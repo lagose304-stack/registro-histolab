@@ -1,0 +1,38 @@
+{
+  "8441714f-c3c2-45da-96da-287129ac959e_sem_1": {
+    "seccion_id": "8441714f-c3c2-45da-96da-287129ac959e",
+    "numero_semana": 1,
+    "estado": "inactiva",
+    "habilitada": false,
+    "pregunta_actual_idx": 0,
+    "pregunta_inicio_timestamp": null,
+    "duracion_segundos": 90,
+    "alumnos_conectados": {},
+    "respuestas_globales": {},
+    "ultima_actualizacion": 1788573776166
+  },
+  "1_sem_1": {
+    "seccion_id": "1",
+    "numero_semana": 1,
+    "estado": "inactiva",
+    "habilitada": false,
+    "pregunta_actual_idx": 0,
+    "pregunta_inicio_timestamp": null,
+    "duracion_segundos": 90,
+    "alumnos_conectados": {},
+    "respuestas_globales": {},
+    "ultima_actualizacion": 1788567645912
+  },
+  "1000_sem_1": {
+    "seccion_id": "1000",
+    "numero_semana": 1,
+    "estado": "inactiva",
+    "habilitada": false,
+    "pregunta_actual_idx": 0,
+    "pregunta_inicio_timestamp": null,
+    "duracion_segundos": 90,
+    "alumnos_conectados": {},
+    "respuestas_globales": {},
+    "ultima_actualizacion": 1788574201925
+  }
+}

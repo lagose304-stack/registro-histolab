@@ -1,0 +1,68 @@
+{
+  "Medicina": {
+    "id": "9012ec37-61ea-4dc0-8c74-31ed68d72f48",
+    "carrera": "Medicina",
+    "nota_total_manuales": 5,
+    "nota_total_pruebas": 5,
+    "examenes": {
+      "5": 10,
+      "11": 10,
+      "16": 10
+    },
+    "puntaje_total": 40,
+    "created_at": "2026-09-04T02:46:57.777815+00:00",
+    "updated_at": "2026-09-04T03:02:27.718+00:00"
+  },
+  "Enfermeria": {
+    "carrera": "Enfermeria",
+    "nota_total_manuales": 8,
+    "nota_total_pruebas": 12,
+    "examenes": {
+      "5": 10,
+      "10": 10
+    },
+    "puntaje_total": 40,
+    "updated_at": "2026-09-04T04:18:54.580Z"
+  },
+  "Microbiologia": {
+    "id": "5f6c3a83-f8ac-40f5-adcf-a7223b04b740",
+    "carrera": "Microbiologia",
+    "nota_total_manuales": 5,
+    "nota_total_pruebas": 5,
+    "examenes": {
+      "5": 10,
+      "11": 10,
+      "16": 10
+    },
+    "puntaje_total": 40,
+    "created_at": "2026-09-04T03:02:28.046043+00:00",
+    "updated_at": "2026-09-04T03:02:28.147+00:00"
+  },
+  "Nutricion": {
+    "id": "15775b4d-2f45-4765-ab27-bc6070f14919",
+    "carrera": "Nutricion",
+    "nota_total_manuales": 5,
+    "nota_total_pruebas": 5,
+    "examenes": {
+      "5": 10,
+      "11": 10,
+      "16": 10
+    },
+    "puntaje_total": 40,
+    "created_at": "2026-09-04T03:02:28.189143+00:00",
+    "updated_at": "2026-09-04T03:02:28.288+00:00"
+  },
+  "Odontologia": {
+    "id": "2cb6593e-e932-47fd-aa07-7a2eb86fcb4d",
+    "carrera": "Odontologia",
+    "nota_total_manuales": 6.5,
+    "nota_total_pruebas": 8.5,
+    "examenes": {
+      "5": 15,
+      "10": 15
+    },
+    "puntaje_total": 45,
+    "created_at": "2026-09-04T03:02:27.903548+00:00",
+    "updated_at": "2026-09-04T03:04:19.498+00:00"
+  }
+}

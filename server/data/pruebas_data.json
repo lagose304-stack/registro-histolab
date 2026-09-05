@@ -1,0 +1,395 @@
+{
+  "pruebas": [
+    {
+      "id": "c79db624-8ab3-4bff-ab00-dc90e8f21e9b",
+      "seccion_id": "test-seccion-h1",
+      "carrera": "Medicina",
+      "numero_semana": 3,
+      "titulo": "Prueba Semanal 3: Tejido Epitelial y Conectivo",
+      "instrucciones": "",
+      "puntaje_total": 5,
+      "duracion_minutos": 15,
+      "estado": "borrador",
+      "preguntas": [
+        {
+          "id": "p1",
+          "enunciado": "Observe la micrografía enfocada en 40x del microscopio y responda:",
+          "imagen_url": "https://images.unsplash.com/photo-1579154204601-01588f351e67?w=600",
+          "puntos": 5,
+          "items": [
+            {
+              "id": "i1",
+              "tipo": "texto_corto",
+              "instruccion": "¿Cuál es la estructura u órgano enfocado?",
+              "respuesta_modelo": "Tráquea (Epitelio cilíndrico seudoestratificado ciliado)",
+              "cantidad": 1
+            },
+            {
+              "id": "i2",
+              "tipo": "listado",
+              "instruccion": "Mencione 3 características morfológicas distintivas observadas:",
+              "cantidad": 3,
+              "respuestas_esperadas": [
+                "Cilios en el borde apical",
+                "Células caliciformes productoras de moco",
+                "Núcleos a diferentes alturas dando apariencia estratificada"
+              ]
+            },
+            {
+              "id": "i3",
+              "tipo": "listado",
+              "instruccion": "Mencione 3 ubicaciones corporales donde se encuentra este tipo de epitelio:",
+              "cantidad": 3,
+              "respuestas_esperadas": [
+                "Tráquea",
+                "Bronquios principales",
+                "Cavidad nasal"
+              ]
+            }
+          ]
+        }
+      ],
+      "updated_at": "2026-09-04T04:35:26.759Z"
+    },
+    {
+      "id": "db2118f4-8244-467c-bbdc-a5a2ee1b420f",
+      "seccion_id": "8441714f-c3c2-45da-96da-287129ac959e",
+      "carrera": "MEDICINA",
+      "numero_semana": 1,
+      "titulo": "Prueba Semanal 1",
+      "instrucciones": "",
+      "puntaje_total": 5,
+      "duracion_minutos": 9,
+      "estado": "publicada",
+      "preguntas": [
+        {
+          "id": "q_1",
+          "numero": 1,
+          "enunciado": "",
+          "puntos": 1,
+          "es_bonus": false,
+          "items": [
+            {
+              "id": "item_1788568360510_787",
+              "tipo": "texto_corto",
+              "instruccion": "Señalado",
+              "etiqueta": "Señalado",
+              "puntos": 0.5,
+              "cantidad": 1,
+              "respuesta_modelo": "Epitelio",
+              "respuestas_esperadas": []
+            },
+            {
+              "id": "item_1788568378230_759",
+              "tipo": "listado",
+              "instruccion": "Ubicaciones",
+              "etiqueta": "Ubicaciones",
+              "puntos": 0.5,
+              "cantidad": 3,
+              "respuesta_modelo": "",
+              "respuestas_esperadas": [
+                "aaa",
+                "bbb",
+                "ccc"
+              ]
+            }
+          ],
+          "tiempo_segundos": 90
+        },
+        {
+          "id": "q_2",
+          "numero": 2,
+          "enunciado": "",
+          "puntos": 1,
+          "es_bonus": false,
+          "items": [],
+          "tiempo_segundos": 90
+        },
+        {
+          "id": "q_3",
+          "numero": 3,
+          "enunciado": "",
+          "puntos": 1,
+          "es_bonus": false,
+          "items": [],
+          "tiempo_segundos": 90
+        },
+        {
+          "id": "q_4",
+          "numero": 4,
+          "enunciado": "",
+          "puntos": 1,
+          "es_bonus": false,
+          "items": [],
+          "tiempo_segundos": 90
+        },
+        {
+          "id": "q_5",
+          "numero": 5,
+          "enunciado": "",
+          "puntos": 1,
+          "es_bonus": false,
+          "items": [],
+          "tiempo_segundos": 90
+        },
+        {
+          "id": "q_6",
+          "numero": 6,
+          "enunciado": "",
+          "puntos": 1,
+          "es_bonus": true,
+          "items": [],
+          "tiempo_segundos": 90
+        }
+      ],
+      "updated_at": "2026-09-05T00:33:48.756Z",
+      "publicada": true,
+      "descripcion": "",
+      "tiempo_limite_minutos": 9,
+      "tiene_bonus": true,
+      "puntaje_maximo_con_bonus": 6,
+      "tiempo_por_pregunta_segundos": 90
+    }
+  ],
+  "entregas": [
+    {
+      "id": "651d50b6-0ef6-4642-9c78-e9f08f482acf",
+      "quiz_id": "d4bcbdb4-4302-4adb-adeb-2c317853d29a",
+      "seccion_id": "test-seccion-h1",
+      "carrera": "Medicina",
+      "numero_semana": 3,
+      "numero_cuenta": "20231009999",
+      "nombre_completo": "Estudiante Prueba Histolab",
+      "respuestas": {
+        "p1_i1": "Tráquea",
+        "p1_i2_0": "Presencia de cilios apicales móviles",
+        "p1_i2_1": "Células caliciformes mucosecretoras",
+        "p1_i2_2": "Disposición pseudoestratificada de núcleos celulares",
+        "p1_i3_0": "Tráquea",
+        "p1_i3_1": "Bronquios lobares",
+        "p1_i3_2": "Fosas nasales"
+      },
+      "estado": "calificado",
+      "nota_obtenida": 4.85,
+      "comentarios": "Excelente identificación histológica de cilios y caliciformes. Muy bien respondido.",
+      "fecha_envio": "2026-09-04T04:32:57.175Z",
+      "updated_at": "2026-09-04T04:32:57.470Z",
+      "calificado_por": "Dra. Docente Titular"
+    },
+    {
+      "id": "60fb0dbf-c038-4b57-a093-18f6a3b50bce",
+      "quiz_id": "db2118f4-8244-467c-bbdc-a5a2ee1b420f",
+      "seccion_id": "8441714f-c3c2-45da-96da-287129ac959e",
+      "carrera": "Medicina",
+      "numero_semana": 1,
+      "numero_cuenta": "00000000000",
+      "nombre_completo": "Prueba Estudiante",
+      "respuestas": {
+        "q_1": {
+          "item_1788568360510_787": "sdasd",
+          "item_1788568378230_759": [
+            "asd",
+            "dd",
+            "sa"
+          ]
+        },
+        "q_2": {
+          "respuesta": ""
+        },
+        "q_3": {
+          "respuesta": ""
+        },
+        "q_4": {
+          "respuesta": ""
+        },
+        "q_5": {
+          "respuesta": ""
+        },
+        "q_6": {
+          "respuesta": ""
+        }
+      },
+      "estado": "calificado",
+      "nota_obtenida": 5,
+      "comentarios": "",
+      "auditoria": {
+        "strikes": 3,
+        "total_salidas": 3,
+        "tiempo_fuera_segundos": 82,
+        "motivo_finalizacion": "expulsion_infracciones",
+        "duracion_total_segundos": 209,
+        "hora_inicio": "2026-09-05T00:48:29.065Z",
+        "hora_fin": "2026-09-05T00:51:58.155Z",
+        "incidentes": [
+          {
+            "tipo": "perdida_de_foco",
+            "detalle": "La ventana de la evaluación perdió el foco activo",
+            "strike": 1,
+            "segundosFuera": 44,
+            "hora": "18:50:29"
+          },
+          {
+            "tipo": "perdida_de_foco",
+            "detalle": "La ventana de la evaluación perdió el foco activo",
+            "strike": 2,
+            "segundosFuera": 33,
+            "hora": "18:51:08"
+          },
+          {
+            "tipo": "perdida_de_foco",
+            "detalle": "La ventana de la evaluación perdió el foco activo",
+            "strike": 3,
+            "segundosFuera": 5,
+            "hora": "18:51:55"
+          }
+        ],
+        "pantalla_completa_solicitada": true,
+        "conexion_al_enviar": "online",
+        "hora_recepcion_servidor": "2026-09-05T00:51:58.398Z",
+        "nota_real": 5.251,
+        "nota_con_bonus": 5.251,
+        "evaluaciones_incisos": {
+          "q_1___item_1788568360510_787": {
+            "estado": "mala",
+            "puntos_obtenidos": 0,
+            "puntos_max": 0.5,
+            "pregunta_id": "q_1",
+            "item_id": "item_1788568360510_787"
+          },
+          "q_1___item_1788568378230_759___slot_0": {
+            "estado": "buena",
+            "puntos_obtenidos": 0.167,
+            "puntos_max": 0.167,
+            "pregunta_id": "q_1",
+            "item_id": "item_1788568378230_759",
+            "slot_idx": 0
+          },
+          "q_1___item_1788568378230_759___slot_1": {
+            "estado": "regular",
+            "puntos_obtenidos": 0.084,
+            "puntos_max": 0.167,
+            "pregunta_id": "q_1",
+            "item_id": "item_1788568378230_759",
+            "slot_idx": 1
+          },
+          "q_1___item_1788568378230_759___slot_2": {
+            "estado": "mala",
+            "puntos_obtenidos": 0,
+            "puntos_max": 0.167,
+            "pregunta_id": "q_1",
+            "item_id": "item_1788568378230_759",
+            "slot_idx": 2
+          },
+          "q_2___direct": {
+            "estado": "buena",
+            "puntos_obtenidos": 1,
+            "puntos_max": 1,
+            "pregunta_id": "q_2",
+            "item_id": null
+          },
+          "q_3___direct": {
+            "estado": "buena",
+            "puntos_obtenidos": 1,
+            "puntos_max": 1,
+            "pregunta_id": "q_3",
+            "item_id": null
+          },
+          "q_4___direct": {
+            "estado": "buena",
+            "puntos_obtenidos": 1,
+            "puntos_max": 1,
+            "pregunta_id": "q_4",
+            "item_id": null
+          },
+          "q_5___direct": {
+            "estado": "buena",
+            "puntos_obtenidos": 1,
+            "puntos_max": 1,
+            "pregunta_id": "q_5",
+            "item_id": null
+          },
+          "q_6___direct": {
+            "estado": "buena",
+            "puntos_obtenidos": 1,
+            "puntos_max": 1,
+            "pregunta_id": "q_6",
+            "item_id": null
+          }
+        }
+      },
+      "fecha_envio": "2026-09-05T00:51:58.398Z",
+      "updated_at": "2026-09-05T00:53:53.171Z",
+      "nota_real": 5.251,
+      "nota_con_bonus": 5.251,
+      "calificado_por": "Elam Elisama Lagos Matamoros",
+      "evaluaciones_incisos": {
+        "q_1___item_1788568360510_787": {
+          "estado": "mala",
+          "puntos_obtenidos": 0,
+          "puntos_max": 0.5,
+          "pregunta_id": "q_1",
+          "item_id": "item_1788568360510_787"
+        },
+        "q_1___item_1788568378230_759___slot_0": {
+          "estado": "buena",
+          "puntos_obtenidos": 0.167,
+          "puntos_max": 0.167,
+          "pregunta_id": "q_1",
+          "item_id": "item_1788568378230_759",
+          "slot_idx": 0
+        },
+        "q_1___item_1788568378230_759___slot_1": {
+          "estado": "regular",
+          "puntos_obtenidos": 0.084,
+          "puntos_max": 0.167,
+          "pregunta_id": "q_1",
+          "item_id": "item_1788568378230_759",
+          "slot_idx": 1
+        },
+        "q_1___item_1788568378230_759___slot_2": {
+          "estado": "mala",
+          "puntos_obtenidos": 0,
+          "puntos_max": 0.167,
+          "pregunta_id": "q_1",
+          "item_id": "item_1788568378230_759",
+          "slot_idx": 2
+        },
+        "q_2___direct": {
+          "estado": "buena",
+          "puntos_obtenidos": 1,
+          "puntos_max": 1,
+          "pregunta_id": "q_2",
+          "item_id": null
+        },
+        "q_3___direct": {
+          "estado": "buena",
+          "puntos_obtenidos": 1,
+          "puntos_max": 1,
+          "pregunta_id": "q_3",
+          "item_id": null
+        },
+        "q_4___direct": {
+          "estado": "buena",
+          "puntos_obtenidos": 1,
+          "puntos_max": 1,
+          "pregunta_id": "q_4",
+          "item_id": null
+        },
+        "q_5___direct": {
+          "estado": "buena",
+          "puntos_obtenidos": 1,
+          "puntos_max": 1,
+          "pregunta_id": "q_5",
+          "item_id": null
+        },
+        "q_6___direct": {
+          "estado": "buena",
+          "puntos_obtenidos": 1,
+          "puntos_max": 1,
+          "pregunta_id": "q_6",
+          "item_id": null
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+# Dependencias
+node_modules/
+*/node_modules/
+
+# Entorno y variables secretas
+.env
+.env.local
+.env.*.local
+*/.env
+
+# Builds y distribución
+dist/
+build/
+*/dist/
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+logs/
+*.log
+
+# Editor & OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

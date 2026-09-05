@@ -1,0 +1,82 @@
+[
+  {
+    "id": "asig-1788313376964-h62z1",
+    "seccion_id": "8441714f-c3c2-45da-96da-287129ac959e",
+    "instructor_id": "b535b7cd-6f27-4879-b842-bd6541ec9c93",
+    "instructor_nombre": "Snoopy aaa",
+    "tipo_asignacion": "Subir nota de manuales semanal",
+    "referencia_id": "semana_1",
+    "metadata": {},
+    "updated_at": "2026-09-02T02:57:11.118Z"
+  },
+  {
+    "id": "asig-1788313666524-r0azg",
+    "seccion_id": "8441714f-c3c2-45da-96da-287129ac959e",
+    "instructor_id": "1e205a86-9713-4712-8aba-c0d2d5753f74",
+    "instructor_nombre": "Elam Lagos",
+    "tipo_asignacion": "Subir nota de prueba semanal",
+    "referencia_id": "semana_1",
+    "metadata": {},
+    "updated_at": "2026-09-02T02:57:11.118Z"
+  },
+  {
+    "id": "asig-1788313666524-qp01g",
+    "seccion_id": "8441714f-c3c2-45da-96da-287129ac959e",
+    "instructor_id": "1e205a86-9713-4712-8aba-c0d2d5753f74",
+    "instructor_nombre": "Elam Lagos",
+    "tipo_asignacion": "Pasar lista de asistencia semanal",
+    "referencia_id": "semana_1",
+    "metadata": {},
+    "updated_at": "2026-09-02T02:57:11.118Z"
+  },
+  {
+    "id": "asig-1788313666524-znpxy",
+    "seccion_id": "8441714f-c3c2-45da-96da-287129ac959e",
+    "instructor_id": "b535b7cd-6f27-4879-b842-bd6541ec9c93",
+    "instructor_nombre": "Snoopy aaa",
+    "tipo_asignacion": "Pasar lista de asistencia semanal",
+    "referencia_id": "semana_2",
+    "metadata": {},
+    "updated_at": "2026-09-02T02:57:11.118Z"
+  },
+  {
+    "id": "asig-1788313666524-y8vag",
+    "seccion_id": "8441714f-c3c2-45da-96da-287129ac959e",
+    "instructor_id": "1e205a86-9713-4712-8aba-c0d2d5753f74",
+    "instructor_nombre": "Elam Lagos",
+    "tipo_asignacion": "Subir nota de examen parcial",
+    "referencia_id": "examen_I",
+    "metadata": {},
+    "updated_at": "2026-09-02T02:57:11.118Z"
+  },
+  {
+    "id": "asig-1788317831360-2jur6",
+    "seccion_id": "8441714f-c3c2-45da-96da-287129ac959e",
+    "instructor_id": "1e205a86-9713-4712-8aba-c0d2d5753f74",
+    "instructor_nombre": "Elam Lagos",
+    "tipo_asignacion": "Subir nota de examen parcial",
+    "referencia_id": "examen_II",
+    "metadata": {},
+    "updated_at": "2026-09-02T02:57:11.118Z"
+  },
+  {
+    "id": "asig-1788317831360-5syb3",
+    "seccion_id": "8441714f-c3c2-45da-96da-287129ac959e",
+    "instructor_id": "1e205a86-9713-4712-8aba-c0d2d5753f74",
+    "instructor_nombre": "Elam Lagos",
+    "tipo_asignacion": "Subir nota de examen parcial",
+    "referencia_id": "examen_III",
+    "metadata": {},
+    "updated_at": "2026-09-02T02:57:11.118Z"
+  },
+  {
+    "id": "asig-1788317831360-zvin0",
+    "seccion_id": "8441714f-c3c2-45da-96da-287129ac959e",
+    "instructor_id": "1e205a86-9713-4712-8aba-c0d2d5753f74",
+    "instructor_nombre": "Elam Lagos",
+    "tipo_asignacion": "Crear prueba semanal",
+    "referencia_id": "semana_1",
+    "metadata": {},
+    "updated_at": "2026-09-02T02:57:11.118Z"
+  }
+]

@@ -1,0 +1,36 @@
+[
+  {
+    "id": "8441714f-c3c2-45da-96da-287129ac959e",
+    "codigo": "LU0700",
+    "nombre": "Laboratorio de Histología - Sección LU0700",
+    "carrera": "MEDICINA",
+    "dia": "Lunes",
+    "hora_inicio": "07:00",
+    "hora_fin": "09:00",
+    "doctor_encargado": "Dr Snoopy",
+    "coordinador": "Elam Lagos",
+    "periodo_academico": "II PAC 2026",
+    "activa": true,
+    "created_at": "2026-08-28T01:40:22.347+00:00",
+    "updated_at": "2026-08-28T03:16:49.33+00:00",
+    "instructores_asignados": [
+      "b535b7cd-6f27-4879-b842-bd6541ec9c93"
+    ]
+  },
+  {
+    "id": "8af72df1-ee7a-4415-bba6-6769bb0fe115",
+    "codigo": "LU0900",
+    "nombre": "Laboratorio de Histología - Sección LU0900",
+    "carrera": "ENFERMERIA",
+    "dia": "Lunes",
+    "hora_inicio": "09:00",
+    "hora_fin": "11:00",
+    "doctor_encargado": "dfsdf",
+    "coordinador": "Elam Lagos",
+    "periodo_academico": "II PAC 2026",
+    "activa": true,
+    "created_at": "2026-08-29T03:41:15.843+00:00",
+    "updated_at": "2026-08-29T03:41:15.843+00:00",
+    "instructores_asignados": []
+  }
+]

@@ -1,0 +1,23 @@
+{
+  "name": "histolab-server",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Backend API para Registro Histolab",
+  "main": "src/index.js",
+  "scripts": {
+    "dev": "nodemon --watch src --ext js,mjs,cjs --ignore data/ --ignore \"*.json\" src/index.js",
+    "start": "node src/index.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.112.4",
+    "bcryptjs": "^3.0.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "jsonwebtoken": "^9.0.3",
+    "morgan": "^1.10.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.9"
+  }
+}
