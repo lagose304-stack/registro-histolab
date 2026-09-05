@@ -1633,6 +1633,8 @@ export default function StudentPortalView({ student, notify = () => {} }) {
           gap: 0.5rem;
           border-bottom: 2px solid #e2e8f0;
           padding-bottom: 0.2rem;
+          width: 100%;
+          box-sizing: border-box;
         }
         .sp-tab-btn {
           padding: 0.65rem 1.25rem;
@@ -1646,6 +1648,27 @@ export default function StudentPortalView({ student, notify = () => {} }) {
           gap: 0.45rem;
           border-radius: 0.6rem 0.6rem 0 0;
           transition: all 0.15s ease;
+          box-sizing: border-box;
+        }
+        .sp-tab-label-desktop {
+          display: inline;
+        }
+        .sp-tab-label-mobile {
+          display: none;
+        }
+        .sp-live-badge {
+          background: #dc2626;
+          color: #ffffff;
+          font-size: 0.68rem;
+          font-weight: 900;
+          padding: 0.15rem 0.5rem;
+          border-radius: 9999px;
+          display: inline-flex;
+          align-items: center;
+          gap: 0.3rem;
+          letter-spacing: 0.5px;
+          animation: pulseLiveBadge 1.5s infinite;
+          flex-shrink: 0;
         }
 
         /* Grids de Contenido */
@@ -1797,28 +1820,48 @@ export default function StudentPortalView({ student, notify = () => {} }) {
             white-space: nowrap !important;
           }
 
-          /* Barra de Navegación Segmentada compacta */
+          /* Barra de Navegación Segmentada compacta que NUNCA se sale de la pantalla */
           .sp-tabs-nav {
             border-bottom: 1px solid #e2e8f0 !important;
             padding: 0.2rem !important;
             background: #f1f5f9 !important;
             border-radius: 0.65rem !important;
             display: flex !important;
+            width: 100% !important;
+            max-width: 100% !important;
+            box-sizing: border-box !important;
             gap: 0.2rem !important;
+            overflow: hidden !important;
           }
           .sp-tab-btn {
             flex: 1 1 0 !important;
+            min-width: 0 !important;
+            max-width: 33.333% !important;
+            box-sizing: border-box !important;
             justify-content: center !important;
-            padding: 0.42rem 0.3rem !important;
+            align-items: center !important;
+            padding: 0.42rem 0.15rem !important;
             font-size: 0.72rem !important;
             border-radius: 0.5rem !important;
             border-bottom: none !important;
             white-space: nowrap !important;
-            gap: 0.25rem !important;
+            gap: 0.2rem !important;
+            overflow: hidden !important;
+            text-overflow: ellipsis !important;
+          }
+          .sp-tab-label-desktop {
+            display: none !important;
+          }
+          .sp-tab-label-mobile {
+            display: inline !important;
+            overflow: hidden !important;
+            text-overflow: ellipsis !important;
+            white-space: nowrap !important;
           }
           .sp-tab-btn svg {
             width: 14px !important;
             height: 14px !important;
+            flex-shrink: 0 !important;
           }
           .sp-tab-btn.active {
             background: #ffffff !important;
@@ -1826,6 +1869,11 @@ export default function StudentPortalView({ student, notify = () => {} }) {
           }
           .sp-tab-btn:not(.active) {
             color: #64748b !important;
+          }
+          .sp-live-badge {
+            padding: 0.08rem 0.25rem !important;
+            font-size: 0.58rem !important;
+            gap: 0.15rem !important;
           }
 
           /* Paneles de pestañas */
@@ -2336,6 +2384,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
             {/* Pestañas de Navegación del Portal */}
             <div className="sp-tabs-nav">
               <button
+                type="button"
                 onClick={() => setActiveTab("calificaciones")}
                 className={`sp-tab-btn ${activeTab === "calificaciones" ? "active" : ""}`}
                 style={{
@@ -2344,10 +2393,12 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                 }}
               >
                 <Award size={16} />
-                <span>Mis Calificaciones</span>
+                <span className="sp-tab-label-desktop">Mis Calificaciones</span>
+                <span className="sp-tab-label-mobile">Notas</span>
               </button>
 
               <button
+                type="button"
                 onClick={() => setActiveTab("asistencia")}
                 className={`sp-tab-btn ${activeTab === "asistencia" ? "active" : ""}`}
                 style={{
@@ -2356,10 +2407,12 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                 }}
               >
                 <CalendarCheck size={16} />
-                <span>Control de Asistencia</span>
+                <span className="sp-tab-label-desktop">Control de Asistencia</span>
+                <span className="sp-tab-label-mobile">Asistencia</span>
               </button>
 
               <button
+                type="button"
                 onClick={() => {
                   setActiveTab("pruebas");
                   setActiveQuizToTake(null);
@@ -2372,25 +2425,12 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                 }}
               >
                 <HelpCircle size={16} />
-                <span>Pruebas Semanales</span>
+                <span className="sp-tab-label-desktop">Pruebas Semanales</span>
+                <span className="sp-tab-label-mobile">Pruebas</span>
                 {anyLiveQuiz && (
-                  <span
-                    style={{
-                      background: "#dc2626",
-                      color: "#ffffff",
-                      fontSize: "0.68rem",
-                      fontWeight: 900,
-                      padding: "0.15rem 0.5rem",
-                      borderRadius: "9999px",
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: "0.3rem",
-                      letterSpacing: "0.5px",
-                      animation: "pulseLiveBadge 1.5s infinite"
-                    }}
-                  >
-                    <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#ffffff" }} />
-                    EN VIVO
+                  <span className="sp-live-badge">
+                    <span style={{ width: "5px", height: "5px", borderRadius: "50%", background: "#ffffff" }} />
+                    <span className="sp-tab-label-desktop">EN VIVO</span>
                   </span>
                 )}
               </button>
