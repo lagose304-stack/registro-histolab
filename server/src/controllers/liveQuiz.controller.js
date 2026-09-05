@@ -216,6 +216,15 @@ export const getLiveQuizState = async (req, res) => {
       }
     }
 
+    // Estadísticas de alumnos conectados y respuestas de la pregunta actual
+    const currentQIdx = session.pregunta_actual_idx ?? 0;
+    const activeStudentsList = Object.values(session.alumnos_conectados || {}).filter(
+      (c) => c && (!c.ultimo_ping || (now - c.ultimo_ping < 60000))
+    );
+    const respondieronCount = activeStudentsList.filter(
+      (c) => c.pregunta_vista === currentQIdx && c.ha_respondido
+    ).length;
+
     res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
     return res.json({
       success: true,
@@ -223,7 +232,9 @@ export const getLiveQuizState = async (req, res) => {
         ...session,
         tiempo_restante_segundos,
         tiempo_transcurrido_segundos,
-        total_conectados: Object.keys(session.alumnos_conectados || {}).length,
+        total_conectados: activeStudentsList.length,
+        respuestas_recibidas_count: respondieronCount,
+        todos_respondieron: activeStudentsList.length > 0 && respondieronCount >= activeStudentsList.length,
         server_time: now
       }
     });
@@ -398,10 +409,19 @@ export const heartbeatLiveQuiz = async (req, res) => {
       }
     }
 
+    // Calcular estadísticas en tiempo real de alumnos que ya respondieron la pregunta actual
+    const currentQIdx = session.pregunta_actual_idx ?? 0;
+    const activeStudentsList = Object.values(session.alumnos_conectados || {}).filter(
+      (c) => c && (!c.ultimo_ping || (now - c.ultimo_ping < 60000))
+    );
+    const respondieronCount = activeStudentsList.filter(
+      (c) => c.pregunta_vista === currentQIdx && c.ha_respondido
+    ).length;
+
     const key = getSessionKey(seccion_id, semana);
     liveSessions[key] = session;
 
-    // Persistir el latido en Supabase de forma rápida para que el monitor del docente lo refleje de inmediato
+    // Persistir en Supabase (con sincronización garantizada)
     await syncLiveSessionToSupabase(session);
 
     return res.json({
@@ -413,12 +433,113 @@ export const heartbeatLiveQuiz = async (req, res) => {
         duracion_segundos: session.duracion_segundos,
         tiempo_restante_segundos,
         tiempo_transcurrido_segundos,
-        total_conectados: Object.keys(session.alumnos_conectados || {}).length,
+        total_conectados: activeStudentsList.length,
+        respuestas_recibidas_count: respondieronCount,
+        todos_respondieron: activeStudentsList.length > 0 && respondieronCount >= activeStudentsList.length,
         server_time: now
       }
     });
   } catch (err) {
     console.error("Error en heartbeatLiveQuiz:", err);
     return res.status(500).json({ success: false, message: "Error al procesar latido en vivo" });
+  }
+};
+
+/**
+ * Consulta instantánea si existe una prueba en vivo activa para una sección determinada.
+ * Permite que los estudiantes detecten la sala de espera al instante sin saturar con llamadas múltiples.
+ */
+export const getActiveLiveQuiz = async (req, res) => {
+  try {
+    const { seccion_id } = req.params;
+    if (!seccion_id) {
+      return res.status(400).json({ success: false, message: "seccion_id requerido" });
+    }
+    const secClean = String(seccion_id).trim();
+
+    // 1. Revisar memoria local activa del worker
+    for (const key in liveSessions) {
+      const sess = liveSessions[key];
+      if (
+        sess &&
+        String(sess.seccion_id).trim() === secClean &&
+        sess.habilitada &&
+        sess.estado !== "finalizada" &&
+        sess.estado !== "inactiva"
+      ) {
+        return res.json({
+          success: true,
+          activa: true,
+          data: sess
+        });
+      }
+    }
+
+    // 2. Revisar base de datos central en Supabase
+    if (isSupabaseConfigured && supabase) {
+      const { data, error } = await supabase
+        .from("sesiones_pruebas_en_vivo")
+        .select("*")
+        .eq("seccion_id", secClean)
+        .eq("habilitada", true)
+        .neq("estado", "finalizada")
+        .neq("estado", "inactiva")
+        .order("updated_at", { ascending: false })
+        .limit(1);
+
+      if (!error && data && data.length > 0) {
+        const row = data[0];
+        const session = {
+          seccion_id: String(row.seccion_id),
+          numero_semana: Number(row.numero_semana),
+          carrera: row.carrera || "Medicina",
+          estado: row.estado || "lobby",
+          habilitada: Boolean(row.habilitada),
+          pregunta_actual_idx: Number(row.pregunta_actual_idx ?? 0),
+          duracion_segundos: Number(row.duracion_segundos ?? 90),
+          pregunta_inicio_timestamp: row.pregunta_inicio_timestamp ? Number(row.pregunta_inicio_timestamp) : null,
+          alumnos_conectados: typeof row.alumnos_conectados === "object" && row.alumnos_conectados ? row.alumnos_conectados : {},
+          respuestas_globales: typeof row.respuestas_globales === "object" && row.respuestas_globales ? row.respuestas_globales : {}
+        };
+        const key = getSessionKey(secClean, session.numero_semana);
+        liveSessions[key] = session;
+
+        return res.json({
+          success: true,
+          activa: true,
+          data: session
+        });
+      }
+
+      // 3. Fallback: verificar si pruebas_semanales tiene habilitada_en_vivo = true
+      const { data: qData } = await supabase
+        .from("pruebas_semanales")
+        .select("numero_semana, titulo, carrera")
+        .eq("seccion_id", secClean)
+        .eq("habilitada_en_vivo", true)
+        .limit(1);
+
+      if (qData && qData.length > 0) {
+        const qRow = qData[0];
+        const fallbackSession = await getOrCreateSession(secClean, qRow.numero_semana);
+        fallbackSession.habilitada = true;
+        if (fallbackSession.estado === "inactiva") {
+          fallbackSession.estado = "lobby";
+        }
+        return res.json({
+          success: true,
+          activa: true,
+          data: fallbackSession
+        });
+      }
+    }
+
+    return res.json({
+      success: true,
+      activa: false
+    });
+  } catch (err) {
+    console.warn("Aviso en getActiveLiveQuiz:", err.message);
+    return res.json({ success: true, activa: false });
   }
 };

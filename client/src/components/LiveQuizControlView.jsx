@@ -599,6 +599,54 @@ export default function LiveQuizControlView({
                 )}
               </div>
 
+              {/* BARRA DE PROGRESO DE RESPUESTAS EN TIEMPO REAL TIPO KAHOOT */}
+              {liveSession.estado === "en_pregunta" && (
+                <div
+                  style={{
+                    background: "#f0fdf4",
+                    border: "1.5px solid #86efac",
+                    borderRadius: "0.85rem",
+                    padding: "1rem 1.25rem",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "0.55rem"
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "0.5rem" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                      <span style={{ fontSize: "0.95rem" }}>📊</span>
+                      <strong style={{ fontSize: "0.88rem", color: "#166534" }}>
+                        Respuestas Recibidas en Tiempo Real:
+                      </strong>
+                    </div>
+                    <span style={{ fontSize: "0.95rem", fontWeight: 900, color: "#15803d" }}>
+                      {liveSession.respuestas_recibidas_count || 0} / {connectedCount} alumnos{" "}
+                      <span style={{ fontSize: "0.78rem", fontWeight: 700, color: "#166534" }}>
+                        ({connectedCount > 0 ? Math.min(100, Math.round(((liveSession.respuestas_recibidas_count || 0) / connectedCount) * 100)) : 0}%)
+                      </span>
+                    </span>
+                  </div>
+
+                  <div style={{ width: "100%", height: "10px", background: "#dcfce7", borderRadius: "9999px", overflow: "hidden" }}>
+                    <div
+                      style={{
+                        width: `${connectedCount > 0 ? Math.min(100, Math.round(((liveSession.respuestas_recibidas_count || 0) / connectedCount) * 100)) : 0}%`,
+                        height: "100%",
+                        background: "linear-gradient(90deg, #16a34a, #22c55e)",
+                        borderRadius: "9999px",
+                        transition: "width 0.4s ease"
+                      }}
+                    />
+                  </div>
+
+                  {liveSession.todos_respondieron && (
+                    <div style={{ fontSize: "0.8rem", fontWeight: 800, color: "#15803d" }}>
+                      🎉 ¡Todos los alumnos conectados ya respondieron esta pregunta!
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* BOTONERA MAESTRA SEGÚN EL ESTADO */}
               <div style={{ display: "flex", gap: "0.85rem", flexWrap: "wrap", borderTop: "1px solid #f1f5f9", paddingTop: "1.1rem" }}>
                 {/* 1. CASO INACTIVA: BOTÓN HABILITAR */}
@@ -980,14 +1028,39 @@ export default function LiveQuizControlView({
                           style={{
                             fontSize: "0.68rem",
                             fontWeight: 800,
-                            padding: "0.15rem 0.45rem",
+                            padding: "0.2rem 0.55rem",
                             borderRadius: "9999px",
-                            background: isAnswering ? "#dbeafe" : "#dcfce7",
-                            color: isAnswering ? "#1d4ed8" : "#15803d",
-                            whiteSpace: "nowrap"
+                            background:
+                              liveSession.estado === "en_pregunta"
+                                ? connInfo?.ha_respondido
+                                  ? "#dcfce7"
+                                  : "#fef3c7"
+                                : "#dcfce7",
+                            color:
+                              liveSession.estado === "en_pregunta"
+                                ? connInfo?.ha_respondido
+                                  ? "#15803d"
+                                  : "#b45309"
+                                : "#15803d",
+                            border:
+                              liveSession.estado === "en_pregunta"
+                                ? connInfo?.ha_respondido
+                                  ? "1px solid #86efac"
+                                  : "1px solid #fde68a"
+                                : "1px solid #86efac",
+                            whiteSpace: "nowrap",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "0.25rem"
                           }}
                         >
-                          {isAnswering ? `🟢 Pregunta ${connInfo.pregunta_vista + 1}` : "🟢 En Espera"}
+                          {liveSession.estado === "en_pregunta"
+                            ? connInfo?.ha_respondido
+                              ? "✓ Respondió"
+                              : "⏳ Pensando..."
+                            : liveSession.estado === "lobby"
+                            ? "🟢 En Sala"
+                            : "🟢 Conectado"}
                         </span>
                       ) : (
                         <span

@@ -172,6 +172,8 @@ export default function StudentPortalView({ student, notify = () => {} }) {
   const [syncingOfflineSubmission, setSyncingOfflineSubmission] = useState(false);
   const [confirmSubmitModalOpen, setConfirmSubmitModalOpen] = useState(false);
   const [confirmExitModalOpen, setConfirmExitModalOpen] = useState(false);
+  const [activeLiveBannerSession, setActiveLiveBannerSession] = useState(null);
+  const [answeredQuestionsMap, setAnsweredQuestionsMap] = useState({});
 
   const quizStartTimeRef = React.useRef(null);
   const quizEndTimeRef = React.useRef(null);
@@ -379,65 +381,55 @@ export default function StudentPortalView({ student, notify = () => {} }) {
     }
   }, [activeTab, loadStudentQuizzes]);
 
-  // Sondeo continuo cada 2s en toda la plataforma para detectar pruebas en vivo habilitadas y enviar latido
+  // Sondeo continuo cada 1.8s con detección instantánea tipo Kahoot
   useEffect(() => {
-    if (activeQuizToTake) return; // Si ya está rindiendo la prueba, la sincronización se hace por heartbeat
+    if (activeQuizToTake) return; // Si ya está dentro del examen, la sincronización se realiza por el heartbeat del examen
 
-    const pollLiveCatalog = async () => {
+    let isMounted = true;
+    const pollLiveSession = async () => {
       let secId = effectiveStudent?.seccion_id || effectiveStudent?.seccion?.id;
       if (!secId) {
         secId = await resolveStudentSectionId();
       }
-      if (!secId) return;
+      if (!secId || !isMounted) return;
 
       try {
-        const res = await api.pruebas.getBySeccion(secId);
-        if (res?.success && Array.isArray(res.data)) {
-          const liveMap = {};
-          await Promise.all(
-            res.data.map(async (q) => {
-              try {
-                const liveRes = await api.pruebas.getLiveState(secId, q.numero_semana);
-                if (liveRes?.success && liveRes.data) {
-                  liveMap[q.numero_semana] = liveRes.data;
-                }
-              } catch (_) {}
-            })
-          );
-          setLiveSessionsMap(liveMap);
+        // 1. Consulta ultra-liviana directa al despachador en vivo
+        const activeRes = await api.pruebas.getActiveLiveSession(secId);
+        if (!isMounted) return;
 
-          const publishedOrLive = res.data.filter((q) => {
-            const s = liveMap[q.numero_semana];
-            const isLiveActive = Boolean(
-              (s && (s.habilitada || s.estado === "lobby" || s.estado === "en_pregunta" || s.estado === "esperando_siguiente") && s.estado !== "finalizada" && s.estado !== "inactiva") ||
-              (q.habilitada_en_vivo === true && (!s || s.estado !== "finalizada"))
-            );
-            return q.publicada === true || String(q.publicada) === "true" || q.estado === "publicada" || isLiveActive;
-          });
+        if (activeRes?.activa && activeRes.data) {
+          const liveData = activeRes.data;
+          const liveSem = Number(liveData.numero_semana);
+          setActiveLiveBannerSession(liveData);
+          setLiveSessionsMap((prev) => ({ ...prev, [liveSem]: liveData }));
 
-          setOnlineQuizzes(publishedOrLive);
-
-          // Enviar latido de presencia cada ciclo para que el docente vea al alumno activo en tiempo real
-          if (cuentaKey && res.data.length > 0) {
-            res.data.forEach((q) => {
-              const s = liveMap[q.numero_semana];
-              if (s?.habilitada || s?.estado === "lobby" || s?.estado === "en_pregunta" || q.habilitada_en_vivo || q.publicada) {
-                api.pruebas.sendLiveHeartbeat(secId, q.numero_semana, {
-                  numero_cuenta: cuentaKey,
-                  nombre_completo: effectiveStudent?.nombre_completo || "Estudiante",
-                  pregunta_vista: -1
-                }).catch(() => {});
-              }
-            });
+          // 2. Registrar presencia del estudiante en la sala de espera ante el docente
+          if (cuentaKey) {
+            api.pruebas.sendLiveHeartbeat(secId, liveSem, {
+              numero_cuenta: cuentaKey,
+              nombre_completo: effectiveStudent?.nombre_completo || "Estudiante",
+              pregunta_vista: -1
+            }).catch(() => {});
           }
+
+          // Si aún no tenemos las pruebas en memoria o falta esta semana, refrescar catálogo
+          if (!onlineQuizzes || !onlineQuizzes.some((q) => Number(q.numero_semana) === liveSem)) {
+            loadStudentQuizzes();
+          }
+        } else {
+          setActiveLiveBannerSession(null);
         }
       } catch (_) {}
     };
 
-    pollLiveCatalog();
-    const interval = setInterval(pollLiveCatalog, 2000);
-    return () => clearInterval(interval);
-  }, [activeQuizToTake, effectiveStudent, resolveStudentSectionId, cuentaKey]);
+    pollLiveSession();
+    const interval = setInterval(pollLiveSession, 1800);
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, [activeQuizToTake, effectiveStudent, resolveStudentSectionId, cuentaKey, onlineQuizzes, loadStudentQuizzes]);
 
   // Identificar si existe alguna prueba con sesión en vivo habilitada por el docente pendiente de realizar
   const anyLiveQuiz = useMemo(() => {
@@ -1059,11 +1051,27 @@ export default function StudentPortalView({ student, notify = () => {} }) {
       if (!secId || !isMounted) return;
 
       try {
+        const curIdx = activeLiveStateRef.current?.pregunta_actual_idx ?? 0;
+        const curQ = (activeQuizToTake?.preguntas || [])[curIdx];
+        const curAns = curQ ? quizAnswers[curQ.id] : null;
+        const hasContent = Boolean(
+          curAns &&
+          (typeof curAns === "string"
+            ? curAns.trim()
+            : typeof curAns?.respuesta === "string"
+            ? curAns.respuesta.trim()
+            : Object.values(curAns || {}).some((v) =>
+                typeof v === "string" ? v.trim() : Array.isArray(v) && v.some((x) => String(x).trim())
+              ))
+        );
+        const hasAnswered = Boolean(answeredQuestionsMap[curIdx] || hasContent);
+
         const res = await api.pruebas.sendLiveHeartbeat(secId, sem, {
           numero_cuenta: cuentaKey,
           nombre_completo: effectiveStudent?.nombre_completo,
           respuestas_parciales: quizAnswers,
-          pregunta_vista: activeLiveStateRef.current?.pregunta_actual_idx ?? 0
+          pregunta_vista: curIdx,
+          ha_respondido: hasAnswered
         });
 
         if (res?.success && res.data && isMounted) {
@@ -1092,7 +1100,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
       isMounted = false;
       clearInterval(heartbeatInterval);
     };
-  }, [activeQuizToTake, effectiveStudent, cuentaKey, quizAnswers, isExamSealedOffline, resolveStudentSectionId]);
+  }, [activeQuizToTake, effectiveStudent, cuentaKey, quizAnswers, isExamSealedOffline, resolveStudentSectionId, answeredQuestionsMap]);
 
   // Decremento local fluido de segundo a segundo mientras está en pregunta
   useEffect(() => {
@@ -2217,6 +2225,113 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                 </div>
               </div>
             </div>
+
+            {/* AVISO DESTACADO DE PRUEBA EN VIVO TIPO KAHOOT */}
+            {activeLiveBannerSession && !existingSubmissions[activeLiveBannerSession.numero_semana] && !activeQuizToTake && (
+              <div
+                className="animate-fade-in"
+                style={{
+                  background: "linear-gradient(135deg, #16a34a 0%, #15803d 100%)",
+                  borderRadius: "1rem",
+                  padding: "1.25rem 1.75rem",
+                  color: "#ffffff",
+                  boxShadow: "0 10px 25px -5px rgba(22, 163, 74, 0.45)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  flexWrap: "wrap",
+                  gap: "1.25rem",
+                  border: "2px solid #86efac",
+                  marginBottom: "1rem"
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: "1rem" }}>
+                  <div
+                    style={{
+                      width: "52px",
+                      height: "52px",
+                      borderRadius: "50%",
+                      background: "rgba(255, 255, 255, 0.2)",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      flexShrink: 0
+                    }}
+                  >
+                    <Radio size={28} className="animate-pulse" color="#ffffff" />
+                  </div>
+                  <div>
+                    <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                      <span
+                        style={{
+                          background: "#ffffff",
+                          color: "#15803d",
+                          fontSize: "0.72rem",
+                          fontWeight: 900,
+                          padding: "0.15rem 0.55rem",
+                          borderRadius: "9999px",
+                          letterSpacing: "0.5px"
+                        }}
+                      >
+                        🔴 EN DIRECTO
+                      </span>
+                      <span style={{ fontSize: "0.85rem", fontWeight: 800, opacity: 0.95 }}>
+                        Semana {activeLiveBannerSession.numero_semana}
+                      </span>
+                    </div>
+                    <h3 style={{ margin: "0.25rem 0 0", fontSize: "1.2rem", fontWeight: 900, letterSpacing: "-0.01em" }}>
+                      ¡Prueba en vivo activa! Sala de espera abierta
+                    </h3>
+                    <p style={{ margin: "0.2rem 0 0", fontSize: "0.85rem", opacity: 0.95 }}>
+                      Tu docente habilitó la evaluación en directo. Entra ahora para sincronizarte antes de la Pregunta 1.
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={async () => {
+                    let targetQ = (onlineQuizzes || []).find(
+                      (q) => Number(q.numero_semana) === Number(activeLiveBannerSession.numero_semana)
+                    );
+                    if (!targetQ) {
+                      let secId = effectiveStudent?.seccion_id || effectiveStudent?.seccion?.id;
+                      if (!secId) secId = await resolveStudentSectionId();
+                      if (secId) {
+                        try {
+                          const qRes = await api.pruebas.getBySemana(secId, activeLiveBannerSession.numero_semana);
+                          if (qRes?.data) targetQ = qRes.data;
+                        } catch (_) {}
+                      }
+                    }
+                    if (targetQ) {
+                      handleStartQuiz(targetQ, activeLiveBannerSession);
+                    } else {
+                      setActiveTab("pruebas");
+                      loadStudentQuizzes();
+                    }
+                  }}
+                  style={{
+                    padding: "0.8rem 1.75rem",
+                    borderRadius: "0.75rem",
+                    border: "none",
+                    background: "#ffffff",
+                    color: "#15803d",
+                    fontSize: "0.95rem",
+                    fontWeight: 900,
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "0.6rem",
+                    boxShadow: "0 4px 15px rgba(0, 0, 0, 0.2)",
+                    whiteSpace: "nowrap"
+                  }}
+                >
+                  <Play size={18} />
+                  <span>Entrar a la Prueba en Vivo</span>
+                </button>
+              </div>
+            )}
 
             {/* Pestañas de Navegación del Portal */}
             <div className="sp-tabs-nav">
@@ -3835,6 +3950,34 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                             ? "Última pregunta de la prueba semanal (Reactivo Bonus). Al terminar el tiempo o pulsar enviar se sellará tu entrega."
                             : `Pregunta ${currentActiveIdx + 1} de ${totalQuestionsCount}. Tus respuestas se guardan automáticamente al cumplirse el tiempo.`}
                         </span>
+
+                        {currentActiveIdx < totalQuestionsCount - 1 && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAnsweredQuestionsMap((prev) => ({ ...prev, [currentActiveIdx]: true }));
+                              notify("✓ Respuesta guardada. Esperando a que el tiempo concluya o el docente avance.", "success");
+                            }}
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "0.5rem",
+                              padding: "0.6rem 1.25rem",
+                              borderRadius: "0.65rem",
+                              border: answeredQuestionsMap[currentActiveIdx] ? "1.5px solid #86efac" : "none",
+                              background: answeredQuestionsMap[currentActiveIdx] ? "#f0fdf4" : "linear-gradient(135deg, #0284c7 0%, #0369a1 100%)",
+                              color: answeredQuestionsMap[currentActiveIdx] ? "#15803d" : "#ffffff",
+                              fontSize: "0.86rem",
+                              fontWeight: 800,
+                              cursor: "pointer",
+                              boxShadow: answeredQuestionsMap[currentActiveIdx] ? "none" : "0 3px 10px rgba(2, 132, 199, 0.25)",
+                              transition: "all 0.15s ease"
+                            }}
+                          >
+                            <CheckCircle2 size={16} color={answeredQuestionsMap[currentActiveIdx] ? "#16a34a" : "#ffffff"} />
+                            <span>{answeredQuestionsMap[currentActiveIdx] ? "Respuesta Guardada ✓" : "Confirmar Respuesta"}</span>
+                          </button>
+                        )}
 
                         {currentActiveIdx === totalQuestionsCount - 1 && (
                           <button

@@ -610,6 +610,13 @@ export const api = {
     },
 
     // Sincronización en Vivo y Control Global de Pruebas
+    async getActiveLiveSession(seccionId) {
+      const res = await fetch(`${API_BASE}/pruebas/live/${seccionId}/activa`, {
+        headers: getAuthHeaders()
+      });
+      return await handleResponse(res);
+    },
+
     async getLiveState(seccionId, semana) {
       const res = await fetch(`${API_BASE}/pruebas/live/${seccionId}/${semana}`, {
         headers: getAuthHeaders()

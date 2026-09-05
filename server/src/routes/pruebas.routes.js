@@ -13,6 +13,7 @@ import {
 } from "../controllers/pruebas.controller.js";
 import {
   getLiveQuizState,
+  getActiveLiveQuiz,
   controlLiveQuiz,
   heartbeatLiveQuiz
 } from "../controllers/liveQuiz.controller.js";
@@ -20,6 +21,7 @@ import {
 const router = Router();
 
 // Control y Sincronización en Vivo de Pruebas Semanales
+router.get("/live/:seccion_id/activa", getActiveLiveQuiz);
 router.get("/live/:seccion_id/:semana", getLiveQuizState);
 router.post("/live/:seccion_id/:semana/control", controlLiveQuiz);
 router.post("/live/:seccion_id/:semana/heartbeat", heartbeatLiveQuiz);
