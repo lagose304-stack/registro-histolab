@@ -43,6 +43,7 @@ import {
 import laboratorioLogo from "../assets/logos/laboratorio.png";
 import facultadLogo from "../assets/logos/facultad.png";
 import universidadLogo from "../assets/logos/universidad.png";
+import { Watermark } from "watermark-js-plus";
 
 const CARRERA_THEMES = {
   Medicina: {
@@ -198,6 +199,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
   const isFromTopBorderRef = React.useRef(false);
   const touchStartYRef = React.useRef(0);
   const violationModalRef = React.useRef(null);
+  const watermarkInstanceRef = React.useRef(null);
 
   useEffect(() => {
     violationModalRef.current = violationModal;
@@ -1527,6 +1529,52 @@ export default function StudentPortalView({ student, notify = () => {} }) {
       }
     };
   }, [activeQuizToTake, isExamSealedOffline]);
+
+  // H. Marca de agua anti-capturas con identificación del estudiante (watermark-js-plus)
+  // Si toman captura, la imagen contiene su nombre y número de cuenta como evidencia.
+  // La marca de agua se recrea automáticamente si intentan eliminarla con DevTools.
+  useEffect(() => {
+    if (!activeQuizToTake || isExamSealedOffline) return;
+
+    const studentName = effectiveStudent?.nombre_completo || "Estudiante";
+    const studentAccount = cuentaKey || "";
+    const now = new Date();
+    const timestamp = `${now.toLocaleDateString()} ${now.toLocaleTimeString()}`;
+    const watermarkText = `${studentName} • ${studentAccount} • ${timestamp}`;
+
+    // Destruir instancia previa si existe
+    if (watermarkInstanceRef.current) {
+      try { watermarkInstanceRef.current.destroy(); } catch (_) {}
+      watermarkInstanceRef.current = null;
+    }
+
+    try {
+      const wm = new Watermark({
+        content: watermarkText,
+        width: 340,
+        height: 180,
+        rotate: -22,
+        fontSize: "14px",
+        fontFamily: "system-ui, -apple-system, sans-serif",
+        fontColor: "rgba(0, 0, 0, 0.06)",
+        zIndex: 9999980,
+        mutationObserve: true,
+        monitorProtection: true,
+        globalAlpha: 0.08
+      });
+      wm.create();
+      watermarkInstanceRef.current = wm;
+    } catch (err) {
+      console.warn("Aviso al crear marca de agua:", err);
+    }
+
+    return () => {
+      if (watermarkInstanceRef.current) {
+        try { watermarkInstanceRef.current.destroy(); } catch (_) {}
+        watermarkInstanceRef.current = null;
+      }
+    };
+  }, [activeQuizToTake, isExamSealedOffline, effectiveStudent?.nombre_completo, cuentaKey]);
 
   // Manejar cambio en casilla de respuesta con auto-guardado persistente
   const handleAnswerChange = (preguntaId, itemId, indexOrText, textIfList = null) => {
