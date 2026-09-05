@@ -153,6 +153,11 @@ export default function StudentPortalView({ student, notify = () => {} }) {
   const activeLiveStateRef = useRef(null);
   activeLiveStateRef.current = activeLiveState;
 
+  const quizAnswersRef = useRef(quizAnswers);
+  quizAnswersRef.current = quizAnswers;
+  const sendHeartbeatRef = useRef(null);
+  const lastKnownQuestionIdxRef = useRef(null);
+
   // Estados del Sistema de Integridad Académica y Antitrampas (Móvil, Escritorio y Resiliencia de Red)
   const [shuffledQuestions, setShuffledQuestions] = useState(() => savedActiveQuizSession?.quiz?.preguntas || []);
   const [timeRemainingSeconds, setTimeRemainingSeconds] = useState(() => {
@@ -615,6 +620,8 @@ export default function StudentPortalView({ student, notify = () => {} }) {
         notify("Prueba bloqueada y enviada automáticamente por exceder el límite de advertencias.", "warning");
       } else if (forcedReason?.motivo === "tiempo_agotado") {
         notify("Tiempo concluido. Tu prueba ha sido enviada exitosamente.", "info");
+      } else if (forcedReason?.motivo === "entrega_anticipada_por_salida") {
+        notify("Evaluación finalizada y enviada con las respuestas contestadas hasta este momento.", "info");
       } else {
         notify("¡Prueba semanal entregada con éxito! Queda registrada en espera de revisión docente.", "success");
       }
@@ -742,7 +749,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
       numero_cuenta: cuentaKey,
       nombre_completo: effectiveStudent?.nombre_completo,
       carrera: carreraKey,
-      respuestas: quizAnswers,
+      respuestas: quizAnswersRef.current || quizAnswers,
       auditoria: auditoriaPayload
     };
 
@@ -1063,9 +1070,10 @@ export default function StudentPortalView({ student, notify = () => {} }) {
       if (!secId || !isMounted) return;
 
       try {
+        const curAnswers = quizAnswersRef.current || quizAnswers;
         const curIdx = activeLiveStateRef.current?.pregunta_actual_idx ?? 0;
         const curQ = (activeQuizToTake?.preguntas || [])[curIdx];
-        const curAns = curQ ? quizAnswers[curQ.id] : null;
+        const curAns = curQ ? curAnswers[curQ.id] : null;
         const hasContent = Boolean(
           curAns &&
           (typeof curAns === "string"
@@ -1081,7 +1089,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
         const res = await api.pruebas.sendLiveHeartbeat(secId, sem, {
           numero_cuenta: cuentaKey,
           nombre_completo: effectiveStudent?.nombre_completo,
-          respuestas_parciales: quizAnswers,
+          respuestas_parciales: curAnswers,
           pregunta_vista: curIdx,
           ha_respondido: hasAnswered
         });
@@ -1089,6 +1097,38 @@ export default function StudentPortalView({ student, notify = () => {} }) {
         if (res?.success && res.data && isMounted) {
           const liveData = res.data;
           setActiveLiveState(liveData);
+
+          // Detección cuando el docente desde control en vivo cambia de pregunta con los botones
+          const incomingIdx = liveData.pregunta_actual_idx;
+          const prevIdx = lastKnownQuestionIdxRef.current;
+
+          if (typeof incomingIdx === "number" && prevIdx !== null && incomingIdx !== prevIdx) {
+            lastKnownQuestionIdxRef.current = incomingIdx;
+
+            // 1. Marcar como respondida y guardada la pregunta anterior
+            setAnsweredQuestionsMap((prev) => ({ ...prev, [prevIdx]: true }));
+
+            // 2. Persistir en almacenamiento local inmediatamente
+            saveActiveAttemptToDisk(
+              activeQuizToTake,
+              shuffledQuestions,
+              curAnswers,
+              quizStartTimeRef.current,
+              quizEndTimeRef.current,
+              strikesCountRef.current,
+              incidentsListRef.current,
+              totalTimeOutRef.current
+            );
+
+            // 3. Desenfocar input activo para ocultar teclado en móviles
+            if (document.activeElement && typeof document.activeElement.blur === "function") {
+              document.activeElement.blur();
+            }
+
+            notify(`Pregunta #${incomingIdx + 1} iniciada por el docente. Tu respuesta previa quedó guardada.`, "info");
+          } else if (typeof incomingIdx === "number") {
+            lastKnownQuestionIdxRef.current = incomingIdx;
+          }
 
           if (liveData.estado === "en_pregunta") {
             setTimeRemainingSeconds(liveData.tiempo_restante_segundos ?? 90);
@@ -1105,14 +1145,38 @@ export default function StudentPortalView({ student, notify = () => {} }) {
       }
     };
 
+    sendHeartbeatRef.current = sendHeartbeat;
     sendHeartbeat();
     const heartbeatInterval = setInterval(sendHeartbeat, 1200);
 
     return () => {
       isMounted = false;
+      sendHeartbeatRef.current = null;
       clearInterval(heartbeatInterval);
     };
-  }, [activeQuizToTake, effectiveStudent, cuentaKey, quizAnswers, isExamSealedOffline, resolveStudentSectionId, answeredQuestionsMap]);
+  }, [activeQuizToTake, effectiveStudent, cuentaKey, quizAnswers, isExamSealedOffline, resolveStudentSectionId, answeredQuestionsMap, shuffledQuestions, saveActiveAttemptToDisk, notify]);
+
+  // Auto-guardado garantizado al terminarse el tiempo de cada pregunta
+  useEffect(() => {
+    if (!activeQuizToTake || isExamSealedOffline) return;
+    if (timeRemainingSeconds === 0) {
+      const curIdx = activeLiveStateRef.current?.pregunta_actual_idx ?? 0;
+      setAnsweredQuestionsMap((prev) => ({ ...prev, [curIdx]: true }));
+      saveActiveAttemptToDisk(
+        activeQuizToTake,
+        shuffledQuestions,
+        quizAnswersRef.current || quizAnswers,
+        quizStartTimeRef.current,
+        quizEndTimeRef.current,
+        strikesCountRef.current,
+        incidentsListRef.current,
+        totalTimeOutRef.current
+      );
+      if (sendHeartbeatRef.current) {
+        sendHeartbeatRef.current();
+      }
+    }
+  }, [timeRemainingSeconds, activeQuizToTake, isExamSealedOffline, shuffledQuestions, saveActiveAttemptToDisk]);
 
   // Decremento local fluido de segundo a segundo mientras está en pregunta
   useEffect(() => {
@@ -1337,6 +1401,46 @@ export default function StudentPortalView({ student, notify = () => {} }) {
 
       return updated;
     });
+  };
+
+  // Auto-guardado garantizado al terminar de escribir en una casilla de respuesta (onBlur)
+  const handleAnswerBlur = (preguntaId) => {
+    if (isExamSealedOffline || !activeQuizToTake) return;
+    const curIdx = activeLiveStateRef.current?.pregunta_actual_idx ?? 0;
+    const currentAnswers = quizAnswersRef.current || quizAnswers;
+    const curQAnswer = currentAnswers[preguntaId];
+
+    const hasValue = Boolean(
+      curQAnswer &&
+      (typeof curQAnswer === "string"
+        ? curQAnswer.trim()
+        : typeof curQAnswer?.respuesta === "string"
+        ? curQAnswer.respuesta.trim()
+        : Object.values(curQAnswer || {}).some((v) =>
+            typeof v === "string" ? v.trim() : Array.isArray(v) && v.some((x) => String(x).trim())
+          ))
+    );
+
+    if (hasValue) {
+      setAnsweredQuestionsMap((prev) => ({ ...prev, [curIdx]: true }));
+    }
+
+    // Guardado persistente inmediato en almacenamiento local
+    saveActiveAttemptToDisk(
+      activeQuizToTake,
+      shuffledQuestions,
+      currentAnswers,
+      quizStartTimeRef.current,
+      quizEndTimeRef.current,
+      strikesCountRef.current,
+      incidentsListRef.current,
+      totalTimeOutRef.current
+    );
+
+    // Sincronización inmediata de latido con respuestas parciales al servidor
+    if (sendHeartbeatRef.current) {
+      sendHeartbeatRef.current();
+    }
   };
 
   // Ver comprobante / revisión de una prueba entregada
@@ -3964,6 +4068,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                                 }
                                 readOnly={isExamSealedOffline || submittingQuiz || timeRemainingSeconds <= 0}
                                 onChange={(e) => handleAnswerChange(currentActiveQ.id, "respuesta", e.target.value)}
+                                onBlur={() => handleAnswerBlur(currentActiveQ.id)}
                                 onFocus={(e) => {
                                   const target = e.target;
                                   setTimeout(() => target.scrollIntoView({ behavior: "smooth", block: "center" }), 150);
@@ -4022,6 +4127,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                                       value={typeof currentVal === "string" ? currentVal : ""}
                                       readOnly={isExamSealedOffline || submittingQuiz || timeRemainingSeconds <= 0}
                                       onChange={(e) => handleAnswerChange(currentActiveQ.id, item.id, e.target.value)}
+                                      onBlur={() => handleAnswerBlur(currentActiveQ.id)}
                                       onFocus={(e) => {
                                         const target = e.target;
                                         setTimeout(() => target.scrollIntoView({ behavior: "smooth", block: "center" }), 150);
@@ -4070,6 +4176,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                                               value={rowVal}
                                               readOnly={isExamSealedOffline || submittingQuiz || timeRemainingSeconds <= 0}
                                               onChange={(e) => handleAnswerChange(currentActiveQ.id, item.id, rIdx, e.target.value)}
+                                              onBlur={() => handleAnswerBlur(currentActiveQ.id)}
                                               onFocus={(e) => {
                                                 const target = e.target;
                                                 setTimeout(() => target.scrollIntoView({ behavior: "smooth", block: "center" }), 150);
@@ -4549,18 +4656,18 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                     fontWeight: 900,
                     textTransform: "uppercase",
                     letterSpacing: "1px",
-                    color: "#dc2626"
+                    color: "#0284c7"
                   }}
                 >
-                  Salir de la Evaluación
+                  Finalizar Evaluación
                 </span>
                 <h3 style={{ margin: "0.3rem 0 0", fontSize: "1.35rem", fontWeight: 900, color: "#0f172a" }}>
-                  ¿Deseas salir de la prueba?
+                  ¿Deseas concluir y salir de la prueba?
                 </h3>
               </div>
 
               <p style={{ margin: 0, fontSize: "0.9rem", color: "#475569", lineHeight: 1.55 }}>
-                Si sales en este momento, las respuestas que no hayas enviado se descartarán y se cancelará tu sesión actual de la evaluación.
+                Al presionar salir, se tomará como que deseas terminar tu evaluación. Se enviarán y registrarán todas las respuestas que hayas completado hasta este momento.
               </p>
 
               <div
@@ -4600,12 +4707,9 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                     setConfirmExitModalOpen(false);
                     isConfirmingRef.current = false;
                     outStartTimeRef.current = null;
-                    if (activeQuizToTake?.numero_semana) {
-                      clearActiveAttemptFromDisk(activeQuizToTake.numero_semana);
-                    }
-                    setActiveQuizToTake(null);
-                    setViolationModal(null);
                     if (document.exitFullscreen) document.exitFullscreen().catch(() => {});
+                    else if (document.webkitExitFullscreen) document.webkitExitFullscreen().catch(() => {});
+                    executeSubmitQuiz({ motivo: "entrega_anticipada_por_salida" });
                   }}
                   style={{
                     flex: 1,
@@ -4615,11 +4719,11 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                     background: "#fff1f2",
                     color: "#b91c1c",
                     fontSize: "0.9rem",
-                    fontWeight: 700,
+                    fontWeight: 800,
                     cursor: "pointer"
                   }}
                 >
-                  Salir y Descartar
+                  Salir y Enviar Respuestas
                 </button>
               </div>
             </div>

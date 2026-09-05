@@ -359,7 +359,7 @@ export const controlLiveQuiz = async (req, res) => {
 export const heartbeatLiveQuiz = async (req, res) => {
   try {
     const { seccion_id, semana } = req.params;
-    const { numero_cuenta, nombre_completo, respuestas_parciales, pregunta_vista } = req.body;
+    const { numero_cuenta, nombre_completo, respuestas_parciales, pregunta_vista, ha_respondido } = req.body;
 
     if (!numero_cuenta) {
       return res.status(400).json({ success: false, message: "Se requiere numero_cuenta" });
@@ -378,6 +378,7 @@ export const heartbeatLiveQuiz = async (req, res) => {
       nombre_completo: nombre_completo || session.alumnos_conectados[cleanAccount]?.nombre_completo || "Estudiante",
       ultimo_ping: now,
       pregunta_vista: typeof pregunta_vista === "number" ? pregunta_vista : -1,
+      ha_respondido: Boolean(ha_respondido),
       ip: req.headers["x-forwarded-for"] || req.socket?.remoteAddress || "127.0.0.1"
     };
 
