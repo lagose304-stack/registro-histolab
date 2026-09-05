@@ -44,6 +44,7 @@ import laboratorioLogo from "../assets/logos/laboratorio.png";
 import facultadLogo from "../assets/logos/facultad.png";
 import universidadLogo from "../assets/logos/universidad.png";
 import { Watermark } from "watermark-js-plus";
+import { getFingerprint } from "@thumbmarkjs/thumbmarkjs";
 
 const CARRERA_THEMES = {
   Medicina: {
@@ -200,6 +201,9 @@ export default function StudentPortalView({ student, notify = () => {} }) {
   const touchStartYRef = React.useRef(0);
   const violationModalRef = React.useRef(null);
   const watermarkInstanceRef = React.useRef(null);
+  const deviceFingerprintRef = React.useRef(null);
+  const typingCadenceRef = React.useRef([]);
+  const pasteCountRef = React.useRef(0);
 
   useEffect(() => {
     violationModalRef.current = violationModal;
@@ -788,7 +792,12 @@ export default function StudentPortalView({ student, notify = () => {} }) {
       hora_fin: new Date(now).toISOString(),
       incidentes: incidentsListRef.current,
       pantalla_completa_solicitada: true,
-      conexion_al_enviar: navigator.onLine ? "online" : "offline"
+      conexion_al_enviar: navigator.onLine ? "online" : "offline",
+      huella_dispositivo: deviceFingerprintRef.current || null,
+      intentos_pegar_texto: pasteCountRef.current || 0,
+      cadencia_escritura: typingCadenceRef.current.length > 0
+        ? { muestras: typingCadenceRef.current.length, promedio_ms: Math.round(typingCadenceRef.current.reduce((a, b) => a + b, 0) / typingCadenceRef.current.length) }
+        : null
     };
 
     const payload = {
@@ -1101,6 +1110,8 @@ export default function StudentPortalView({ student, notify = () => {} }) {
           mensajePersonalizado = "Se detectó uso de pantalla dividida o ventana flotante en el dispositivo. Esta acción no está permitida durante la evaluación.";
         } else if (tipo === "salida_pantalla_completa") {
           mensajePersonalizado = "Se detectó que saliste del modo de pantalla completa durante la evaluación. El examen debe realizarse en pantalla completa en todo momento.";
+        } else if (tipo === "devtools_detectado") {
+          mensajePersonalizado = "Se detectaron las herramientas de desarrollador del navegador abiertas. Manipular el examen con DevTools no está permitido.";
         } else if (segundosFuera > 0) {
           mensajePersonalizado = `Se detectó salida de la pantalla de la evaluación durante ${segundosFuera} segundos.`;
         }
@@ -1467,6 +1478,38 @@ export default function StudentPortalView({ student, notify = () => {} }) {
       e.preventDefault();
     };
 
+    // ─── G. Bloqueo de pegar texto (Paste Detection) ───
+    // Detecta si el estudiante pega texto copiado de otra fuente (ChatGPT, Google, etc.)
+    const handlePaste = (e) => {
+      if (isSubmittingRef.current || isConfirmingRef.current) return;
+      e.preventDefault();
+      pasteCountRef.current += 1;
+      const pastedText = e.clipboardData ? e.clipboardData.getData("text/plain") : "";
+      const preview = pastedText.length > 80 ? pastedText.substring(0, 80) + "..." : pastedText;
+      // Registrar en bitácora como incidente (no como strike, pero queda en el registro)
+      const incident = {
+        tipo: "intento_pegar_texto",
+        detalle: `Intento de pegar texto bloqueado (${pastedText.length} caracteres). Vista previa: "${preview}"`,
+        strike: strikesCountRef.current,
+        segundosFuera: 0,
+        hora: new Date().toLocaleTimeString()
+      };
+      incidentsListRef.current.push(incident);
+      setIncidentsList([...incidentsListRef.current]);
+      notify("⚠️ Pegar texto está bloqueado durante la evaluación. Escribe tus respuestas manualmente.", "warning");
+      if (navigator.vibrate) navigator.vibrate([150]);
+    };
+
+    // ─── H. Bloqueo de arrastrar texto de preguntas ───
+    const handleDragStart = (e) => {
+      e.preventDefault();
+    };
+
+    // ─── I. Bloqueo de selección de texto (cut) ───
+    const handleCut = (e) => {
+      e.preventDefault();
+    };
+
     // ─── Registrar todos los listeners ───
     document.addEventListener("visibilitychange", handleVisibilityChange);
     window.addEventListener("blur", handleBlur);
@@ -1478,6 +1521,9 @@ export default function StudentPortalView({ student, notify = () => {} }) {
     window.addEventListener("keydown", handleKeyDown, { capture: true });
     window.addEventListener("contextmenu", handleContextMenu);
     document.addEventListener("copy", handleCopy);
+    document.addEventListener("paste", handlePaste, { capture: true });
+    document.addEventListener("cut", handleCut);
+    document.addEventListener("dragstart", handleDragStart);
     window.addEventListener("touchstart", handleTouchStart, { passive: true });
     window.addEventListener("touchmove", handleTouchMove, { passive: true });
     window.addEventListener("touchend", handleTouchEnd, { passive: true });
@@ -1494,6 +1540,9 @@ export default function StudentPortalView({ student, notify = () => {} }) {
       window.removeEventListener("keydown", handleKeyDown, { capture: true });
       window.removeEventListener("contextmenu", handleContextMenu);
       document.removeEventListener("copy", handleCopy);
+      document.removeEventListener("paste", handlePaste, { capture: true });
+      document.removeEventListener("cut", handleCut);
+      document.removeEventListener("dragstart", handleDragStart);
       window.removeEventListener("touchstart", handleTouchStart);
       window.removeEventListener("touchmove", handleTouchMove);
       window.removeEventListener("touchend", handleTouchEnd);
@@ -1575,6 +1624,94 @@ export default function StudentPortalView({ student, notify = () => {} }) {
       }
     };
   }, [activeQuizToTake, isExamSealedOffline, effectiveStudent?.nombre_completo, cuentaKey]);
+
+  // I. Huella digital del dispositivo (Browser Fingerprint) vía ThumbmarkJS
+  // Captura un ID único del dispositivo al iniciar el examen para verificar que
+  // el mismo dispositivo que inició es el que termina (anti-suplantación).
+  useEffect(() => {
+    if (!activeQuizToTake || isExamSealedOffline) return;
+    if (deviceFingerprintRef.current) return; // Ya capturado
+
+    const captureFingerprint = async () => {
+      try {
+        const fp = await getFingerprint();
+        deviceFingerprintRef.current = fp;
+      } catch (err) {
+        console.warn("Aviso al capturar huella digital del dispositivo:", err);
+        // Fallback básico si ThumbmarkJS falla
+        deviceFingerprintRef.current = `${navigator.userAgent}_${screen.width}x${screen.height}_${Intl.DateTimeFormat().resolvedOptions().timeZone}`;
+      }
+    };
+    captureFingerprint();
+  }, [activeQuizToTake, isExamSealedOffline]);
+
+  // J. Detección avanzada de DevTools abiertos (timing-based)
+  // Mide el tiempo que toma ejecutar un debugger statement — si DevTools está abierto,
+  // el debugger pausa la ejecución y genera un delay medible.
+  useEffect(() => {
+    if (!activeQuizToTake || isExamSealedOffline) return;
+
+    const devtoolsDetectedRef = { value: false };
+    const checkDevTools = () => {
+      const start = performance.now();
+      // eslint-disable-next-line no-debugger
+      debugger;
+      const elapsed = performance.now() - start;
+      // Si el debugger tardó más de 100ms, DevTools está abierto y pausó la ejecución
+      if (elapsed > 100 && !devtoolsDetectedRef.value) {
+        devtoolsDetectedRef.value = true;
+        const incident = {
+          tipo: "devtools_detectado",
+          detalle: `Se detectaron las herramientas de desarrollador abiertas (delay: ${Math.round(elapsed)}ms)`,
+          strike: strikesCountRef.current,
+          segundosFuera: 0,
+          hora: new Date().toLocaleTimeString()
+        };
+        incidentsListRef.current.push(incident);
+        setIncidentsList([...incidentsListRef.current]);
+        registerViolation(
+          "devtools_detectado",
+          "Se detectaron las herramientas de desarrollador del navegador abiertas durante la evaluación",
+          0
+        );
+        // Reset para poder detectar si lo vuelven a abrir
+        setTimeout(() => { devtoolsDetectedRef.value = false; }, 10000);
+      }
+    };
+
+    const interval = setInterval(checkDevTools, 3000);
+    return () => clearInterval(interval);
+  }, [activeQuizToTake, isExamSealedOffline, registerViolation]);
+
+  // K. Análisis de cadencia de escritura (Typing Cadence)
+  // Registra el intervalo entre teclas para detectar texto pegado o escrito por IA
+  // (cadencia inhumanamente rápida o uniforme indica copy-paste que evadió el bloqueo).
+  useEffect(() => {
+    if (!activeQuizToTake || isExamSealedOffline) return;
+
+    let lastKeyTime = 0;
+    const handleKeyCadence = (e) => {
+      // Solo registrar en inputs/textareas del examen
+      const tag = e.target?.tagName;
+      if (tag !== "INPUT" && tag !== "TEXTAREA") return;
+      const now = performance.now();
+      if (lastKeyTime > 0) {
+        const delta = now - lastKeyTime;
+        // Solo registrar intervalos razonables (entre 10ms y 2000ms)
+        if (delta >= 10 && delta <= 2000) {
+          typingCadenceRef.current.push(Math.round(delta));
+          // Mantener solo las últimas 200 muestras para no acumular memoria
+          if (typingCadenceRef.current.length > 200) {
+            typingCadenceRef.current = typingCadenceRef.current.slice(-200);
+          }
+        }
+      }
+      lastKeyTime = now;
+    };
+
+    window.addEventListener("keydown", handleKeyCadence);
+    return () => window.removeEventListener("keydown", handleKeyCadence);
+  }, [activeQuizToTake, isExamSealedOffline]);
 
   // Manejar cambio en casilla de respuesta con auto-guardado persistente
   const handleAnswerChange = (preguntaId, itemId, indexOrText, textIfList = null) => {
@@ -2455,6 +2592,16 @@ export default function StudentPortalView({ student, notify = () => {} }) {
             padding: 0.85rem !important;
             border-radius: 0.75rem !important;
             gap: 0.85rem !important;
+            -webkit-user-select: none !important;
+            -moz-user-select: none !important;
+            -ms-user-select: none !important;
+            user-select: none !important;
+            -webkit-touch-callout: none !important;
+          }
+          .sp-quiz-take-card input,
+          .sp-quiz-take-card textarea {
+            -webkit-user-select: text !important;
+            user-select: text !important;
           }
           .sp-quiz-image-container img {
             max-height: 200px !important;

@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@thumbmarkjs/thumbmarkjs": "^1.11.0",
     "exceljs": "^4.4.0",
     "lucide-react": "^1.16.0",
     "react": "^19.0.0",
