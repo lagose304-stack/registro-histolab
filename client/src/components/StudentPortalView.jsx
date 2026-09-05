@@ -174,6 +174,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
   const [confirmExitModalOpen, setConfirmExitModalOpen] = useState(false);
   const [activeLiveBannerSession, setActiveLiveBannerSession] = useState(null);
   const [answeredQuestionsMap, setAnsweredQuestionsMap] = useState({});
+  const [isScreenBlackedOut, setIsScreenBlackedOut] = useState(false);
 
   const quizStartTimeRef = React.useRef(null);
   const quizEndTimeRef = React.useRef(null);
@@ -1018,18 +1019,29 @@ export default function StudentPortalView({ student, notify = () => {} }) {
           strike: 3,
           isFinal: true,
           mensaje:
-            "Has alcanzado el límite de 3 advertencias de integridad por salir de la prueba o dividir la pantalla. Tu examen ha sido bloqueado y enviado automáticamente para revisión docente."
+            "Has alcanzado el límite de 3 advertencias de integridad (salida de app, captura de pantalla o despliegue de barra de notificaciones). Tu examen ha sido bloqueado y enviado automáticamente para revisión docente."
         });
         setTimeout(() => {
           handleSubmitQuiz({ motivo: "expulsion_infracciones" });
         }, 2200);
       } else {
         // Advertencia intermedia 1 o 2
+        let mensajePersonalizado = detalle;
+        if (tipo === "captura_de_pantalla") {
+          mensajePersonalizado = "Se detectó un intento de captura de pantalla o grabación del examen. El contenido fue ocultado en negro y la infracción quedó registrada en tu auditoría.";
+        } else if (tipo === "barra_notificaciones_o_salida") {
+          mensajePersonalizado = `Se detectó que bajaste la barra de notificaciones, centro de control o cambiaste de ventana${segundosFuera > 0 ? ` durante ${segundosFuera} seg` : ""}. El contenido fue ocultado y la incidencia quedó registrada en tu auditoría.`;
+        } else if (tipo === "pantalla_dividida") {
+          mensajePersonalizado = "Se detectó uso de pantalla dividida o ventana flotante en el dispositivo. Esta acción no está permitida durante la evaluación.";
+        } else if (segundosFuera > 0) {
+          mensajePersonalizado = `Se detectó salida de la pantalla de la evaluación durante ${segundosFuera} segundos.`;
+        }
+
         setViolationModal({
           strike: nextStrike,
           isFinal: false,
           segundosFuera,
-          mensaje: `Se detectó que saliste de la pantalla de la evaluación${segundosFuera > 0 ? ` durante ${segundosFuera} segundos` : ""}. Esta infracción ha sido registrada en tu auditoría. A la 3ª advertencia, la prueba se entregará automáticamente sin derecho a reintento.`
+          mensaje: `${mensajePersonalizado} A la 3ª advertencia, la prueba se sellará y enviará automáticamente sin derecho a reintento.`
         });
       }
     },
@@ -1118,7 +1130,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
     return () => clearInterval(interval);
   }, [activeQuizToTake, isExamSealedOffline]);
 
-  // Listeners del navegador para control antitrampas y móvil
+  // Listeners del navegador para control antitrampas estricto en móvil y escritorio
   useEffect(() => {
     if (!activeQuizToTake || isExamSealedOffline) return;
 
@@ -1129,8 +1141,18 @@ export default function StudentPortalView({ student, notify = () => {} }) {
         return;
       }
       if (document.hidden) {
-        outStartTimeRef.current = Date.now();
+        if (!outStartTimeRef.current) {
+          outStartTimeRef.current = Date.now();
+        }
+        setIsScreenBlackedOut(true);
+        if (typeof document !== "undefined" && document.body) {
+          document.body.classList.add("anticheat-blackout-on");
+        }
       } else {
+        setIsScreenBlackedOut(false);
+        if (typeof document !== "undefined" && document.body) {
+          document.body.classList.remove("anticheat-blackout-on");
+        }
         if (outStartTimeRef.current) {
           const elapsed = Math.max(1, Math.round((Date.now() - outStartTimeRef.current) / 1000));
           totalTimeOutRef.current += elapsed;
@@ -1140,7 +1162,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
       }
     };
 
-    // B. Pérdida de foco (ventanas flotantes, barra de notificaciones)
+    // B. Pérdida de foco (despliegue de barra de notificaciones en Android, Control Center en iOS, capturas)
     const handleBlur = () => {
       if (isSubmittingRef.current || isConfirmingRef.current) {
         outStartTimeRef.current = null;
@@ -1149,6 +1171,11 @@ export default function StudentPortalView({ student, notify = () => {} }) {
       if (!outStartTimeRef.current) {
         outStartTimeRef.current = Date.now();
       }
+      // Ocultar pantalla de inmediato en negro absoluto para que cualquier captura o vista previa salga 100% negra
+      setIsScreenBlackedOut(true);
+      if (typeof document !== "undefined" && document.body) {
+        document.body.classList.add("anticheat-blackout-on");
+      }
     };
 
     const handleFocus = () => {
@@ -1156,20 +1183,30 @@ export default function StudentPortalView({ student, notify = () => {} }) {
         outStartTimeRef.current = null;
         return;
       }
+      setIsScreenBlackedOut(false);
+      if (typeof document !== "undefined" && document.body) {
+        document.body.classList.remove("anticheat-blackout-on");
+      }
       if (outStartTimeRef.current) {
         const elapsed = Math.max(1, Math.round((Date.now() - outStartTimeRef.current) / 1000));
         totalTimeOutRef.current += elapsed;
         outStartTimeRef.current = null;
-        registerViolation("perdida_de_foco", "La ventana de la evaluación perdió el foco activo", elapsed);
+        registerViolation("barra_notificaciones_o_salida", "Despliegue de barra de notificaciones, centro de control o pérdida de foco", elapsed);
       }
     };
 
-    // C. Detección de pantalla dividida (Split-Screen en Android / iPad)
+    // C. Detección de pantalla dividida (Split-Screen en Android / iPad) ignorando cuando el teclado virtual esté abierto
     const handleResize = () => {
-      const isSplit = window.innerHeight < window.screen.height * 0.52;
+      const isInputActive = Boolean(
+        document.activeElement &&
+        (document.activeElement.tagName === "INPUT" || document.activeElement.tagName === "TEXTAREA")
+      );
+      if (isInputActive) return; // Teclado móvil abierto, no es pantalla dividida
+
+      const isSplit = window.innerHeight < window.screen.height * 0.48;
       setIsSplitScreenDetected(isSplit);
       if (isSplit && !violationModal) {
-        registerViolation("pantalla_dividida", "Se detectó modo de pantalla dividida en el dispositivo", 0);
+        registerViolation("pantalla_dividida", "Se detectó modo de pantalla dividida o ventana flotante en el dispositivo", 0);
       }
     };
 
@@ -1179,8 +1216,21 @@ export default function StudentPortalView({ student, notify = () => {} }) {
       setIsFullscreenActive(isFs);
     };
 
-    // E. Bloqueo de atajos de teclado de desarrollo / copia
+    // E. Detección directa de capturas de pantalla por teclado y bloqueo de atajos de desarrollo
     const handleKeyDown = (e) => {
+      const isPrintScreen = e.key === "PrintScreen" || e.key === "Snapshot";
+      const isMacScreenshot = (e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === "3" || e.key === "4" || e.key === "5");
+
+      if (isPrintScreen || isMacScreenshot) {
+        e.preventDefault();
+        setIsScreenBlackedOut(true);
+        registerViolation("captura_de_pantalla", "Intento de captura de pantalla detectado", 0);
+        setTimeout(() => {
+          setIsScreenBlackedOut(false);
+        }, 2500);
+        return;
+      }
+
       if (
         e.key === "F12" ||
         (e.ctrlKey && e.shiftKey && (e.key === "I" || e.key === "i" || e.key === "C" || e.key === "c" || e.key === "J" || e.key === "j")) ||
@@ -1216,6 +1266,32 @@ export default function StudentPortalView({ student, notify = () => {} }) {
       window.removeEventListener("contextmenu", handleContextMenu);
     };
   }, [activeQuizToTake, isExamSealedOffline, registerViolation, violationModal]);
+
+  // G. Auto-desplazamiento inteligente para cuando el teclado virtual de celular se abre
+  useEffect(() => {
+    if (!activeQuizToTake || isExamSealedOffline) return;
+
+    const handleViewportChange = () => {
+      const el = document.activeElement;
+      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA")) {
+        setTimeout(() => {
+          el.scrollIntoView({ behavior: "smooth", block: "center" });
+        }, 120);
+      }
+    };
+
+    if (typeof window !== "undefined" && window.visualViewport) {
+      window.visualViewport.addEventListener("resize", handleViewportChange);
+      window.visualViewport.addEventListener("scroll", handleViewportChange);
+    }
+
+    return () => {
+      if (typeof window !== "undefined" && window.visualViewport) {
+        window.visualViewport.removeEventListener("resize", handleViewportChange);
+        window.visualViewport.removeEventListener("scroll", handleViewportChange);
+      }
+    };
+  }, [activeQuizToTake, isExamSealedOffline]);
 
   // Manejar cambio en casilla de respuesta con auto-guardado persistente
   const handleAnswerChange = (preguntaId, itemId, indexOrText, textIfList = null) => {
@@ -1669,6 +1745,36 @@ export default function StudentPortalView({ student, notify = () => {} }) {
           letter-spacing: 0.5px;
           animation: pulseLiveBadge 1.5s infinite;
           flex-shrink: 0;
+        }
+
+        /* Auto-altura para respuestas multilínea en móvil y escritorio */
+        .sp-quiz-textarea {
+          font-family: inherit;
+          line-height: 1.45;
+          resize: vertical;
+          min-height: 56px;
+        }
+        /* Bloqueo de impresión y capturas por CSS */
+        @media print {
+          body * {
+            display: none !important;
+          }
+          body::after {
+            content: "EVALUACIÓN PROTEGIDA - CAPTURA O IMPRESIÓN PROHIBIDA";
+            display: block !important;
+            font-size: 24pt !important;
+            font-weight: 900 !important;
+            color: #000000 !important;
+            text-align: center !important;
+            margin-top: 40vh !important;
+          }
+        }
+        /* Blackout total cuando la ventana pierde el foco */
+        body.anticheat-blackout-on #root {
+          filter: brightness(0) !important;
+          background: #000000 !important;
+          user-select: none !important;
+          -webkit-user-select: none !important;
         }
 
         /* Grids de Contenido */
@@ -3733,7 +3839,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                   if (!currentActiveQ) return null;
 
                   return (
-                    <div style={{ position: "relative", zIndex: 2, display: "flex", flexDirection: "column", gap: "1.5rem" }}>
+                    <div style={{ position: "relative", zIndex: 2, display: "flex", flexDirection: "column", gap: "1.5rem", paddingBottom: "min(45vh, 320px)" }}>
                       <div
                         key={currentActiveQ.id}
                         style={{
@@ -3846,9 +3952,9 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                               <label style={{ fontSize: "0.88rem", fontWeight: 800, color: "#1e293b" }}>
                                 Respuesta:
                               </label>
-                              <input
-                                type="text"
-                                className="sp-quiz-input"
+                              <textarea
+                                rows={2}
+                                className="sp-quiz-input sp-quiz-textarea"
                                 value={
                                   typeof quizAnswers?.[currentActiveQ.id]?.respuesta === "string"
                                     ? quizAnswers[currentActiveQ.id].respuesta
@@ -3858,6 +3964,13 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                                 }
                                 readOnly={isExamSealedOffline || submittingQuiz || timeRemainingSeconds <= 0}
                                 onChange={(e) => handleAnswerChange(currentActiveQ.id, "respuesta", e.target.value)}
+                                onFocus={(e) => {
+                                  const target = e.target;
+                                  setTimeout(() => target.scrollIntoView({ behavior: "smooth", block: "center" }), 150);
+                                }}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter" && !e.shiftKey) e.preventDefault();
+                                }}
                                 onPaste={(e) => {
                                   e.preventDefault();
                                   notify("⚠️ Acción bloqueada por seguridad: No está permitido pegar texto.", "warning");
@@ -3865,16 +3978,22 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                                 autoComplete="off"
                                 autoCorrect="off"
                                 spellCheck="false"
-                                placeholder="Escribe tu respuesta aquí (escribe manualmente, pegar está bloqueado)..."
+                                placeholder="Escribe tu respuesta aquí (se ajusta automáticamente)..."
                                 style={{
+                                  width: "100%",
+                                  boxSizing: "border-box",
                                   padding: "0.65rem 0.85rem",
                                   borderRadius: "0.55rem",
                                   border: "1.5px solid #cbd5e1",
                                   background: (isExamSealedOffline || submittingQuiz || timeRemainingSeconds <= 0) ? "#f8fafc" : "#ffffff",
-                                  fontSize: "0.88rem",
+                                  fontSize: "0.9rem",
+                                  lineHeight: "1.45",
                                   fontWeight: 600,
                                   color: "#0f172a",
                                   outline: "none",
+                                  resize: "vertical",
+                                  minHeight: "56px",
+                                  fontFamily: "inherit",
                                   cursor: (isExamSealedOffline || submittingQuiz || timeRemainingSeconds <= 0) ? "not-allowed" : "text"
                                 }}
                               />
@@ -3897,12 +4016,19 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                                   </div>
 
                                   {item.tipo === "texto_corto" ? (
-                                    <input
-                                      type="text"
-                                      className="sp-quiz-input"
+                                    <textarea
+                                      rows={2}
+                                      className="sp-quiz-input sp-quiz-textarea"
                                       value={typeof currentVal === "string" ? currentVal : ""}
                                       readOnly={isExamSealedOffline || submittingQuiz || timeRemainingSeconds <= 0}
                                       onChange={(e) => handleAnswerChange(currentActiveQ.id, item.id, e.target.value)}
+                                      onFocus={(e) => {
+                                        const target = e.target;
+                                        setTimeout(() => target.scrollIntoView({ behavior: "smooth", block: "center" }), 150);
+                                      }}
+                                      onKeyDown={(e) => {
+                                        if (e.key === "Enter" && !e.shiftKey) e.preventDefault();
+                                      }}
                                       onPaste={(e) => {
                                         e.preventDefault();
                                         notify("⚠️ Acción bloqueada por seguridad académica: No está permitido pegar texto.", "warning");
@@ -3912,14 +4038,20 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                                       spellCheck="false"
                                       placeholder="Escribe tu respuesta manualmente aquí..."
                                       style={{
+                                        width: "100%",
+                                        boxSizing: "border-box",
                                         padding: "0.65rem 0.85rem",
                                         borderRadius: "0.55rem",
                                         border: currentVal ? "2px solid #0284c7" : "1.5px solid #cbd5e1",
                                         background: (isExamSealedOffline || submittingQuiz || timeRemainingSeconds <= 0) ? "#f8fafc" : currentVal ? "#f0f9ff" : "#ffffff",
-                                        fontSize: "0.88rem",
+                                        fontSize: "0.9rem",
+                                        lineHeight: "1.45",
                                         fontWeight: 600,
                                         color: "#0f172a",
                                         outline: "none",
+                                        resize: "vertical",
+                                        minHeight: "56px",
+                                        fontFamily: "inherit",
                                         cursor: (isExamSealedOffline || submittingQuiz || timeRemainingSeconds <= 0) ? "not-allowed" : "text"
                                       }}
                                     />
@@ -3938,6 +4070,10 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                                               value={rowVal}
                                               readOnly={isExamSealedOffline || submittingQuiz || timeRemainingSeconds <= 0}
                                               onChange={(e) => handleAnswerChange(currentActiveQ.id, item.id, rIdx, e.target.value)}
+                                              onFocus={(e) => {
+                                                const target = e.target;
+                                                setTimeout(() => target.scrollIntoView({ behavior: "smooth", block: "center" }), 150);
+                                              }}
                                               onPaste={(e) => {
                                                 e.preventDefault();
                                                 notify("⚠️ Acción bloqueada por seguridad: No está permitido pegar texto.", "warning");
@@ -4051,6 +4187,23 @@ export default function StudentPortalView({ student, notify = () => {} }) {
           </div>
         )}
 
+
+        {/* TELÓN NEGRO ANTI-CAPTURAS Y CONTROL CENTER/NOTIFICACIONES */}
+        {isScreenBlackedOut && (
+          <div
+            id="anti-cheat-blackout-curtain"
+            style={{
+              position: "fixed",
+              top: 0,
+              left: 0,
+              width: "100vw",
+              height: "100vh",
+              zIndex: 99999999,
+              background: "#000000",
+              pointerEvents: "all"
+            }}
+          />
+        )}
 
         {/* MODAL DE ADVERTENCIA / INFRACCIÓN DE SEGURIDAD ANTITRAMPAS */}
         {violationModal && (
