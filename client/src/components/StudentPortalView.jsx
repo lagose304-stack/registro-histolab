@@ -1491,42 +1491,338 @@ export default function StudentPortalView({ student, notify = () => {} }) {
         }
         ${activeQuizToTake ? `
           header { display: none !important; }
-          main.main-content { padding: 0.5rem 0.75rem !important; }
+          main.main-content { padding: 0.5rem 0.5rem !important; }
         ` : ""}
+
+        /* Contenedor Principal */
+        .sp-portal-container {
+          max-width: ${activeQuizToTake ? "1200px" : "1280px"};
+          width: 100%;
+          margin: 0 auto;
+          padding: 0 0 2rem 0;
+          display: flex;
+          flex-direction: column;
+          gap: 1.25rem;
+        }
+
+        /* Banner de Notificación de Prueba en Vivo */
+        .sp-live-alert {
+          background: linear-gradient(135deg, #fff1f2 0%, #fee2e2 100%);
+          border: 2px solid #f87171;
+          border-radius: 1rem;
+          padding: 1.1rem 1.4rem;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          flex-wrap: wrap;
+          gap: 1rem;
+          box-shadow: 0 8px 20px -4px rgba(225, 29, 72, 0.15);
+        }
+
+        /* Hero Banner de Perfil */
+        .sp-profile-banner {
+          background: #ffffff;
+          border-radius: 1rem;
+          border: 1px solid #e2e8f0;
+          padding: 1.35rem 1.6rem;
+          box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.03);
+        }
+        .sp-profile-inner {
+          display: flex;
+          align-items: center;
+          gap: 1.15rem;
+        }
+        .sp-profile-avatar {
+          width: 56px;
+          height: 56px;
+          border-radius: 1rem;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          flex-shrink: 0;
+        }
+        .sp-profile-name {
+          font-size: 1.45rem;
+          font-weight: 900;
+          color: #0f172a;
+          margin: 0;
+          line-height: 1.25;
+        }
+        .sp-profile-tags {
+          display: flex;
+          align-items: center;
+          gap: 0.45rem;
+          flex-wrap: wrap;
+          margin-top: 0.4rem;
+        }
+        .sp-tag-pill {
+          font-size: 0.8rem;
+          font-weight: 700;
+          padding: 0.22rem 0.6rem;
+          border-radius: 0.45rem;
+          background: #f8fafc;
+          border: 1px solid #e2e8f0;
+          color: #334155;
+          display: inline-flex;
+          align-items: center;
+          gap: 0.35rem;
+        }
+
+        /* Grid de Tarjetas de Métricas */
+        .sp-metrics-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+          gap: 1.1rem;
+        }
+        .sp-metric-card {
+          background: #ffffff;
+          border-radius: 1rem;
+          border: 1px solid #e2e8f0;
+          padding: 1.15rem 1.35rem;
+          display: flex;
+          align-items: center;
+          gap: 1rem;
+          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.02);
+        }
+        .sp-metric-icon {
+          width: 48px;
+          height: 48px;
+          border-radius: 0.75rem;
+          color: #ffffff;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          flex-shrink: 0;
+        }
+        .sp-metric-val {
+          font-size: 1.45rem;
+          font-weight: 900;
+          color: #0f172a;
+          line-height: 1.2;
+        }
+
+        /* Barra de Pestañas Moderna (Segmented Control) */
+        .sp-tabs-nav {
+          display: flex;
+          gap: 0.5rem;
+          border-bottom: 2px solid #e2e8f0;
+          padding-bottom: 0.2rem;
+        }
+        .sp-tab-btn {
+          padding: 0.65rem 1.25rem;
+          border: none;
+          background: transparent;
+          font-weight: 800;
+          font-size: 0.88rem;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          gap: 0.45rem;
+          border-radius: 0.6rem 0.6rem 0 0;
+          transition: all 0.15s ease;
+        }
+
+        /* Grids de Contenido */
+        .sp-exams-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+          gap: 1rem;
+        }
+        .sp-exam-card {
+          background: #faf5ff;
+          border: 1.5px solid #e9d5ff;
+          border-radius: 0.75rem;
+          padding: 1rem;
+          text-align: center;
+        }
+        .sp-subscores-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+          gap: 1.25rem;
+        }
+        .sp-asistencia-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+          gap: 0.85rem;
+        }
+        .sp-quizzes-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+          gap: 1.1rem;
+        }
+        .sp-card-panel {
+          background: #ffffff;
+          border-radius: 1rem;
+          border: 1px solid #e2e8f0;
+          padding: 1.4rem;
+          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.02);
+        }
+
+        /* AJUSTES RESPONSIVOS PARA MÓVIL (< 768px) */
+        @media (max-width: 768px) {
+          .sp-portal-container {
+            gap: 0.85rem !important;
+          }
+
+          .sp-live-alert {
+            padding: 0.85rem 1rem !important;
+            border-radius: 0.85rem !important;
+            flex-direction: column !important;
+            align-items: stretch !important;
+            gap: 0.75rem !important;
+          }
+          .sp-live-alert button {
+            width: 100% !important;
+            justify-content: center !important;
+            padding: 0.75rem !important;
+          }
+
+          .sp-profile-banner {
+            padding: 0.95rem 1rem !important;
+            border-radius: 0.85rem !important;
+          }
+          .sp-profile-inner {
+            gap: 0.75rem !important;
+            align-items: flex-start !important;
+          }
+          .sp-profile-avatar {
+            width: 42px !important;
+            height: 42px !important;
+            border-radius: 0.65rem !important;
+          }
+          .sp-profile-avatar svg {
+            width: 22px !important;
+            height: 22px !important;
+          }
+          .sp-profile-name {
+            font-size: 1.12rem !important;
+            line-height: 1.25 !important;
+          }
+          .sp-profile-tags {
+            gap: 0.3rem !important;
+            margin-top: 0.35rem !important;
+          }
+          .sp-tag-pill {
+            font-size: 0.72rem !important;
+            padding: 0.15rem 0.45rem !important;
+            border-radius: 0.35rem !important;
+          }
+
+          .sp-metrics-grid {
+            grid-template-columns: 1fr !important;
+            gap: 0.65rem !important;
+          }
+          .sp-metric-card {
+            padding: 0.85rem 1rem !important;
+            border-radius: 0.85rem !important;
+            gap: 0.75rem !important;
+          }
+          .sp-metric-icon {
+            width: 40px !important;
+            height: 40px !important;
+            border-radius: 0.65rem !important;
+          }
+          .sp-metric-icon svg {
+            width: 20px !important;
+            height: 20px !important;
+          }
+          .sp-metric-val {
+            font-size: 1.3rem !important;
+          }
+
+          /* Barra de Navegación Segmentada Estilo App Nativa en Móvil */
+          .sp-tabs-nav {
+            border-bottom: none !important;
+            padding: 0.3rem !important;
+            background: #f1f5f9 !important;
+            border-radius: 0.85rem !important;
+            border: 1px solid #e2e8f0 !important;
+            display: flex !important;
+            flex-wrap: nowrap !important;
+            overflow-x: auto !important;
+            -webkit-overflow-scrolling: touch !important;
+            scrollbar-width: none !important;
+            gap: 0.3rem !important;
+          }
+          .sp-tabs-nav::-webkit-scrollbar {
+            display: none !important;
+          }
+          .sp-tab-btn {
+            flex: 1 0 auto !important;
+            justify-content: center !important;
+            padding: 0.5rem 0.75rem !important;
+            font-size: 0.78rem !important;
+            border-radius: 0.6rem !important;
+            border-bottom: none !important;
+            white-space: nowrap !important;
+          }
+          .sp-tab-btn.active {
+            background: #ffffff !important;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08) !important;
+          }
+          .sp-tab-btn:not(.active) {
+            color: #64748b !important;
+          }
+
+          .sp-card-panel {
+            padding: 0.95rem !important;
+            border-radius: 0.85rem !important;
+          }
+
+          /* Exámenes en 2 Columnas Limpias en Móvil */
+          .sp-exams-grid {
+            grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)) !important;
+            gap: 0.6rem !important;
+          }
+          .sp-exam-card {
+            padding: 0.75rem 0.5rem !important;
+          }
+
+          .sp-subscores-grid {
+            grid-template-columns: 1fr !important;
+            gap: 0.85rem !important;
+          }
+
+          /* Calendario de Asistencia: Cuadrícula Limpia de 2 Columnas */
+          .sp-asistencia-grid {
+            grid-template-columns: repeat(2, 1fr) !important;
+            gap: 0.5rem !important;
+          }
+          .sp-asistencia-item {
+            padding: 0.65rem 0.5rem !important;
+            border-radius: 0.6rem !important;
+          }
+
+          .sp-quizzes-grid {
+            grid-template-columns: 1fr !important;
+            gap: 0.85rem !important;
+          }
+
+          /* Interfaz de Examen Activo en Móvil */
+          .sp-quiz-take-card {
+            padding: 0.95rem !important;
+            border-radius: 0.85rem !important;
+            gap: 1rem !important;
+          }
+          .sp-quiz-image-container img {
+            max-height: 220px !important;
+          }
+          .sp-quiz-input {
+            font-size: 16px !important; /* Previene zoom involuntario en iPhone/Android */
+            padding: 0.7rem 0.85rem !important;
+          }
+        }
       `}</style>
 
       {/* =================================================================== */}
       {/* CONTENIDO PRINCIPAL DEL PORTAL                                      */}
       {/* =================================================================== */}
-      <div
-        style={{
-          maxWidth: activeQuizToTake ? "1200px" : "1280px",
-          width: "100%",
-          margin: "0 auto",
-          padding: "0 0 2rem 0",
-          display: "flex",
-          flexDirection: "column",
-          gap: "1.5rem"
-        }}
-      >
-                {!activeQuizToTake ? (
+      <div className="sp-portal-container">
+        {!activeQuizToTake ? (
           <>
             {/* Banner de Notificación de Prueba en Vivo Habilitada */}
             {anyLiveQuiz && (
-              <div
-                style={{
-                  background: "linear-gradient(135deg, #fff1f2 0%, #fee2e2 100%)",
-                  border: "2px solid #f87171",
-                  borderRadius: "1rem",
-                  padding: "1.1rem 1.4rem",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  flexWrap: "wrap",
-                  gap: "1rem",
-                  boxShadow: "0 8px 20px -4px rgba(225, 29, 72, 0.15)"
-                }}
-              >
+              <div className="sp-live-alert">
                 <div style={{ display: "flex", alignItems: "center", gap: "1rem" }}>
                   <div
                     style={{
@@ -1595,362 +1891,263 @@ export default function StudentPortalView({ student, notify = () => {} }) {
               </div>
             )}
 
-{/* Banner Superior de Perfil del Estudiante */}
-        <div
-          style={{
-            background: "#ffffff",
-            borderRadius: "1rem",
-            border: "1px solid #e2e8f0",
-            padding: "1.5rem 1.75rem",
-            marginBottom: "0.25rem",
-            boxShadow: "0 4px 20px -2px rgba(0, 0, 0, 0.03)"
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "1.25rem" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "1.25rem" }}>
-              <div
-                style={{
-                  width: "60px",
-                  height: "60px",
-                  borderRadius: "1rem",
-                  background: theme.gradient,
-                  color: "#ffffff",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  boxShadow: `0 8px 24px -4px ${theme.primary}50`,
-                  flexShrink: 0
-                }}
-              >
-                <GraduationCap size={34} />
-              </div>
-
-              <div>
-                <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}>
-                  <h2 style={{ fontSize: "1.55rem", fontWeight: 900, color: "#0f172a", margin: 0 }}>
-                    {effectiveStudent?.nombre_completo || "Estudiante de Histología"}
-                  </h2>
-                  <span
-                    style={{
-                      background: "#f1f5f9",
-                      color: "#334155",
-                      fontFamily: "monospace",
-                      fontSize: "0.85rem",
-                      fontWeight: 800,
-                      padding: "0.22rem 0.65rem",
-                      borderRadius: "0.5rem",
-                      border: "1px solid #e2e8f0"
-                    }}
-                  >
-                    Cuenta: {effectiveStudent?.numero_cuenta}
-                  </span>
+            {/* Banner Superior de Perfil del Estudiante */}
+            <div className="sp-profile-banner">
+              <div className="sp-profile-inner">
+                <div
+                  className="sp-profile-avatar"
+                  style={{
+                    background: theme.gradient,
+                    boxShadow: `0 8px 24px -4px ${theme.primary}50`
+                  }}
+                >
+                  <GraduationCap size={32} />
                 </div>
 
-                <div style={{ display: "flex", alignItems: "center", gap: "0.85rem", flexWrap: "wrap", fontSize: "0.88rem", color: "#64748b", marginTop: "0.4rem" }}>
-                  <span>Carrera: <strong style={{ color: theme.primary, fontWeight: 800 }}>{carreraKey}</strong></span>
-                  <span style={{ color: "#cbd5e1" }}>•</span>
-                  <span>Sección: <strong style={{ color: "#0f172a" }}>{seccion?.codigo || "Sin sección"}</strong></span>
-                  {seccion?.dia && (
-                    <>
-                      <span style={{ color: "#cbd5e1" }}>•</span>
-                      <span style={{ color: "#475569", fontWeight: 600 }}>{seccion.dia} {seccion.hora_inicio} - {seccion.hora_fin}</span>
-                    </>
-                  )}
-                  {seccion?.coordinador && (
-                    <>
-                      <span style={{ color: "#cbd5e1" }}>•</span>
-                      <span>Coordinador: <strong style={{ color: "#334155" }}>{seccion.coordinador}</strong></span>
-                    </>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Tarjetas de Métricas Principales */}
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
-            gap: "1.1rem"
-          }}
-        >
-          {/* Métrica 1: Nota Total Acumulada */}
-          <div
-            style={{
-              background: "#ffffff",
-              borderRadius: "1rem",
-              border: "1px solid #e2e8f0",
-              padding: "1.25rem 1.4rem",
-              display: "flex",
-              alignItems: "center",
-              gap: "1rem",
-              boxShadow: "0 2px 8px rgba(0, 0, 0, 0.02)"
-            }}
-          >
-            <div
-              style={{
-                width: "48px",
-                height: "48px",
-                borderRadius: "0.75rem",
-                background: "linear-gradient(135deg, #10b981 0%, #059669 100%)",
-                color: "#ffffff",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                boxShadow: "0 4px 12px rgba(16, 185, 129, 0.25)"
-              }}
-            >
-              <Award size={24} />
-            </div>
-            <div>
-              <span style={{ fontSize: "0.74rem", fontWeight: 800, color: "#64748b", textTransform: "uppercase" }}>
-                Total Acumulado
-              </span>
-              {loadingAcademic ? (
-                <div style={{ padding: "0.2rem 0" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
-                    <div style={{ width: "70px", height: "24px", background: "#e2e8f0", borderRadius: "6px", animation: "pulseSkeleton 1.5s infinite" }} />
-                    <span style={{ fontSize: "0.85rem", color: "#94a3b8", fontWeight: 700 }}>pts</span>
-                  </div>
-                  <div style={{ fontSize: "0.72rem", color: "#94a3b8", marginTop: "0.25rem" }}>
-                    Cargando calificaciones...
-                  </div>
-                </div>
-              ) : (
-                <>
-                  <div style={{ fontSize: "1.5rem", fontWeight: 900, color: "#0f172a", lineHeight: 1.2 }}>
-                    {totalDinamico}{" "}
-                    <span style={{ fontSize: "0.85rem", color: "#64748b", fontWeight: 700 }}>
-                      / {maxPuntajeCarrera > 0 ? maxPuntajeCarrera : "—"} pts
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.65rem", flexWrap: "wrap" }}>
+                    <h2 className="sp-profile-name">
+                      {effectiveStudent?.nombre_completo || "Estudiante de Histología"}
+                    </h2>
+                    <span
+                      style={{
+                        background: "#f1f5f9",
+                        color: "#334155",
+                        fontFamily: "monospace",
+                        fontSize: "0.82rem",
+                        fontWeight: 800,
+                        padding: "0.18rem 0.55rem",
+                        borderRadius: "0.45rem",
+                        border: "1px solid #e2e8f0"
+                      }}
+                    >
+                      Cuenta: {effectiveStudent?.numero_cuenta}
                     </span>
                   </div>
-                  <div style={{ fontSize: "0.72rem", color: "#64748b", fontWeight: 600, marginTop: "0.25rem" }}>
-                    Manuales: <strong style={{ color: "#0284c7" }}>{notaOroManuales}</strong> • Pruebas: <strong style={{ color: "#16a34a" }}>{notaOroPruebas}</strong> • Exámenes: <strong style={{ color: "#7c3aed" }}>{sumaExamenes}</strong>
-                  </div>
-                </>
-              )}
-            </div>
-          </div>
 
-          {/* Métrica 2: Estatus Derecho a Examen */}
-          <div
-            style={{
-              background: "#ffffff",
-              borderRadius: "1rem",
-              border: "1px solid #e2e8f0",
-              padding: "1.25rem 1.4rem",
-              display: "flex",
-              alignItems: "center",
-              gap: "1rem",
-              boxShadow: "0 2px 8px rgba(0, 0, 0, 0.02)"
-            }}
-          >
-            <div
-              style={{
-                width: "48px",
-                height: "48px",
-                borderRadius: "0.75rem",
-                background: derechoExamenesStatus.perdioAlguno
-                  ? "linear-gradient(135deg, #ef4444 0%, #dc2626 100%)"
-                  : "linear-gradient(135deg, #0284c7 0%, #0369a1 100%)",
-                color: "#ffffff",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                boxShadow: derechoExamenesStatus.perdioAlguno
-                  ? "0 4px 12px rgba(239, 68, 68, 0.25)"
-                  : "0 4px 12px rgba(2, 132, 199, 0.25)",
-                flexShrink: 0
-              }}
-            >
-              {derechoExamenesStatus.perdioAlguno ? <ShieldAlert size={24} /> : <ShieldCheck size={24} />}
-            </div>
-            <div style={{ minWidth: 0, flex: 1 }}>
-              <span style={{ fontSize: "0.74rem", fontWeight: 800, color: "#64748b", textTransform: "uppercase" }}>
-                Derecho a Examen
-              </span>
-              {loadingAcademic ? (
-                <div style={{ padding: "0.2rem 0" }}>
-                  <div style={{ width: "120px", height: "20px", background: "#e2e8f0", borderRadius: "6px", animation: "pulseSkeleton 1.5s infinite" }} />
-                  <div style={{ fontSize: "0.72rem", color: "#94a3b8", marginTop: "0.25rem" }}>
-                    Verificando asistencia...
+                  <div className="sp-profile-tags">
+                    <span className="sp-tag-pill" style={{ background: theme.bg, borderColor: theme.border, color: theme.text }}>
+                      🎓 <strong>{carreraKey}</strong>
+                    </span>
+                    <span className="sp-tag-pill">
+                      🏛️ Sec: <strong>{seccion?.codigo || "Sin sección"}</strong>
+                    </span>
+                    {seccion?.dia && (
+                      <span className="sp-tag-pill">
+                        📅 {seccion.dia} {seccion.hora_inicio} - {seccion.hora_fin}
+                      </span>
+                    )}
+                    {seccion?.coordinador && (
+                      <span className="sp-tag-pill">
+                        👨‍🏫 Coord: {seccion.coordinador}
+                      </span>
+                    )}
                   </div>
                 </div>
-              ) : (
-                <>
-                  <div
-                    style={{
-                      fontSize: "1.08rem",
-                      fontWeight: 900,
-                      color: derechoExamenesStatus.perdioAlguno ? "#dc2626" : "#0284c7",
-                      lineHeight: 1.25
-                    }}
-                  >
-                    {derechoExamenesStatus.titulo}
-                  </div>
-                  {/* Desglose por examen */}
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: "0.35rem", marginTop: "0.35rem" }}>
-                    {derechoExamenesStatus.exams.map((dex) => (
-                      <span
-                        key={dex.id}
+              </div>
+            </div>
+
+            {/* Tarjetas de Métricas Principales */}
+            <div className="sp-metrics-grid">
+              {/* Métrica 1: Nota Total Acumulada */}
+              <div className="sp-metric-card">
+                <div
+                  className="sp-metric-icon"
+                  style={{
+                    background: "linear-gradient(135deg, #10b981 0%, #059669 100%)",
+                    boxShadow: "0 4px 12px rgba(16, 185, 129, 0.25)"
+                  }}
+                >
+                  <Award size={24} />
+                </div>
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <span style={{ fontSize: "0.74rem", fontWeight: 800, color: "#64748b", textTransform: "uppercase" }}>
+                    Total Acumulado
+                  </span>
+                  {loadingAcademic ? (
+                    <div style={{ padding: "0.2rem 0" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
+                        <div style={{ width: "70px", height: "24px", background: "#e2e8f0", borderRadius: "6px", animation: "pulseSkeleton 1.5s infinite" }} />
+                        <span style={{ fontSize: "0.85rem", color: "#94a3b8", fontWeight: 700 }}>pts</span>
+                      </div>
+                      <div style={{ fontSize: "0.72rem", color: "#94a3b8", marginTop: "0.25rem" }}>
+                        Cargando calificaciones...
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="sp-metric-val">
+                        {totalDinamico}{" "}
+                        <span style={{ fontSize: "0.85rem", color: "#64748b", fontWeight: 700 }}>
+                          / {maxPuntajeCarrera > 0 ? maxPuntajeCarrera : "—"} pts
+                        </span>
+                      </div>
+                      <div style={{ fontSize: "0.72rem", color: "#64748b", fontWeight: 600, marginTop: "0.25rem" }}>
+                        Manuales: <strong style={{ color: "#0284c7" }}>{notaOroManuales}</strong> • Pruebas: <strong style={{ color: "#16a34a" }}>{notaOroPruebas}</strong> • Exám: <strong style={{ color: "#7c3aed" }}>{sumaExamenes}</strong>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              {/* Métrica 2: Estatus Derecho a Examen */}
+              <div className="sp-metric-card">
+                <div
+                  className="sp-metric-icon"
+                  style={{
+                    background: derechoExamenesStatus.perdioAlguno
+                      ? "linear-gradient(135deg, #ef4444 0%, #dc2626 100%)"
+                      : "linear-gradient(135deg, #0284c7 0%, #0369a1 100%)",
+                    boxShadow: derechoExamenesStatus.perdioAlguno
+                      ? "0 4px 12px rgba(239, 68, 68, 0.25)"
+                      : "0 4px 12px rgba(2, 132, 199, 0.25)"
+                  }}
+                >
+                  {derechoExamenesStatus.perdioAlguno ? <ShieldAlert size={24} /> : <ShieldCheck size={24} />}
+                </div>
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <span style={{ fontSize: "0.74rem", fontWeight: 800, color: "#64748b", textTransform: "uppercase" }}>
+                    Derecho a Examen
+                  </span>
+                  {loadingAcademic ? (
+                    <div style={{ padding: "0.2rem 0" }}>
+                      <div style={{ width: "120px", height: "20px", background: "#e2e8f0", borderRadius: "6px", animation: "pulseSkeleton 1.5s infinite" }} />
+                      <div style={{ fontSize: "0.72rem", color: "#94a3b8", marginTop: "0.25rem" }}>
+                        Verificando asistencia...
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <div
                         style={{
-                          fontSize: "0.68rem",
-                          fontWeight: 800,
-                          padding: "0.12rem 0.45rem",
-                          borderRadius: "0.35rem",
-                          background: dex.perdio ? "#fee2e2" : "#f0fdf4",
-                          color: dex.perdio ? "#b91c1c" : "#15803d",
-                          border: dex.perdio ? "1px solid #fca5a5" : "1px solid #bbf7d0"
+                          fontSize: "1.05rem",
+                          fontWeight: 900,
+                          color: derechoExamenesStatus.perdioAlguno ? "#dc2626" : "#0284c7",
+                          lineHeight: 1.25
                         }}
                       >
-                        {dex.label}: {dex.perdio ? `🚨 SDE (${dex.faltasInjustificadas} faltas)` : "✓ Habilitado"}
-                      </span>
-                    ))}
-                  </div>
-                </>
-              )}
-            </div>
-          </div>
-
-          {/* Métrica 3: Asistencias */}
-          <div
-            style={{
-              background: "#ffffff",
-              borderRadius: "1rem",
-              border: "1px solid #e2e8f0",
-              padding: "1.25rem 1.4rem",
-              display: "flex",
-              alignItems: "center",
-              gap: "1rem",
-              boxShadow: "0 2px 8px rgba(0, 0, 0, 0.02)"
-            }}
-          >
-            <div
-              style={{
-                width: "48px",
-                height: "48px",
-                borderRadius: "0.75rem",
-                background: "linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%)",
-                color: "#ffffff",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                boxShadow: "0 4px 12px rgba(139, 92, 246, 0.25)"
-              }}
-            >
-              <CalendarCheck size={24} />
-            </div>
-            <div>
-              <span style={{ fontSize: "0.74rem", fontWeight: 800, color: "#64748b", textTransform: "uppercase" }}>
-                Asistencia
-              </span>
-              {loadingAcademic ? (
-                <div style={{ padding: "0.2rem 0" }}>
-                  <div style={{ width: "90px", height: "22px", background: "#e2e8f0", borderRadius: "6px", animation: "pulseSkeleton 1.5s infinite" }} />
-                  <div style={{ fontSize: "0.72rem", color: "#94a3b8", marginTop: "0.25rem" }}>
-                    Calculando semanas...
-                  </div>
+                        {derechoExamenesStatus.titulo}
+                      </div>
+                      {/* Desglose por examen */}
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: "0.3rem", marginTop: "0.35rem" }}>
+                        {derechoExamenesStatus.exams.map((dex) => (
+                          <span
+                            key={dex.id}
+                            style={{
+                              fontSize: "0.68rem",
+                              fontWeight: 800,
+                              padding: "0.12rem 0.45rem",
+                              borderRadius: "0.35rem",
+                              background: dex.perdio ? "#fee2e2" : "#f0fdf4",
+                              color: dex.perdio ? "#b91c1c" : "#15803d",
+                              border: dex.perdio ? "1px solid #fca5a5" : "1px solid #bbf7d0"
+                            }}
+                          >
+                            {dex.label}: {dex.perdio ? `🚨 SDE (${dex.faltasInjustificadas} faltas)` : "✓ Habilitado"}
+                          </span>
+                        ))}
+                      </div>
+                    </>
+                  )}
                 </div>
-              ) : (
-                <div style={{ fontSize: "1.35rem", fontWeight: 900, color: "#0f172a", lineHeight: 1.2 }}>
-                  {attendanceStats.asistenciasCount}{" "}
-                  <span style={{ fontSize: "0.85rem", color: "#64748b", fontWeight: 700 }}>
-                    de {attendanceStats.totalSemanas} semanas ({attendanceStats.pct}%)
+              </div>
+
+              {/* Métrica 3: Asistencias */}
+              <div className="sp-metric-card">
+                <div
+                  className="sp-metric-icon"
+                  style={{
+                    background: "linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%)",
+                    boxShadow: "0 4px 12px rgba(139, 92, 246, 0.25)"
+                  }}
+                >
+                  <CalendarCheck size={24} />
+                </div>
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <span style={{ fontSize: "0.74rem", fontWeight: 800, color: "#64748b", textTransform: "uppercase" }}>
+                    Asistencia
                   </span>
+                  {loadingAcademic ? (
+                    <div style={{ padding: "0.2rem 0" }}>
+                      <div style={{ width: "90px", height: "22px", background: "#e2e8f0", borderRadius: "6px", animation: "pulseSkeleton 1.5s infinite" }} />
+                      <div style={{ fontSize: "0.72rem", color: "#94a3b8", marginTop: "0.25rem" }}>
+                        Calculando semanas...
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="sp-metric-val">
+                      {attendanceStats.asistenciasCount}{" "}
+                      <span style={{ fontSize: "0.85rem", color: "#64748b", fontWeight: 700 }}>
+                        de {attendanceStats.totalSemanas} sem ({attendanceStats.pct}%)
+                      </span>
+                    </div>
+                  )}
                 </div>
-              )}
+              </div>
             </div>
-          </div>
-        </div>
 
-        {/* Pestañas de Navegación del Portal */}
-        <div style={{ display: "flex", gap: "0.5rem", borderBottom: "2px solid #e2e8f0", paddingBottom: "0.2rem" }}>
-          <button
-            onClick={() => setActiveTab("calificaciones")}
-            style={{
-              padding: "0.6rem 1.25rem",
-              border: "none",
-              borderBottom: activeTab === "calificaciones" ? `3px solid ${theme.primary}` : "3px solid transparent",
-              background: "transparent",
-              color: activeTab === "calificaciones" ? theme.primary : "#64748b",
-              fontWeight: 800,
-              fontSize: "0.88rem",
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              gap: "0.45rem"
-            }}
-          >
-            <Award size={16} />
-            <span>Mis Calificaciones</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab("asistencia")}
-            style={{
-              padding: "0.6rem 1.25rem",
-              border: "none",
-              borderBottom: activeTab === "asistencia" ? `3px solid ${theme.primary}` : "3px solid transparent",
-              background: "transparent",
-              color: activeTab === "asistencia" ? theme.primary : "#64748b",
-              fontWeight: 800,
-              fontSize: "0.88rem",
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              gap: "0.45rem"
-            }}
-          >
-            <CalendarCheck size={16} />
-            <span>Control de Asistencia</span>
-          </button>
-
-          <button
-            onClick={() => {
-              setActiveTab("pruebas");
-              setActiveQuizToTake(null);
-              setReviewingSubmission(null);
-            }}
-            style={{
-              padding: "0.6rem 1.25rem",
-              border: "none",
-              borderBottom: activeTab === "pruebas" ? `3px solid ${theme.primary}` : "3px solid transparent",
-              background: "transparent",
-              color: activeTab === "pruebas" ? theme.primary : "#64748b",
-              fontWeight: 800,
-              fontSize: "0.88rem",
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              gap: "0.45rem"
-            }}
-          >
-            <HelpCircle size={16} />
-            <span>Pruebas Semanales</span>
-            {anyLiveQuiz && (
-              <span
+            {/* Pestañas de Navegación del Portal */}
+            <div className="sp-tabs-nav">
+              <button
+                onClick={() => setActiveTab("calificaciones")}
+                className={`sp-tab-btn ${activeTab === "calificaciones" ? "active" : ""}`}
                 style={{
-                  background: "#dc2626",
-                  color: "#ffffff",
-                  fontSize: "0.68rem",
-                  fontWeight: 900,
-                  padding: "0.15rem 0.5rem",
-                  borderRadius: "9999px",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "0.3rem",
-                  letterSpacing: "0.5px",
-                  animation: "pulseLiveBadge 1.5s infinite"
+                  color: activeTab === "calificaciones" ? theme.primary : "#64748b",
+                  borderBottom: activeTab === "calificaciones" ? `3px solid ${theme.primary}` : "3px solid transparent"
                 }}
               >
-                <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#ffffff" }} />
-                EN VIVO
-              </span>
-            )}
-          </button>
-        </div>
+                <Award size={16} />
+                <span>Mis Calificaciones</span>
+              </button>
+
+              <button
+                onClick={() => setActiveTab("asistencia")}
+                className={`sp-tab-btn ${activeTab === "asistencia" ? "active" : ""}`}
+                style={{
+                  color: activeTab === "asistencia" ? theme.primary : "#64748b",
+                  borderBottom: activeTab === "asistencia" ? `3px solid ${theme.primary}` : "3px solid transparent"
+                }}
+              >
+                <CalendarCheck size={16} />
+                <span>Control de Asistencia</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  setActiveTab("pruebas");
+                  setActiveQuizToTake(null);
+                  setReviewingSubmission(null);
+                }}
+                className={`sp-tab-btn ${activeTab === "pruebas" ? "active" : ""}`}
+                style={{
+                  color: activeTab === "pruebas" ? theme.primary : "#64748b",
+                  borderBottom: activeTab === "pruebas" ? `3px solid ${theme.primary}` : "3px solid transparent"
+                }}
+              >
+                <HelpCircle size={16} />
+                <span>Pruebas Semanales</span>
+                {anyLiveQuiz && (
+                  <span
+                    style={{
+                      background: "#dc2626",
+                      color: "#ffffff",
+                      fontSize: "0.68rem",
+                      fontWeight: 900,
+                      padding: "0.15rem 0.5rem",
+                      borderRadius: "9999px",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "0.3rem",
+                      letterSpacing: "0.5px",
+                      animation: "pulseLiveBadge 1.5s infinite"
+                    }}
+                  >
+                    <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#ffffff" }} />
+                    EN VIVO
+                  </span>
+                )}
+              </button>
+            </div>
 
         {/* =================================================================== */}
         {/* PESTAÑA A: CALIFICACIONES DETALLADAS                                */}
@@ -2007,26 +2204,19 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                   No hay semanas de examen programadas en el calendario de esta carrera.
                 </div>
               ) : (
-                <div style={{ display: "flex", flexWrap: "wrap", gap: "1rem" }}>
+                <div className="sp-exams-grid">
                   {examenesList.map((ex) => (
                     <div
                       key={ex.id}
-                      style={{
-                        width: "220px",
-                        background: "#faf5ff",
-                        border: "1.5px solid #e9d5ff",
-                        borderRadius: "0.75rem",
-                        padding: "1rem",
-                        textAlign: "center"
-                      }}
+                      className="sp-exam-card"
                     >
                       <span style={{ fontSize: "0.78rem", fontWeight: 900, color: "#7e22ce", textTransform: "uppercase", display: "block" }}>
                         {ex.label}
                       </span>
-                      <div style={{ fontSize: "1.6rem", fontWeight: 900, color: "#581c87", marginTop: "0.25rem" }}>
+                      <div style={{ fontSize: "1.5rem", fontWeight: 900, color: "#581c87", marginTop: "0.25rem" }}>
                         {formatGrade(ex.nota)}{" "}
                         {ex.ptsMax > 0 && (
-                          <span style={{ fontSize: "0.85rem", color: "#9333ea", fontWeight: 700 }}>
+                          <span style={{ fontSize: "0.82rem", color: "#9333ea", fontWeight: 700 }}>
                             / {ex.ptsMax} pts
                           </span>
                         )}
@@ -2038,7 +2228,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
             </div>
 
             {/* 2. Manuales y Pruebas Semanales en 2 Columnas */}
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: "1.25rem" }}>
+            <div className="sp-subscores-grid">
               {/* Manuales de Laboratorio */}
               <div
                 style={{
@@ -2257,7 +2447,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                 No hay semanas académicas configuradas para esta carrera.
               </div>
             ) : (
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(210px, 1fr))", gap: "0.85rem" }}>
+              <div className="sp-asistencia-grid">
                 {activeCareerWeeks.map((w) => {
                   const sem = Number(w.numero_semana);
                   const val =
@@ -2294,6 +2484,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                   return (
                     <div
                       key={`asist_sem_${sem}`}
+                      className="sp-asistencia-item"
                       style={{
                         background: bg,
                         border: `1.5px solid ${border}`,
@@ -2632,13 +2823,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                     </p>
                   </div>
                 ) : (
-                  <div
-                    style={{
-                      display: "grid",
-                      gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))",
-                      gap: "1.1rem"
-                    }}
-                  >
+                  <div className="sp-quizzes-grid">
                     {onlineQuizzes.map((quiz) => {
                       const submission = existingSubmissions[quiz.numero_semana];
                       const isSubmitted = Boolean(submission);
@@ -2655,6 +2840,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                       return (
                         <div
                           key={quiz.id || quiz.numero_semana}
+                          className="sp-quiz-card"
                           style={{
                             background: "#ffffff",
                             borderRadius: "1rem",
@@ -2816,7 +3002,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem", width: "100%" }}>
             <div
-                className="animate-fade-in"
+                className="animate-fade-in sp-quiz-take-card"
                 style={{
                   position: "relative",
                   background: "#ffffff",
@@ -3306,6 +3492,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                         {/* Micrografía histológica protegida contra Google Lens y capturas */}
                         {currentActiveQ.imagen_url && (
                           <div
+                            className="sp-quiz-image-container"
                             style={{
                               position: "relative",
                               textAlign: "center",
@@ -3367,6 +3554,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                               </label>
                               <input
                                 type="text"
+                                className="sp-quiz-input"
                                 value={
                                   typeof quizAnswers?.[currentActiveQ.id]?.respuesta === "string"
                                     ? quizAnswers[currentActiveQ.id].respuesta
@@ -3417,6 +3605,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                                   {item.tipo === "texto_corto" ? (
                                     <input
                                       type="text"
+                                      className="sp-quiz-input"
                                       value={typeof currentVal === "string" ? currentVal : ""}
                                       readOnly={isExamSealedOffline || submittingQuiz || timeRemainingSeconds <= 0}
                                       onChange={(e) => handleAnswerChange(currentActiveQ.id, item.id, e.target.value)}
@@ -3451,6 +3640,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                                             </span>
                                             <input
                                               type="text"
+                                              className="sp-quiz-input"
                                               value={rowVal}
                                               readOnly={isExamSealedOffline || submittingQuiz || timeRemainingSeconds <= 0}
                                               onChange={(e) => handleAnswerChange(currentActiveQ.id, item.id, rIdx, e.target.value)}

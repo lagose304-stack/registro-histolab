@@ -376,16 +376,54 @@ h1, h2, h3, h4, h5 {
   }
 }
 
-@media (max-width: 480px) {
-  .stats-grid {
-    grid-template-columns: 1fr !important;
+@media (max-width: 640px) {
+  .navbar-container {
+    padding: 0.55rem 0.75rem !important;
+    gap: 0.5rem !important;
   }
 
-  .navbar-container {
-    padding: 0.75rem 0.85rem !important;
+  .navbar-logo-title {
+    font-size: 1.05rem !important;
+  }
+
+  .navbar-user-chip {
+    padding: 0.25rem 0.55rem 0.25rem 0.35rem !important;
+    gap: 0.35rem !important;
+    max-width: 140px !important;
+  }
+
+  .navbar-user-name {
+    font-size: 0.78rem !important;
+  }
+
+  .navbar-subinfo-badge {
+    display: none !important;
+  }
+
+  .navbar-logout-text {
+    display: none !important;
+  }
+
+  .navbar-logout-btn {
+    padding: 0.45rem !important;
+    min-height: 34px !important;
+    min-width: 34px !important;
+    justify-content: center !important;
+    border-radius: var(--radius-sm) !important;
+  }
+}
+
+@media (max-width: 480px) {
+  .main-content {
+    padding: 0.85rem 0.65rem 3.5rem !important;
+  }
+
+  .stats-grid {
+    grid-template-columns: 1fr !important;
   }
 
   .login-card-container {
     padding: 0.75rem !important;
   }
 }
+

@@ -46,18 +46,17 @@ export default function Navbar({
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
-          gap: "0.85rem",
-          flexWrap: "wrap"
+          gap: "0.85rem"
         }}
       >
         {/* Logo y Marca Oficial */}
-        <div style={{ display: "flex", alignItems: "center", gap: "0.85rem" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "0.65rem", flexShrink: 0 }}>
           <div style={{
-            width: "42px",
-            height: "42px",
+            width: "40px",
+            height: "40px",
             background: "#ffffff",
             border: "1px solid #e2e8f0",
-            padding: "0.25rem",
+            padding: "0.2rem",
             borderRadius: "var(--radius-md)",
             display: "flex",
             alignItems: "center",
@@ -72,25 +71,29 @@ export default function Navbar({
             />
           </div>
           <div>
-            <h1 style={{ fontSize: "1.3rem", fontWeight: 800, lineHeight: 1.1, color: "var(--text-main)", margin: 0 }}>
+            <h1 className="navbar-logo-title" style={{ fontSize: "1.25rem", fontWeight: 800, lineHeight: 1.1, color: "var(--text-main)", margin: 0 }}>
               <span className="text-gradient">REGISTRO HISTOLAB</span>
             </h1>
           </div>
         </div>
 
         {/* Acciones y Perfil */}
-        <div style={{ display: "flex", alignItems: "center", gap: "0.85rem", flexWrap: "wrap" }}>
+        <div className="navbar-actions" style={{ display: "flex", alignItems: "center", gap: "0.55rem" }}>
           {/* Perfil del Usuario Logueado (Instructor o Estudiante) */}
           {hasUser && (
-            <div style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "0.65rem",
-              background: isStudent ? "#f0fdf4" : "#f0f9ff",
-              border: isStudent ? "1px solid #bbf7d0" : "1px solid #bae6fd",
-              padding: "0.35rem 0.85rem 0.35rem 0.55rem",
-              borderRadius: "9999px"
-            }}>
+            <div
+              className="navbar-user-chip"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "0.5rem",
+                background: isStudent ? "#f0fdf4" : "#f0f9ff",
+                border: isStudent ? "1px solid #bbf7d0" : "1px solid #bae6fd",
+                padding: "0.3rem 0.75rem 0.3rem 0.45rem",
+                borderRadius: "9999px",
+                maxWidth: "240px"
+              }}
+            >
               <div style={{
                 width: "28px",
                 height: "28px",
@@ -103,24 +106,39 @@ export default function Navbar({
                 alignItems: "center",
                 justifyContent: "center",
                 fontWeight: 700,
-                fontSize: "0.78rem"
+                fontSize: "0.78rem",
+                flexShrink: 0
               }}>
                 {initial}
               </div>
 
-              <div style={{ display: "flex", alignItems: "center", gap: "0.45rem" }}>
-                <span style={{ fontSize: "0.85rem", fontWeight: 700, color: "#0f172a" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", minWidth: 0 }}>
+                <span
+                  className="navbar-user-name"
+                  style={{
+                    fontSize: "0.84rem",
+                    fontWeight: 700,
+                    color: "#0f172a",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap"
+                  }}
+                  title={displayName}
+                >
                   {displayName}
                 </span>
                 {subInfo && (
                   <span
+                    className="navbar-subinfo-badge"
                     style={{
-                      fontSize: "0.7rem",
+                      fontSize: "0.68rem",
                       fontWeight: 800,
                       background: isStudent ? "#dcfce7" : "#e0f2fe",
                       color: isStudent ? "#15803d" : "#0369a1",
                       padding: "0.1rem 0.45rem",
-                      borderRadius: "0.35rem"
+                      borderRadius: "0.35rem",
+                      whiteSpace: "nowrap",
+                      flexShrink: 0
                     }}
                   >
                     {subInfo}
@@ -134,21 +152,22 @@ export default function Navbar({
           {hasUser && (
             <button
               onClick={onLogout}
-              className="btn btn-danger"
+              className="btn btn-danger navbar-logout-btn"
               style={{
-                padding: "0.5rem 1rem",
-                fontSize: "0.88rem",
+                padding: "0.45rem 0.85rem",
+                fontSize: "0.85rem",
                 fontWeight: 700,
                 display: "inline-flex",
                 alignItems: "center",
-                gap: "0.45rem",
+                gap: "0.4rem",
                 borderRadius: "var(--radius-md)",
                 background: "#fef2f2",
                 border: "1px solid #fecaca",
                 color: "#dc2626",
                 cursor: "pointer",
                 transition: "all 0.15s ease",
-                boxShadow: "0 1px 2px rgba(220, 38, 38, 0.05)"
+                boxShadow: "0 1px 2px rgba(220, 38, 38, 0.05)",
+                whiteSpace: "nowrap"
               }}
               onMouseEnter={(e) => {
                 e.currentTarget.style.background = "#dc2626";
@@ -161,7 +180,7 @@ export default function Navbar({
               title="Cerrar sesión y proteger portal"
             >
               <LogOut size={16} />
-              <span>Cerrar Sesión</span>
+              <span className="navbar-logout-text">Cerrar Sesión</span>
             </button>
           )}
         </div>
