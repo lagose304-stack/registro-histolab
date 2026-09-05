@@ -193,6 +193,15 @@ export default function StudentPortalView({ student, notify = () => {} }) {
   const isConfirmingRef = React.useRef(false);
   const isSubmittingRef = React.useRef(false);
   const focusLossRecordRef = React.useRef({ lostAt: null, reason: null });
+  const blackoutTimeoutRef = React.useRef(null);
+  const lastAlertTimestampRef = React.useRef(0);
+  const isFromTopBorderRef = React.useRef(false);
+  const touchStartYRef = React.useRef(0);
+  const violationModalRef = React.useRef(null);
+
+  useEffect(() => {
+    violationModalRef.current = violationModal;
+  }, [violationModal]);
 
   // Sincronizar si cambia el prop student desde el padre
   useEffect(() => {
@@ -984,10 +993,53 @@ export default function StudentPortalView({ student, notify = () => {} }) {
     };
   }, [activeQuizToTake, isExamSealedOffline]);
 
-  // Registrar una infracción de integridad (Salida de app, cambio de pestaña, split screen)
+  // Desactivación segura e inmediata del apagón de pantalla (con resguardo total anti-bloqueo)
+  const deactivateDrmBlackout = useCallback(() => {
+    if (blackoutTimeoutRef.current) {
+      clearTimeout(blackoutTimeoutRef.current);
+      blackoutTimeoutRef.current = null;
+    }
+    setIsScreenBlackedOut(false);
+    if (typeof document !== "undefined") {
+      if (document.body) {
+        document.body.classList.remove("anticheat-blackout-on");
+      }
+      const rawCurtain = document.getElementById("anti-cheat-blackout-curtain");
+      if (rawCurtain) rawCurtain.style.display = "none";
+    }
+  }, []);
+
+  // Activación con Watchdog de seguridad (la pantalla NUNCA se queda pegada en negro)
+  const activateDrmBlackout = useCallback((autoDismissMs = 1800) => {
+    setIsScreenBlackedOut(true);
+    if (typeof document !== "undefined") {
+      if (document.body) {
+        document.body.classList.add("anticheat-blackout-on");
+      }
+      const rawCurtain = document.getElementById("anti-cheat-blackout-curtain");
+      if (rawCurtain) rawCurtain.style.display = "flex";
+    }
+    // Watchdog automático que garantiza reactivación en máximo 1.8 segundos
+    if (blackoutTimeoutRef.current) {
+      clearTimeout(blackoutTimeoutRef.current);
+    }
+    blackoutTimeoutRef.current = setTimeout(() => {
+      deactivateDrmBlackout();
+    }, autoDismissMs);
+  }, [deactivateDrmBlackout]);
+
+  // Registrar una infracción de integridad (Salida de app, cambio de pestaña, split screen, barra de notificaciones)
   const registerViolation = useCallback(
     (tipo, detalle, segundosFuera = 0) => {
       if (!activeQuizToTake || autoSubmitTriggeredRef.current || isExamSealedOffline || isSubmittingRef.current || isConfirmingRef.current) return;
+
+      // Antirrebote para evitar múltiples advertencias simultáneas por el mismo evento
+      const now = Date.now();
+      if (now - lastAlertTimestampRef.current < 1200) return;
+      lastAlertTimestampRef.current = now;
+
+      // Desactivar el telón negro de inmediato para asegurar que el modal de advertencia sea 100% visible e interactivo
+      deactivateDrmBlackout();
 
       const nextStrike = strikesCountRef.current + 1;
       strikesCountRef.current = nextStrike;
@@ -1017,7 +1069,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
 
       // Alerta háptica si el móvil lo soporta
       if (navigator.vibrate) {
-        navigator.vibrate([200, 100, 200]);
+        navigator.vibrate([250, 100, 250]);
       }
 
       if (nextStrike >= 3) {
@@ -1036,9 +1088,9 @@ export default function StudentPortalView({ student, notify = () => {} }) {
         // Advertencia intermedia 1 o 2
         let mensajePersonalizado = detalle;
         if (tipo === "captura_de_pantalla") {
-          mensajePersonalizado = "Se detectó un intento de captura de pantalla o grabación del examen. El contenido fue ocultado en negro y la infracción quedó registrada en tu auditoría.";
+          mensajePersonalizado = "Se detectó un intento de captura de pantalla o grabación del examen. El contenido fue protegido y la infracción quedó registrada en tu bitácora de integridad.";
         } else if (tipo === "barra_notificaciones_o_salida") {
-          mensajePersonalizado = `Se detectó que bajaste la barra de notificaciones, centro de control o cambiaste de ventana${segundosFuera > 0 ? ` durante ${segundosFuera} seg` : ""}. El contenido fue ocultado y la incidencia quedó registrada en tu auditoría.`;
+          mensajePersonalizado = `Se detectó que bajaste la barra de notificaciones, Centro de Control o cambiaste de ventana${segundosFuera > 0 ? ` durante ${segundosFuera} seg` : ""}. La incidencia quedó registrada en tu bitácora de integridad.`;
         } else if (tipo === "pantalla_dividida") {
           mensajePersonalizado = "Se detectó uso de pantalla dividida o ventana flotante en el dispositivo. Esta acción no está permitida durante la evaluación.";
         } else if (segundosFuera > 0) {
@@ -1054,7 +1106,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
         notify(`⚠️ Advertencia ${nextStrike}/3: ${mensajePersonalizado}`, "warning");
       }
     },
-    [activeQuizToTake, isExamSealedOffline, saveActiveAttemptToDisk, shuffledQuestions, quizAnswers, notify]
+    [activeQuizToTake, isExamSealedOffline, saveActiveAttemptToDisk, shuffledQuestions, quizAnswers, notify, deactivateDrmBlackout, handleSubmitQuiz]
   );
 
   // Sincronización en vivo vía Heartbeat con el servidor durante la prueba
@@ -1200,62 +1252,36 @@ export default function StudentPortalView({ student, notify = () => {} }) {
   useEffect(() => {
     if (!activeQuizToTake || isExamSealedOffline) return;
 
-    // Helper sincrónico de apagón inmediato a nivel DOM nativo (0ms)
-    const activateDrmBlackout = () => {
-      setIsScreenBlackedOut(true);
-      if (typeof document !== "undefined") {
-        if (document.body) {
-          document.body.classList.add("anticheat-blackout-on");
-        }
-        const rawCurtain = document.getElementById("anti-cheat-blackout-curtain");
-        if (rawCurtain) rawCurtain.style.display = "flex";
-      }
-    };
-
-    const deactivateDrmBlackout = () => {
-      setIsScreenBlackedOut(false);
-      if (typeof document !== "undefined") {
-        if (document.body) {
-          document.body.classList.remove("anticheat-blackout-on");
-        }
-        const rawCurtain = document.getElementById("anti-cheat-blackout-curtain");
-        if (rawCurtain) rawCurtain.style.display = "none";
-      }
-    };
-
     // A. Sensores táctiles para barra de notificaciones y Control Center en móviles (Android & iPhone)
-    let touchStartY = 0;
-    let isFromTopBorder = false;
-
     const handleTouchStart = (e) => {
       if (isSubmittingRef.current || isConfirmingRef.current) return;
       // Detección de captura con 3 dedos (Android)
       if (e.touches && e.touches.length >= 3) {
-        activateDrmBlackout();
+        activateDrmBlackout(2000);
         registerViolation("captura_de_pantalla", "Gesto de captura de pantalla con 3 dedos detectado", 0);
         return;
       }
 
       const touch = e.touches?.[0];
       if (!touch) return;
-      touchStartY = touch.clientY;
-      // Zona superior extendida a 85px (cubre notch, barra de estado y borde en cualquier teléfono)
-      if (touch.clientY <= 85 || touch.screenY <= 110) {
-        isFromTopBorder = true;
+      touchStartYRef.current = touch.clientY;
+      // Zona superior extendida: 80px del viewport o 120px de pantalla
+      if (touch.clientY <= 80 || touch.screenY <= 120) {
+        isFromTopBorderRef.current = true;
       } else {
-        isFromTopBorder = false;
+        isFromTopBorderRef.current = false;
       }
     };
 
     const handleTouchMove = (e) => {
       if (isSubmittingRef.current || isConfirmingRef.current) return;
       const touch = e.touches?.[0];
-      if (!touch || !isFromTopBorder) return;
-      const deltaY = touch.clientY - touchStartY;
+      if (!touch || !isFromTopBorderRef.current) return;
+      const deltaY = touch.clientY - touchStartYRef.current;
       // Desplazamiento hacia abajo desde la zona superior = Intento de bajar barra de notificaciones
-      if (deltaY > 18) {
-        isFromTopBorder = false;
-        activateDrmBlackout();
+      if (deltaY > 16) {
+        isFromTopBorderRef.current = false;
+        activateDrmBlackout(2000);
         registerViolation(
           "barra_notificaciones_o_salida",
           "Despliegue de barra de notificaciones o Centro de Control detectado",
@@ -1264,14 +1290,18 @@ export default function StudentPortalView({ student, notify = () => {} }) {
       }
     };
 
+    const handleTouchEnd = () => {
+      isFromTopBorderRef.current = false;
+    };
+
     const handleTouchCancel = () => {
       if (isSubmittingRef.current || isConfirmingRef.current) return;
-      if (isFromTopBorder) {
-        isFromTopBorder = false;
-        activateDrmBlackout();
+      if (isFromTopBorderRef.current) {
+        isFromTopBorderRef.current = false;
+        activateDrmBlackout(2000);
         registerViolation(
           "barra_notificaciones_o_salida",
-          "Interrupción de pantalla por el sistema operativo (barra de notificaciones)",
+          "Interrupción por barra de notificaciones o Centro de Control",
           1
         );
       }
@@ -1284,9 +1314,12 @@ export default function StudentPortalView({ student, notify = () => {} }) {
         return;
       }
       if (document.hidden) {
-        activateDrmBlackout();
+        activateDrmBlackout(2500);
         if (!focusLossRecordRef.current.lostAt) {
-          focusLossRecordRef.current = { lostAt: Date.now(), reason: "salida_de_pantalla" };
+          focusLossRecordRef.current = {
+            lostAt: Date.now(),
+            reason: isFromTopBorderRef.current ? "barra_notificaciones" : "salida_de_pantalla"
+          };
         }
       } else {
         deactivateDrmBlackout();
@@ -1297,7 +1330,9 @@ export default function StudentPortalView({ student, notify = () => {} }) {
           totalTimeOutRef.current += elapsed;
           registerViolation(
             reason === "barra_notificaciones" ? "barra_notificaciones_o_salida" : "salida_de_pantalla",
-            `Salida de la evaluación / cambio de aplicación durante ${elapsed} seg`,
+            reason === "barra_notificaciones"
+              ? `Despliegue de barra de notificaciones o Centro de Control durante ${elapsed} seg`
+              : `Salida de la evaluación / cambio de aplicación durante ${elapsed} seg`,
             elapsed
           );
         }
@@ -1309,29 +1344,52 @@ export default function StudentPortalView({ student, notify = () => {} }) {
         focusLossRecordRef.current = { lostAt: null, reason: null };
         return;
       }
-      activateDrmBlackout();
+      const wasTop = isFromTopBorderRef.current;
+      isFromTopBorderRef.current = false;
+
+      // Apagón temporal preventivo estilo DRM (máximo 2.5s con watchdog)
+      activateDrmBlackout(2500);
+
       if (!focusLossRecordRef.current.lostAt) {
-        focusLossRecordRef.current = { lostAt: Date.now(), reason: "barra_notificaciones" };
+        focusLossRecordRef.current = {
+          lostAt: Date.now(),
+          reason: wasTop ? "barra_notificaciones" : "salida_de_pantalla"
+        };
+      }
+
+      // Si bajó la barra de notificaciones en móvil, registrar de inmediato
+      if (wasTop) {
+        registerViolation(
+          "barra_notificaciones_o_salida",
+          "Despliegue de barra de notificaciones o Centro de Control detectado",
+          1
+        );
       }
     };
 
     const handleFocus = () => {
+      isFromTopBorderRef.current = false;
+      deactivateDrmBlackout();
+
       if (isSubmittingRef.current || isConfirmingRef.current) {
         focusLossRecordRef.current = { lostAt: null, reason: null };
-        deactivateDrmBlackout();
         return;
       }
-      deactivateDrmBlackout();
       if (focusLossRecordRef.current.lostAt) {
         const elapsed = Math.max(1, Math.round((Date.now() - focusLossRecordRef.current.lostAt) / 1000));
         const reason = focusLossRecordRef.current.reason || "barra_notificaciones";
         focusLossRecordRef.current = { lostAt: null, reason: null };
         totalTimeOutRef.current += elapsed;
-        registerViolation(
-          "barra_notificaciones_o_salida",
-          `Despliegue de barra de notificaciones, Centro de Control o pérdida de foco durante ${elapsed} seg`,
-          elapsed
-        );
+
+        if (!violationModalRef.current || elapsed > 1) {
+          registerViolation(
+            reason === "barra_notificaciones" ? "barra_notificaciones_o_salida" : "salida_de_pantalla",
+            reason === "barra_notificaciones"
+              ? `Despliegue de barra de notificaciones, Centro de Control o pérdida de foco durante ${elapsed} seg`
+              : `Salida de la evaluación / cambio de aplicación durante ${elapsed} seg`,
+            elapsed
+          );
+        }
       }
     };
 
@@ -1349,7 +1407,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
 
       const isSplit = window.innerHeight < window.screen.height * 0.48;
       setIsSplitScreenDetected(isSplit);
-      if (isSplit && !violationModal) {
+      if (isSplit && !violationModalRef.current) {
         registerViolation("pantalla_dividida", "Se detectó modo de pantalla dividida o ventana flotante en el dispositivo", 0);
       }
     };
@@ -1368,7 +1426,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
 
       if (isPrintScreen || isMacScreenshot || isWinSnipping) {
         e.preventDefault();
-        activateDrmBlackout();
+        activateDrmBlackout(2000);
         try {
           if (navigator.clipboard && navigator.clipboard.writeText) {
             navigator.clipboard.writeText("");
@@ -1376,9 +1434,6 @@ export default function StudentPortalView({ student, notify = () => {} }) {
         } catch (_) {}
         registerViolation("captura_de_pantalla", "Intento de captura de pantalla o grabación detectado", 0);
         if (navigator.vibrate) navigator.vibrate([350, 100, 350]);
-        setTimeout(() => {
-          deactivateDrmBlackout();
-        }, 2500);
         return;
       }
 
@@ -1398,9 +1453,8 @@ export default function StudentPortalView({ student, notify = () => {} }) {
       try {
         if (e.clipboardData) e.clipboardData.setData("text/plain", "");
       } catch (_) {}
-      activateDrmBlackout();
+      activateDrmBlackout(1500);
       registerViolation("captura_de_pantalla", "Acción de copiado o captura de contenido bloqueada", 0);
-      setTimeout(() => deactivateDrmBlackout(), 2000);
     };
 
     const handleContextMenu = (e) => {
@@ -1414,13 +1468,14 @@ export default function StudentPortalView({ student, notify = () => {} }) {
     window.addEventListener("resize", handleResize);
     document.addEventListener("fullscreenchange", handleFullscreenChange);
     document.addEventListener("webkitfullscreenchange", handleFullscreenChange);
-    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keydown", handleKeyDown, { capture: true });
     window.addEventListener("contextmenu", handleContextMenu);
     document.addEventListener("copy", handleCopy);
 
     // Eventos táctiles móviles para borde superior y cancelación por el OS
     window.addEventListener("touchstart", handleTouchStart, { passive: true });
     window.addEventListener("touchmove", handleTouchMove, { passive: true });
+    window.addEventListener("touchend", handleTouchEnd, { passive: true });
     window.addEventListener("touchcancel", handleTouchCancel, { passive: true });
 
     return () => {
@@ -1431,14 +1486,15 @@ export default function StudentPortalView({ student, notify = () => {} }) {
       window.removeEventListener("resize", handleResize);
       document.removeEventListener("fullscreenchange", handleFullscreenChange);
       document.removeEventListener("webkitfullscreenchange", handleFullscreenChange);
-      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keydown", handleKeyDown, { capture: true });
       window.removeEventListener("contextmenu", handleContextMenu);
       document.removeEventListener("copy", handleCopy);
       window.removeEventListener("touchstart", handleTouchStart);
       window.removeEventListener("touchmove", handleTouchMove);
+      window.removeEventListener("touchend", handleTouchEnd);
       window.removeEventListener("touchcancel", handleTouchCancel);
     };
-  }, [activeQuizToTake, isExamSealedOffline, registerViolation, violationModal, notify]);
+  }, [activeQuizToTake, isExamSealedOffline, registerViolation, activateDrmBlackout, deactivateDrmBlackout, notify]);
 
   // G. Auto-desplazamiento inteligente para cuando el teclado virtual de celular se abre
   useEffect(() => {
@@ -1987,11 +2043,9 @@ export default function StudentPortalView({ student, notify = () => {} }) {
           background: #000000 !important;
           overflow: hidden !important;
         }
-        body.anticheat-blackout-on .sp-portal-container {
+        body.anticheat-blackout-on .sp-quiz-take-card {
           opacity: 0 !important;
-          visibility: hidden !important;
           filter: brightness(0) !important;
-          pointer-events: none !important;
         }
         #anti-cheat-blackout-curtain {
           display: none;
@@ -1999,14 +2053,15 @@ export default function StudentPortalView({ student, notify = () => {} }) {
           inset: 0 !important;
           width: 100vw !important;
           height: 100vh !important;
-          z-index: 2000000000 !important;
+          z-index: 9999990 !important;
           background: #000000 !important;
           color: #ffffff;
           align-items: center;
           justify-content: center;
           flex-direction: column;
-          gap: 1rem;
-          pointer-events: all !important;
+          gap: 1.25rem;
+          pointer-events: auto !important;
+          cursor: pointer;
         }
         body.anticheat-blackout-on #anti-cheat-blackout-curtain {
           display: flex !important;
@@ -3672,15 +3727,15 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                   notify("⚠️ Acción bloqueada: No está permitido copiar durante la evaluación.", "warning");
                 }}
               >
-                {/* Marca de agua forense de fondo sutil sobre todo el examen */}
+                {/* Marca de agua forense visible estilo Netflix DRM sobre toda la evaluación */}
                 <div
                   style={{
                     position: "absolute",
                     inset: 0,
                     pointerEvents: "none",
                     zIndex: 1,
-                    opacity: 0.035,
-                    backgroundImage: `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='320' height='120' viewBox='0 0 320 120'><text x='20' y='60' fill='%23000000' font-family='sans-serif' font-weight='900' font-size='13' transform='rotate(-22 160 60)' letter-spacing='1'>${encodeURIComponent((effectiveStudent?.nombre_completo || "HISTOLAB").toUpperCase())} • ${encodeURIComponent(cuentaKey || "")}</text></svg>")`,
+                    opacity: 0.12,
+                    backgroundImage: `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='340' height='130' viewBox='0 0 340 130'><text x='15' y='65' fill='%23000000' font-family='sans-serif' font-weight='900' font-size='12' transform='rotate(-22 170 65)' letter-spacing='1'>HISTOLAB • ${encodeURIComponent((effectiveStudent?.nombre_completo || "HISTOLAB").toUpperCase())} • ${encodeURIComponent(cuentaKey || "")}</text></svg>")`,
                     backgroundRepeat: "repeat"
                   }}
                 />
@@ -4160,8 +4215,8 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                                 inset: 0,
                                 pointerEvents: "none",
                                 zIndex: 2,
-                                opacity: 0.18,
-                                backgroundImage: `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='260' height='90' viewBox='0 0 260 90'><text x='20' y='45' fill='%23ffffff' font-family='sans-serif' font-weight='900' font-size='12' transform='rotate(-20 130 45)' letter-spacing='1'>${encodeURIComponent((effectiveStudent?.nombre_completo || "HISTOLAB").toUpperCase())} • ${encodeURIComponent(cuentaKey || "")}</text></svg>")`,
+                                opacity: 0.24,
+                                backgroundImage: `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='260' height='90' viewBox='0 0 260 90'><text x='20' y='45' fill='%23ffffff' font-family='sans-serif' font-weight='900' font-size='12' transform='rotate(-20 130 45)' letter-spacing='1'>HISTOLAB • ${encodeURIComponent((effectiveStudent?.nombre_completo || "HISTOLAB").toUpperCase())} • ${encodeURIComponent(cuentaKey || "")}</text></svg>")`,
                                 backgroundRepeat: "repeat"
                               }}
                             />
@@ -4442,6 +4497,8 @@ export default function StudentPortalView({ student, notify = () => {} }) {
         {/* TELÓN NEGRO ANTI-CAPTURAS Y CONTROL CENTER/NOTIFICACIONES (DRM STREAMING PROTECTION) */}
         <div
           id="anti-cheat-blackout-curtain"
+          onClick={() => deactivateDrmBlackout()}
+          onTouchStart={() => deactivateDrmBlackout()}
           style={{
             position: "fixed",
             top: 0,
@@ -4454,19 +4511,42 @@ export default function StudentPortalView({ student, notify = () => {} }) {
             flexDirection: "column",
             alignItems: "center",
             justifyContent: "center",
-            gap: "1rem",
-            pointerEvents: "all"
+            gap: "1.25rem",
+            pointerEvents: isScreenBlackedOut ? "auto" : "none",
+            display: isScreenBlackedOut ? "flex" : "none",
+            cursor: "pointer"
           }}
         >
-          <ShieldAlert size={48} color="#ef4444" />
-          <div style={{ textAlign: "center", padding: "0 1.5rem" }}>
-            <div style={{ fontSize: "1.15rem", fontWeight: 900, color: "#ffffff", letterSpacing: "0.5px" }}>
+          <ShieldAlert size={52} color="#ef4444" className="animate-pulse" />
+          <div style={{ textAlign: "center", padding: "0 1.5rem", maxWidth: "480px" }}>
+            <div style={{ fontSize: "1.2rem", fontWeight: 900, color: "#ffffff", letterSpacing: "0.5px" }}>
               PROTECCIÓN DE INTEGRIDAD HISTOLAB
             </div>
-            <div style={{ fontSize: "0.86rem", color: "#94a3b8", marginTop: "0.35rem" }}>
-              Intento de captura de pantalla o pérdida de foco detectado. Pantalla oscurecida por seguridad.
+            <div style={{ fontSize: "0.88rem", color: "#94a3b8", marginTop: "0.45rem", lineHeight: 1.5 }}>
+              Intento de captura de pantalla, cambio de app o despliegue de barra de notificaciones detectado. El contenido fue resguardado temporalmente.
             </div>
           </div>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              deactivateDrmBlackout();
+            }}
+            style={{
+              marginTop: "0.5rem",
+              padding: "0.75rem 1.75rem",
+              borderRadius: "9999px",
+              background: "linear-gradient(135deg, #0284c7 0%, #0369a1 100%)",
+              color: "#ffffff",
+              border: "1px solid #38bdf8",
+              fontSize: "0.9rem",
+              fontWeight: 900,
+              cursor: "pointer",
+              boxShadow: "0 0 20px rgba(2, 132, 199, 0.5)"
+            }}
+          >
+            Tocar aquí para continuar evaluación
+          </button>
         </div>
 
         {/* MODAL DE ADVERTENCIA / INFRACCIÓN DE SEGURIDAD ANTITRAMPAS */}
@@ -4543,14 +4623,16 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                 <button
                   type="button"
                   onClick={() => {
+                    deactivateDrmBlackout();
                     setViolationModal(null);
+                    isFromTopBorderRef.current = false;
                     requestQuizFullscreen();
                   }}
                   style={{
                     width: "100%",
                     marginTop: "0.5rem",
-                    padding: "0.75rem",
-                    borderRadius: "0.7rem",
+                    padding: "0.85rem",
+                    borderRadius: "0.75rem",
                     border: "none",
                     background: "linear-gradient(135deg, #0284c7 0%, #0369a1 100%)",
                     color: "#ffffff",
@@ -4565,7 +4647,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                   }}
                 >
                   <Maximize2 size={18} />
-                  <span>Entendido • Reanudar Pantalla Completa</span>
+                  <span>Entendido • Continuar Evaluación</span>
                 </button>
               ) : (
                 <div
