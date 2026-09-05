@@ -203,6 +203,41 @@ export default function StudentPortalView({ student, notify = () => {} }) {
     violationModalRef.current = violationModal;
   }, [violationModal]);
 
+  // Desactivación segura e inmediata del apagón de pantalla (con resguardo total anti-bloqueo)
+  const deactivateDrmBlackout = useCallback(() => {
+    if (blackoutTimeoutRef.current) {
+      clearTimeout(blackoutTimeoutRef.current);
+      blackoutTimeoutRef.current = null;
+    }
+    setIsScreenBlackedOut(false);
+    if (typeof document !== "undefined") {
+      if (document.body) {
+        document.body.classList.remove("anticheat-blackout-on");
+      }
+      const rawCurtain = document.getElementById("anti-cheat-blackout-curtain");
+      if (rawCurtain) rawCurtain.style.display = "none";
+    }
+  }, []);
+
+  // Activación con Watchdog de seguridad (la pantalla NUNCA se queda pegada en negro)
+  const activateDrmBlackout = useCallback((autoDismissMs = 1800) => {
+    setIsScreenBlackedOut(true);
+    if (typeof document !== "undefined") {
+      if (document.body) {
+        document.body.classList.add("anticheat-blackout-on");
+      }
+      const rawCurtain = document.getElementById("anti-cheat-blackout-curtain");
+      if (rawCurtain) rawCurtain.style.display = "flex";
+    }
+    // Watchdog automático que garantiza reactivación en máximo 1.8 segundos
+    if (blackoutTimeoutRef.current) {
+      clearTimeout(blackoutTimeoutRef.current);
+    }
+    blackoutTimeoutRef.current = setTimeout(() => {
+      deactivateDrmBlackout();
+    }, autoDismissMs);
+  }, [deactivateDrmBlackout]);
+
   // Sincronizar si cambia el prop student desde el padre
   useEffect(() => {
     if (student) {
@@ -657,6 +692,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
         quiz: targetQuiz || { numero_semana: quizSem, titulo: `Semana ${quizSem}` },
         submission: finalData
       });
+      deactivateDrmBlackout();
       setActiveQuizToTake(null);
       setQuizAnswers({});
       setViolationModal(null);
@@ -674,7 +710,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
         else if (document.webkitExitFullscreen) document.webkitExitFullscreen().catch(() => {});
       } catch (_) {}
     },
-    [activeQuizToTake, clearActiveAttemptFromDisk, getPendingSubmissionStorageKey, loadStudentQuizzes, notify]
+    [activeQuizToTake, clearActiveAttemptFromDisk, getPendingSubmissionStorageKey, loadStudentQuizzes, notify, deactivateDrmBlackout]
   );
 
   // Estadísticas de preguntas respondidas para el diálogo de confirmación de entrega
@@ -993,40 +1029,6 @@ export default function StudentPortalView({ student, notify = () => {} }) {
     };
   }, [activeQuizToTake, isExamSealedOffline]);
 
-  // Desactivación segura e inmediata del apagón de pantalla (con resguardo total anti-bloqueo)
-  const deactivateDrmBlackout = useCallback(() => {
-    if (blackoutTimeoutRef.current) {
-      clearTimeout(blackoutTimeoutRef.current);
-      blackoutTimeoutRef.current = null;
-    }
-    setIsScreenBlackedOut(false);
-    if (typeof document !== "undefined") {
-      if (document.body) {
-        document.body.classList.remove("anticheat-blackout-on");
-      }
-      const rawCurtain = document.getElementById("anti-cheat-blackout-curtain");
-      if (rawCurtain) rawCurtain.style.display = "none";
-    }
-  }, []);
-
-  // Activación con Watchdog de seguridad (la pantalla NUNCA se queda pegada en negro)
-  const activateDrmBlackout = useCallback((autoDismissMs = 1800) => {
-    setIsScreenBlackedOut(true);
-    if (typeof document !== "undefined") {
-      if (document.body) {
-        document.body.classList.add("anticheat-blackout-on");
-      }
-      const rawCurtain = document.getElementById("anti-cheat-blackout-curtain");
-      if (rawCurtain) rawCurtain.style.display = "flex";
-    }
-    // Watchdog automático que garantiza reactivación en máximo 1.8 segundos
-    if (blackoutTimeoutRef.current) {
-      clearTimeout(blackoutTimeoutRef.current);
-    }
-    blackoutTimeoutRef.current = setTimeout(() => {
-      deactivateDrmBlackout();
-    }, autoDismissMs);
-  }, [deactivateDrmBlackout]);
 
   // Registrar una infracción de integridad (Salida de app, cambio de pestaña, split screen, barra de notificaciones)
   const registerViolation = useCallback(
@@ -1500,12 +1502,14 @@ export default function StudentPortalView({ student, notify = () => {} }) {
   useEffect(() => {
     if (!activeQuizToTake || isExamSealedOffline) return;
 
+    let timeoutId = null;
     const handleViewportChange = () => {
       const el = document.activeElement;
       if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA")) {
-        setTimeout(() => {
+        if (timeoutId) clearTimeout(timeoutId);
+        timeoutId = setTimeout(() => {
           el.scrollIntoView({ behavior: "smooth", block: "center" });
-        }, 120);
+        }, 180);
       }
     };
 
@@ -1515,6 +1519,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
     }
 
     return () => {
+      if (timeoutId) clearTimeout(timeoutId);
       if (typeof window !== "undefined" && window.visualViewport) {
         window.visualViewport.removeEventListener("resize", handleViewportChange);
         window.visualViewport.removeEventListener("scroll", handleViewportChange);
@@ -1526,7 +1531,8 @@ export default function StudentPortalView({ student, notify = () => {} }) {
   const handleAnswerChange = (preguntaId, itemId, indexOrText, textIfList = null) => {
     if (isExamSealedOffline) return;
     setQuizAnswers((prev) => {
-      const currentQ = prev[preguntaId] || {};
+      const prevVal = prev[preguntaId];
+      const currentQ = (prevVal && typeof prevVal === "object" && !Array.isArray(prevVal)) ? { ...prevVal } : {};
       let updated;
       if (textIfList !== null) {
         // Listado numerado
@@ -1549,6 +1555,8 @@ export default function StudentPortalView({ student, notify = () => {} }) {
           }
         };
       }
+
+      quizAnswersRef.current = updated;
 
       // Auto-guardado inmediato en almacenamiento local para no perder respuestas por corte o recarga
       if (activeQuizToTake) {
@@ -4266,11 +4274,15 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                                     : ""
                                 }
                                 readOnly={isExamSealedOffline || submittingQuiz || timeRemainingSeconds <= 0}
-                                onChange={(e) => handleAnswerChange(currentActiveQ.id, "respuesta", e.target.value)}
+                                onChange={(e) => {
+                                  handleAnswerChange(currentActiveQ.id, "respuesta", e.target.value);
+                                  e.target.style.height = "auto";
+                                  e.target.style.height = `${Math.max(56, e.target.scrollHeight)}px`;
+                                }}
                                 onBlur={() => handleAnswerBlur(currentActiveQ.id)}
                                 onFocus={(e) => {
                                   const target = e.target;
-                                  setTimeout(() => target.scrollIntoView({ behavior: "smooth", block: "center" }), 150);
+                                  setTimeout(() => target.scrollIntoView({ behavior: "smooth", block: "center" }), 250);
                                 }}
                                 onKeyDown={(e) => {
                                   if (e.key === "Enter" && !e.shiftKey) e.preventDefault();
@@ -4325,11 +4337,15 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                                       className="sp-quiz-input sp-quiz-textarea"
                                       value={typeof currentVal === "string" ? currentVal : ""}
                                       readOnly={isExamSealedOffline || submittingQuiz || timeRemainingSeconds <= 0}
-                                      onChange={(e) => handleAnswerChange(currentActiveQ.id, item.id, e.target.value)}
+                                      onChange={(e) => {
+                                        handleAnswerChange(currentActiveQ.id, item.id, e.target.value);
+                                        e.target.style.height = "auto";
+                                        e.target.style.height = `${Math.max(56, e.target.scrollHeight)}px`;
+                                      }}
                                       onBlur={() => handleAnswerBlur(currentActiveQ.id)}
                                       onFocus={(e) => {
                                         const target = e.target;
-                                        setTimeout(() => target.scrollIntoView({ behavior: "smooth", block: "center" }), 150);
+                                        setTimeout(() => target.scrollIntoView({ behavior: "smooth", block: "center" }), 250);
                                       }}
                                       onKeyDown={(e) => {
                                         if (e.key === "Enter" && !e.shiftKey) e.preventDefault();
@@ -4378,7 +4394,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                                               onBlur={() => handleAnswerBlur(currentActiveQ.id)}
                                               onFocus={(e) => {
                                                 const target = e.target;
-                                                setTimeout(() => target.scrollIntoView({ behavior: "smooth", block: "center" }), 150);
+                                                setTimeout(() => target.scrollIntoView({ behavior: "smooth", block: "center" }), 250);
                                               }}
                                               onPaste={(e) => {
                                                 e.preventDefault();

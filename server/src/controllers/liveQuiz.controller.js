@@ -421,9 +421,12 @@ export const heartbeatLiveQuiz = async (req, res) => {
 
     const key = getSessionKey(seccion_id, semana);
     liveSessions[key] = session;
+    savePersistentLiveSessions(liveSessions);
 
-    // Persistir en Supabase (con sincronización garantizada)
-    await syncLiveSessionToSupabase(session);
+    // Sincronizar en segundo plano sin bloquear el latido del estudiante (latencia ultra baja <5ms)
+    syncLiveSessionToSupabase(session).catch((err) => {
+      console.warn("Aviso en syncLiveSessionToSupabase background:", err?.message);
+    });
 
     return res.json({
       success: true,
