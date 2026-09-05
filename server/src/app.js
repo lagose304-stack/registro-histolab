@@ -1,6 +1,5 @@
 import express from "express";
 import cors from "cors";
-import morgan from "morgan";
 import dotenv from "dotenv";
 import { supabase, isSupabaseConfigured } from "./db/supabase.js";
 import healthRoutes from "./routes/health.routes.js";
@@ -41,7 +40,15 @@ app.use(
   })
 );
 app.use(express.json());
-app.use(morgan("dev"));
+// Reemplazo seguro de morgan para Cloudflare Workers / Node.js (evita eval / new Function)
+app.use((req, res, next) => {
+  const start = Date.now();
+  res.on("finish", () => {
+    const duration = Date.now() - start;
+    console.log(`[${req.method}] ${req.originalUrl || req.url} ${res.statusCode} (${duration}ms)`);
+  });
+  next();
+});
 
 // Rutas de la API
 app.use("/api/health", healthRoutes);
