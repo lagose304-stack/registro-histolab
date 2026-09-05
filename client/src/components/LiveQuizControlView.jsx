@@ -221,9 +221,13 @@ export default function LiveQuizControlView({
   const totalPreguntas = activeQuiz?.preguntas?.length || 6;
   const isBonusQuestion = currentQIdx === 5;
 
-  // Estadísticas de alumnos conectados
+  // Estadísticas de alumnos conectados en tiempo real (< 60 segundos)
   const connectedMap = liveSession.alumnos_conectados || {};
-  const connectedCount = Object.keys(connectedMap).length;
+  const nowTs = Date.now();
+  const activeConnectedStudents = Object.values(connectedMap).filter(
+    (c) => c && (!c.ultimo_ping || (nowTs - c.ultimo_ping < 60000))
+  );
+  const connectedCount = activeConnectedStudents.length;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem", paddingBottom: "3rem" }}>
@@ -941,9 +945,12 @@ export default function LiveQuizControlView({
                 </div>
               ) : (
                 studentsList.map((est) => {
-                  const cKey = String(est.numero_cuenta);
-                  const isConnected = Boolean(connectedMap[cKey]);
-                  const connInfo = connectedMap[cKey];
+                  const cKey = String(est.numero_cuenta || "").trim();
+                  const connInfo = connectedMap[cKey] || connectedMap[String(est.numero_cuenta)];
+                  const isConnected = Boolean(
+                    connInfo && (!connInfo.ultimo_ping || (nowTs - connInfo.ultimo_ping < 60000))
+                  );
+                  const isAnswering = connInfo && typeof connInfo.pregunta_vista === "number" && connInfo.pregunta_vista >= 0;
 
                   return (
                     <div
@@ -975,12 +982,12 @@ export default function LiveQuizControlView({
                             fontWeight: 800,
                             padding: "0.15rem 0.45rem",
                             borderRadius: "9999px",
-                            background: "#dcfce7",
-                            color: "#15803d",
+                            background: isAnswering ? "#dbeafe" : "#dcfce7",
+                            color: isAnswering ? "#1d4ed8" : "#15803d",
                             whiteSpace: "nowrap"
                           }}
                         >
-                          🟢 Conectado
+                          {isAnswering ? `🟢 Pregunta ${connInfo.pregunta_vista + 1}` : "🟢 En Espera"}
                         </span>
                       ) : (
                         <span

@@ -32,7 +32,7 @@ function loadPersistentLiveSessions() {
       return JSON.parse(raw);
     }
   } catch (err) {
-    console.warn("Aviso al leer sesiones en vivo:", err.message);
+    console.warn("Aviso al leer sesiones en vivo locales:", err.message);
   }
   return {};
 }
@@ -42,17 +42,67 @@ function savePersistentLiveSessions(sessions) {
     ensureDataDir();
     fs.writeFileSync(LIVE_DATA_FILE, JSON.stringify(sessions, null, 2), "utf-8");
   } catch (err) {
-    console.warn("Aviso al guardar sesiones en vivo:", err.message);
+    // Modo serverless / Cloudflare Workers: no bloqueante
   }
 }
 
-// Sincronización asíncrona no bloqueante con la tabla sesiones_pruebas_en_vivo de Supabase
+// Mapa en memoria para acelerar consultas concurrentes por worker
+const liveSessions = loadPersistentLiveSessions();
+
+function getSessionKey(seccion_id, semana) {
+  return `${String(seccion_id).trim()}_sem_${Number(semana)}`;
+}
+
+/**
+ * Consulta la sesión en vivo desde Supabase (fuente de verdad compartida entre todos los workers y usuarios).
+ */
+async function fetchSessionFromSupabase(seccion_id, semana) {
+  if (!isSupabaseConfigured || !supabase || !seccion_id) return null;
+  try {
+    const secClean = String(seccion_id).trim();
+    const semNum = Number(semana);
+
+    const { data, error } = await supabase
+      .from("sesiones_pruebas_en_vivo")
+      .select("*")
+      .eq("seccion_id", secClean)
+      .eq("numero_semana", semNum)
+      .maybeSingle();
+
+    if (!error && data) {
+      return {
+        seccion_id: String(data.seccion_id),
+        numero_semana: Number(data.numero_semana),
+        carrera: data.carrera || "Medicina",
+        estado: data.estado || "inactiva",
+        habilitada: Boolean(data.habilitada),
+        pregunta_actual_idx: Number(data.pregunta_actual_idx ?? 0),
+        duracion_segundos: Number(data.duracion_segundos ?? 90),
+        pregunta_inicio_timestamp: data.pregunta_inicio_timestamp ? Number(data.pregunta_inicio_timestamp) : null,
+        alumnos_conectados: typeof data.alumnos_conectados === "object" && data.alumnos_conectados ? data.alumnos_conectados : {},
+        respuestas_globales: typeof data.respuestas_globales === "object" && data.respuestas_globales ? data.respuestas_globales : {},
+        ultima_actualizacion: data.updated_at ? new Date(data.updated_at).getTime() : Date.now()
+      };
+    }
+  } catch (err) {
+    console.warn("Aviso al consultar sesión en vivo de Supabase:", err.message);
+  }
+  return null;
+}
+
+/**
+ * Sincronización atómica con Supabase y respaldo de estado de habilitación en pruebas_semanales
+ */
 async function syncLiveSessionToSupabase(session) {
   if (!isSupabaseConfigured || !supabase || !session?.seccion_id) return;
   try {
+    const secClean = String(session.seccion_id).trim();
+    const semNum = Number(session.numero_semana);
+
     const payload = {
-      seccion_id: session.seccion_id,
-      numero_semana: Number(session.numero_semana),
+      seccion_id: secClean,
+      numero_semana: semNum,
+      carrera: session.carrera || "Medicina",
       estado: session.estado || "inactiva",
       habilitada: Boolean(session.habilitada),
       pregunta_actual_idx: session.pregunta_actual_idx ?? 0,
@@ -63,46 +113,90 @@ async function syncLiveSessionToSupabase(session) {
       updated_at: new Date().toISOString()
     };
 
-    await supabase
+    // 1. Guardar en la tabla de sesiones en tiempo real
+    const { error: liveErr } = await supabase
       .from("sesiones_pruebas_en_vivo")
       .upsert(payload, { onConflict: "seccion_id,numero_semana" });
+
+    if (liveErr) {
+      console.warn("Aviso al sincronizar sesión en vivo con Supabase:", liveErr.message);
+    }
+
+    // 2. Mantener sincronizado el flag habilitada_en_vivo en pruebas_semanales
+    try {
+      await supabase
+        .from("pruebas_semanales")
+        .update({
+          habilitada_en_vivo: Boolean(session.habilitada),
+          control_en_vivo: true,
+          updated_at: new Date().toISOString()
+        })
+        .eq("seccion_id", secClean)
+        .eq("numero_semana", semNum);
+    } catch (_) {}
   } catch (err) {
-    // Si la tabla aún no se ha creado en Supabase, el sistema continúa funcionando con JSON sin interrumpir la prueba
-    console.warn("Aviso al sincronizar sesión en vivo con Supabase:", err.message);
+    console.warn("Aviso al ejecutar syncLiveSessionToSupabase:", err.message);
   }
 }
 
-// Mapa en memoria de sesiones en vivo: clave `${seccion_id}_sem_${semana}`
-const liveSessions = loadPersistentLiveSessions();
-
-function getSessionKey(seccion_id, semana) {
-  return `${String(seccion_id).trim()}_sem_${Number(semana)}`;
-}
-
-function getOrCreateSession(seccion_id, semana) {
+/**
+ * Obtiene la sesión en vivo combinando Supabase (fuente de verdad) y la memoria local.
+ */
+async function getOrCreateSession(seccion_id, semana) {
   const key = getSessionKey(seccion_id, semana);
-  if (!liveSessions[key]) {
-    liveSessions[key] = {
-      seccion_id: String(seccion_id),
-      numero_semana: Number(semana),
-      estado: "inactiva", // 'inactiva' | 'lobby' | 'en_pregunta' | 'esperando_siguiente' | 'finalizada'
-      habilitada: false,
-      pregunta_actual_idx: 0, // 0 = Pregunta 1
-      pregunta_inicio_timestamp: null,
-      duracion_segundos: 90, // Por defecto 1:30 min = 90 segundos
-      alumnos_conectados: {}, // { [numero_cuenta]: { nombre, ultimo_ping, pregunta_actual, respuestas_count } }
-      respuestas_globales: {}, // { [numero_cuenta]: { [pregunta_id]: { ... } } }
-      ultima_actualizacion: Date.now()
+  const memSession = liveSessions[key];
+
+  // 1. Siempre verificar estado maestro en Supabase
+  const sbSession = await fetchSessionFromSupabase(seccion_id, semana);
+
+  if (sbSession) {
+    // Si tenemos datos en memoria con pings de alumnos, fusionarlos para no perder latidos recientes
+    const mergedConnected = {
+      ...(sbSession.alumnos_conectados || {}),
+      ...(memSession?.alumnos_conectados || {})
     };
+    const mergedAnswers = {
+      ...(sbSession.respuestas_globales || {}),
+      ...(memSession?.respuestas_globales || {})
+    };
+
+    liveSessions[key] = {
+      ...sbSession,
+      alumnos_conectados: mergedConnected,
+      respuestas_globales: mergedAnswers
+    };
+    return liveSessions[key];
   }
-  return liveSessions[key];
+
+  // 2. Si no existe en Supabase pero existe en memoria local
+  if (memSession) {
+    return memSession;
+  }
+
+  // 3. Crear sesión inicial por defecto
+  const defaultSession = {
+    seccion_id: String(seccion_id).trim(),
+    numero_semana: Number(semana),
+    carrera: "Medicina",
+    estado: "inactiva",
+    habilitada: false,
+    pregunta_actual_idx: 0,
+    pregunta_inicio_timestamp: null,
+    duracion_segundos: 90,
+    alumnos_conectados: {},
+    respuestas_globales: {},
+    ultima_actualizacion: Date.now()
+  };
+
+  liveSessions[key] = defaultSession;
+  return defaultSession;
 }
 
 // 1. Obtener estado sincronizado de la sesión en vivo
 export const getLiveQuizState = async (req, res) => {
   try {
     const { seccion_id, semana } = req.params;
-    const session = getOrCreateSession(seccion_id, semana);
+    const session = await getOrCreateSession(seccion_id, semana);
     const now = Date.now();
 
     // Verificación automática de expiración de tiempo si está en pregunta
@@ -118,6 +212,7 @@ export const getLiveQuizState = async (req, res) => {
         session.estado = "esperando_siguiente";
         session.ultima_actualizacion = now;
         savePersistentLiveSessions(liveSessions);
+        await syncLiveSessionToSupabase(session);
       }
     }
 
@@ -142,13 +237,15 @@ export const getLiveQuizState = async (req, res) => {
 export const controlLiveQuiz = async (req, res) => {
   try {
     const { seccion_id, semana } = req.params;
-    const { accion, duracion_segundos, pregunta_idx } = req.body;
-    const session = getOrCreateSession(seccion_id, semana);
+    const { accion, duracion_segundos, pregunta_idx, carrera } = req.body;
+    const session = await getOrCreateSession(seccion_id, semana);
     const now = Date.now();
+
+    if (carrera) session.carrera = carrera;
 
     switch (accion) {
       case "habilitar": {
-        // Pasa de inactiva a lobby (los alumnos pueden entrar a ver los Datos Generales)
+        // Pasa a lobby (los alumnos ven la alerta roja y pueden ingresar a la prueba)
         session.habilitada = true;
         session.estado = "lobby";
         session.pregunta_actual_idx = 0;
@@ -199,6 +296,7 @@ export const controlLiveQuiz = async (req, res) => {
       case "finalizar": {
         // Finaliza la prueba para toda la sección
         session.estado = "finalizada";
+        session.habilitada = false;
         session.ultima_actualizacion = now;
         break;
       }
@@ -220,10 +318,12 @@ export const controlLiveQuiz = async (req, res) => {
         return res.status(400).json({ success: false, message: `Acción desconocida: ${accion}` });
     }
 
+    const key = getSessionKey(seccion_id, semana);
+    liveSessions[key] = session;
     savePersistentLiveSessions(liveSessions);
-    syncLiveSessionToSupabase(session).catch((err) => {
-      console.warn("Aviso en syncLiveSessionToSupabase:", err.message);
-    });
+
+    // Esperar explícitamente a que Supabase confirme para garantizar consistencia entre instancias
+    await syncLiveSessionToSupabase(session);
 
     const elapsed = session.pregunta_inicio_timestamp ? Math.floor((now - session.pregunta_inicio_timestamp) / 1000) : 0;
     const remaining = Math.max(0, session.duracion_segundos - elapsed);
@@ -244,7 +344,7 @@ export const controlLiveQuiz = async (req, res) => {
   }
 };
 
-// 3. Latido (Heartbeat) de los estudiantes durante la prueba en vivo
+// 3. Latido (Heartbeat) de los estudiantes durante la prueba o en el lobby
 export const heartbeatLiveQuiz = async (req, res) => {
   try {
     const { seccion_id, semana } = req.params;
@@ -254,24 +354,32 @@ export const heartbeatLiveQuiz = async (req, res) => {
       return res.status(400).json({ success: false, message: "Se requiere numero_cuenta" });
     }
 
-    const session = getOrCreateSession(seccion_id, semana);
+    const cleanAccount = String(numero_cuenta).trim();
+    const session = await getOrCreateSession(seccion_id, semana);
     const now = Date.now();
 
+    if (!session.alumnos_conectados) {
+      session.alumnos_conectados = {};
+    }
+
     // Actualizar registro del estudiante conectado
-    session.alumnos_conectados[numero_cuenta] = {
-      nombre_completo: nombre_completo || session.alumnos_conectados[numero_cuenta]?.nombre_completo || "Estudiante",
+    session.alumnos_conectados[cleanAccount] = {
+      nombre_completo: nombre_completo || session.alumnos_conectados[cleanAccount]?.nombre_completo || "Estudiante",
       ultimo_ping: now,
-      pregunta_vista: typeof pregunta_vista === "number" ? pregunta_vista : session.pregunta_actual_idx,
-      ip: req.headers["x-forwarded-for"] || req.socket.remoteAddress || "127.0.0.1"
+      pregunta_vista: typeof pregunta_vista === "number" ? pregunta_vista : -1,
+      ip: req.headers["x-forwarded-for"] || req.socket?.remoteAddress || "127.0.0.1"
     };
 
     // Respaldar respuestas parciales si se enviaron
     if (respuestas_parciales && typeof respuestas_parciales === "object") {
-      if (!session.respuestas_globales[numero_cuenta]) {
-        session.respuestas_globales[numero_cuenta] = {};
+      if (!session.respuestas_globales) {
+        session.respuestas_globales = {};
       }
-      session.respuestas_globales[numero_cuenta] = {
-        ...session.respuestas_globales[numero_cuenta],
+      if (!session.respuestas_globales[cleanAccount]) {
+        session.respuestas_globales[cleanAccount] = {};
+      }
+      session.respuestas_globales[cleanAccount] = {
+        ...session.respuestas_globales[cleanAccount],
         ...respuestas_parciales
       };
     }
@@ -289,6 +397,12 @@ export const heartbeatLiveQuiz = async (req, res) => {
         session.ultima_actualizacion = now;
       }
     }
+
+    const key = getSessionKey(seccion_id, semana);
+    liveSessions[key] = session;
+
+    // Persistir el latido en Supabase de forma rápida para que el monitor del docente lo refleje de inmediato
+    await syncLiveSessionToSupabase(session);
 
     return res.json({
       success: true,

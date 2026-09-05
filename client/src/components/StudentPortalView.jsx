@@ -297,6 +297,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
   }, [effectiveStudent, carreraKey]);
 
   // Cargar pruebas semanales de la sección (publicadas o habilitadas en vivo)
+  // Cargar pruebas semanales de la sección (publicadas o habilitadas en vivo)
   const loadStudentQuizzes = useCallback(async () => {
     let secId = effectiveStudent?.seccion_id || effectiveStudent?.seccion?.id;
     if (!secId) {
@@ -326,15 +327,24 @@ export default function StudentPortalView({ student, notify = () => {} }) {
         const publishedOrLive = res.data.filter((q) => {
           const s = liveMap[q.numero_semana];
           const isLiveActive = Boolean(
-            s &&
-              (s.habilitada || s.estado === "lobby" || s.estado === "en_pregunta" || s.estado === "esperando_siguiente") &&
-              s.estado !== "finalizada" &&
-              s.estado !== "inactiva"
+            (s && (s.habilitada || s.estado === "lobby" || s.estado === "en_pregunta" || s.estado === "esperando_siguiente") && s.estado !== "finalizada" && s.estado !== "inactiva") ||
+            (q.habilitada_en_vivo === true && (!s || s.estado !== "finalizada"))
           );
           return q.publicada === true || String(q.publicada) === "true" || q.estado === "publicada" || isLiveActive;
         });
 
         setOnlineQuizzes(publishedOrLive);
+
+        // Enviar latido de presencia para registrar al alumno como conectado ante el docente
+        if (cuentaKey && res.data.length > 0) {
+          res.data.forEach((q) => {
+            api.pruebas.sendLiveHeartbeat(secId, q.numero_semana, {
+              numero_cuenta: cuentaKey,
+              nombre_completo: effectiveStudent?.nombre_completo || "Estudiante",
+              pregunta_vista: -1
+            }).catch(() => {});
+          });
+        }
 
         // Cargar las entregas de este estudiante
         const subsMap = {};
@@ -369,7 +379,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
     }
   }, [activeTab, loadStudentQuizzes]);
 
-  // Sondeo continuo cada 2.5s en toda la plataforma para detectar pruebas en vivo habilitadas por el docente
+  // Sondeo continuo cada 2s en toda la plataforma para detectar pruebas en vivo habilitadas y enviar latido
   useEffect(() => {
     if (activeQuizToTake) return; // Si ya está rindiendo la prueba, la sincronización se hace por heartbeat
 
@@ -399,38 +409,46 @@ export default function StudentPortalView({ student, notify = () => {} }) {
           const publishedOrLive = res.data.filter((q) => {
             const s = liveMap[q.numero_semana];
             const isLiveActive = Boolean(
-              s &&
-                (s.habilitada || s.estado === "lobby" || s.estado === "en_pregunta" || s.estado === "esperando_siguiente") &&
-                s.estado !== "finalizada" &&
-                s.estado !== "inactiva"
+              (s && (s.habilitada || s.estado === "lobby" || s.estado === "en_pregunta" || s.estado === "esperando_siguiente") && s.estado !== "finalizada" && s.estado !== "inactiva") ||
+              (q.habilitada_en_vivo === true && (!s || s.estado !== "finalizada"))
             );
             return q.publicada === true || String(q.publicada) === "true" || q.estado === "publicada" || isLiveActive;
           });
 
-          if (publishedOrLive.length > 0) {
-            setOnlineQuizzes(publishedOrLive);
+          setOnlineQuizzes(publishedOrLive);
+
+          // Enviar latido de presencia cada ciclo para que el docente vea al alumno activo en tiempo real
+          if (cuentaKey && res.data.length > 0) {
+            res.data.forEach((q) => {
+              const s = liveMap[q.numero_semana];
+              if (s?.habilitada || s?.estado === "lobby" || s?.estado === "en_pregunta" || q.habilitada_en_vivo || q.publicada) {
+                api.pruebas.sendLiveHeartbeat(secId, q.numero_semana, {
+                  numero_cuenta: cuentaKey,
+                  nombre_completo: effectiveStudent?.nombre_completo || "Estudiante",
+                  pregunta_vista: -1
+                }).catch(() => {});
+              }
+            });
           }
         }
       } catch (_) {}
     };
 
     pollLiveCatalog();
-    const interval = setInterval(pollLiveCatalog, 2500);
+    const interval = setInterval(pollLiveCatalog, 2000);
     return () => clearInterval(interval);
-  }, [activeQuizToTake, effectiveStudent, resolveStudentSectionId]);
+  }, [activeQuizToTake, effectiveStudent, resolveStudentSectionId, cuentaKey]);
 
   // Identificar si existe alguna prueba con sesión en vivo habilitada por el docente pendiente de realizar
   const anyLiveQuiz = useMemo(() => {
     return (onlineQuizzes || []).find((q) => {
       const s = liveSessionsMap[q.numero_semana];
       const isSubmitted = Boolean(existingSubmissions[q.numero_semana]);
-      return Boolean(
-        s &&
-          (s.habilitada || s.estado === "lobby" || s.estado === "en_pregunta" || s.estado === "esperando_siguiente") &&
-          s.estado !== "finalizada" &&
-          s.estado !== "inactiva" &&
-          !isSubmitted
+      const isLiveActive = Boolean(
+        (s && (s.habilitada || s.estado === "lobby" || s.estado === "en_pregunta" || s.estado === "esperando_siguiente") && s.estado !== "finalizada" && s.estado !== "inactiva") ||
+        (q.habilitada_en_vivo === true && (!s || s.estado !== "finalizada"))
       );
+      return isLiveActive && !isSubmitted;
     });
   }, [onlineQuizzes, liveSessionsMap, existingSubmissions]);
 
