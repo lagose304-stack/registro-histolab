@@ -5,14 +5,24 @@ import crypto from "node:crypto";
 import { supabase, isSupabaseConfigured } from "../db/supabase.js";
 import { updateEstudianteGradeDirect } from "./estudiantes.controller.js";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const __dirname = (() => {
+  try {
+    if (typeof import.meta !== "undefined" && typeof import.meta.url === "string" && import.meta.url.startsWith("file:")) {
+      return path.dirname(fileURLToPath(import.meta.url));
+    }
+  } catch {}
+  return (typeof process !== "undefined" && process.cwd) ? process.cwd() : "/";
+})();
 const DATA_DIR = path.join(__dirname, "../../data");
 const DATA_FILE = path.join(DATA_DIR, "pruebas_data.json");
 
 function ensureDataDir() {
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
+  try {
+    if (typeof fs.existsSync === "function" && !fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+  } catch (err) {
+    // Ignorar errores de sistema de archivos en entornos serverless/Cloudflare Workers
   }
 }
 
