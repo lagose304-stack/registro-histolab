@@ -13,6 +13,7 @@
     "dev:client": "npm run dev --prefix client",
     "install:all": "npm install && npm install --prefix server && npm install --prefix client",
     "build": "npm run build --prefix client",
+    "deploy": "npm run build && wrangler deploy",
     "start": "npm start --prefix server"
   },
   "devDependencies": {
