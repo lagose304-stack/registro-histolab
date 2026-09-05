@@ -192,6 +192,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
   const autoSubmitTriggeredRef = React.useRef(false);
   const isConfirmingRef = React.useRef(false);
   const isSubmittingRef = React.useRef(false);
+  const focusLossRecordRef = React.useRef({ lostAt: null, reason: null });
 
   // Sincronizar si cambia el prop student desde el padre
   useEffect(() => {
@@ -1194,78 +1195,142 @@ export default function StudentPortalView({ student, notify = () => {} }) {
     return () => clearInterval(interval);
   }, [activeQuizToTake, isExamSealedOffline]);
 
-  // Listeners del navegador para control antitrampas estricto en móvil y escritorio
+  // Listeners del navegador para control antitrampas estricto en móvil y escritorio (Tecnología DRM Streaming)
   useEffect(() => {
     if (!activeQuizToTake || isExamSealedOffline) return;
 
-    // A. Salida de app en celular / cambio de pestaña en navegador
+    // Helper sincrónico de apagón inmediato a nivel DOM nativo (0ms)
+    const activateDrmBlackout = () => {
+      setIsScreenBlackedOut(true);
+      if (typeof document !== "undefined") {
+        if (document.body) {
+          document.body.classList.add("anticheat-blackout-on");
+        }
+        const rawCurtain = document.getElementById("anti-cheat-blackout-curtain");
+        if (rawCurtain) rawCurtain.style.display = "flex";
+      }
+    };
+
+    const deactivateDrmBlackout = () => {
+      setIsScreenBlackedOut(false);
+      if (typeof document !== "undefined") {
+        if (document.body) {
+          document.body.classList.remove("anticheat-blackout-on");
+        }
+        const rawCurtain = document.getElementById("anti-cheat-blackout-curtain");
+        if (rawCurtain) rawCurtain.style.display = "none";
+      }
+    };
+
+    // A. Sensores táctiles para barra de notificaciones y Control Center en móviles (Android & iPhone)
+    const handleTouchStart = (e) => {
+      if (isSubmittingRef.current || isConfirmingRef.current) return;
+      const touch = e.touches?.[0];
+      // Si el toque inicia en los primeros 36px del borde superior (zona exclusiva de barra de notificaciones)
+      if (touch && (touch.clientY <= 36 || touch.screenY <= 60)) {
+        activateDrmBlackout();
+        registerViolation(
+          "barra_notificaciones_o_salida",
+          "Gesto detectado en el borde superior (despliegue de barra de notificaciones o Centro de Control)",
+          1
+        );
+        if (navigator.vibrate) navigator.vibrate([300, 100, 300]);
+      }
+    };
+
+    const handleTouchMove = (e) => {
+      if (isSubmittingRef.current || isConfirmingRef.current) return;
+      const touch = e.touches?.[0];
+      if (touch && touch.clientY <= 55 && e.movementY > 0) {
+        activateDrmBlackout();
+        registerViolation(
+          "barra_notificaciones_o_salida",
+          "Desplazamiento hacia abajo desde la barra de estado superior",
+          1
+        );
+      }
+    };
+
+    const handleTouchCancel = () => {
+      if (isSubmittingRef.current || isConfirmingRef.current) return;
+      // El OS (Android/iOS) interrumpió el toque para desplegar notificaciones, llamada o menú flotante
+      activateDrmBlackout();
+      registerViolation(
+        "barra_notificaciones_o_salida",
+        "Interrupción del sistema operativo en pantalla (despliegue de notificaciones o menú del sistema)",
+        1
+      );
+    };
+
+    // B. Pérdida de foco, cambio de app y minimización (unificado con focusLossRecordRef)
     const handleVisibilityChange = () => {
       if (isSubmittingRef.current || isConfirmingRef.current) {
-        outStartTimeRef.current = null;
+        focusLossRecordRef.current = { lostAt: null, reason: null };
         return;
       }
       if (document.hidden) {
-        if (!outStartTimeRef.current) {
-          outStartTimeRef.current = Date.now();
-        }
-        setIsScreenBlackedOut(true);
-        if (typeof document !== "undefined" && document.body) {
-          document.body.classList.add("anticheat-blackout-on");
+        activateDrmBlackout();
+        if (!focusLossRecordRef.current.lostAt) {
+          focusLossRecordRef.current = { lostAt: Date.now(), reason: "salida_de_pantalla" };
         }
       } else {
-        setIsScreenBlackedOut(false);
-        if (typeof document !== "undefined" && document.body) {
-          document.body.classList.remove("anticheat-blackout-on");
-        }
-        if (outStartTimeRef.current) {
-          const elapsed = Math.max(1, Math.round((Date.now() - outStartTimeRef.current) / 1000));
+        deactivateDrmBlackout();
+        if (focusLossRecordRef.current.lostAt) {
+          const elapsed = Math.max(1, Math.round((Date.now() - focusLossRecordRef.current.lostAt) / 1000));
+          const reason = focusLossRecordRef.current.reason || "salida_de_pantalla";
+          focusLossRecordRef.current = { lostAt: null, reason: null };
           totalTimeOutRef.current += elapsed;
-          outStartTimeRef.current = null;
-          registerViolation("salida_de_pantalla", "Cambio de aplicación o pestaña en el dispositivo", elapsed);
+          registerViolation(
+            reason === "barra_notificaciones" ? "barra_notificaciones_o_salida" : "salida_de_pantalla",
+            `Salida de la evaluación / cambio de aplicación durante ${elapsed} seg`,
+            elapsed
+          );
         }
       }
     };
 
-    // B. Pérdida de foco (despliegue de barra de notificaciones en Android, Control Center en iOS, capturas)
     const handleBlur = () => {
       if (isSubmittingRef.current || isConfirmingRef.current) {
-        outStartTimeRef.current = null;
+        focusLossRecordRef.current = { lostAt: null, reason: null };
         return;
       }
-      if (!outStartTimeRef.current) {
-        outStartTimeRef.current = Date.now();
-      }
-      // Ocultar pantalla de inmediato en negro absoluto para que cualquier captura o vista previa salga 100% negra
-      setIsScreenBlackedOut(true);
-      if (typeof document !== "undefined" && document.body) {
-        document.body.classList.add("anticheat-blackout-on");
+      activateDrmBlackout();
+      if (!focusLossRecordRef.current.lostAt) {
+        focusLossRecordRef.current = { lostAt: Date.now(), reason: "barra_notificaciones" };
       }
     };
 
     const handleFocus = () => {
       if (isSubmittingRef.current || isConfirmingRef.current) {
-        outStartTimeRef.current = null;
+        focusLossRecordRef.current = { lostAt: null, reason: null };
+        deactivateDrmBlackout();
         return;
       }
-      setIsScreenBlackedOut(false);
-      if (typeof document !== "undefined" && document.body) {
-        document.body.classList.remove("anticheat-blackout-on");
-      }
-      if (outStartTimeRef.current) {
-        const elapsed = Math.max(1, Math.round((Date.now() - outStartTimeRef.current) / 1000));
+      deactivateDrmBlackout();
+      if (focusLossRecordRef.current.lostAt) {
+        const elapsed = Math.max(1, Math.round((Date.now() - focusLossRecordRef.current.lostAt) / 1000));
+        const reason = focusLossRecordRef.current.reason || "barra_notificaciones";
+        focusLossRecordRef.current = { lostAt: null, reason: null };
         totalTimeOutRef.current += elapsed;
-        outStartTimeRef.current = null;
-        registerViolation("barra_notificaciones_o_salida", "Despliegue de barra de notificaciones, centro de control o pérdida de foco", elapsed);
+        registerViolation(
+          "barra_notificaciones_o_salida",
+          `Despliegue de barra de notificaciones, Centro de Control o pérdida de foco durante ${elapsed} seg`,
+          elapsed
+        );
       }
     };
 
-    // C. Detección de pantalla dividida (Split-Screen en Android / iPad) ignorando cuando el teclado virtual esté abierto
+    const handlePageHide = () => {
+      handleBlur();
+    };
+
+    // C. Detección de pantalla dividida (Split-Screen en Android / iPad)
     const handleResize = () => {
       const isInputActive = Boolean(
         document.activeElement &&
         (document.activeElement.tagName === "INPUT" || document.activeElement.tagName === "TEXTAREA")
       );
-      if (isInputActive) return; // Teclado móvil abierto, no es pantalla dividida
+      if (isInputActive) return; // Teclado móvil abierto
 
       const isSplit = window.innerHeight < window.screen.height * 0.48;
       setIsSplitScreenDetected(isSplit);
@@ -1280,17 +1345,24 @@ export default function StudentPortalView({ student, notify = () => {} }) {
       setIsFullscreenActive(isFs);
     };
 
-    // E. Detección directa de capturas de pantalla por teclado y bloqueo de atajos de desarrollo
+    // E. Detección de atajos de captura de pantalla y recorte (PrintScreen, Win+Shift+S, Cmd+Shift+3/4/5)
     const handleKeyDown = (e) => {
-      const isPrintScreen = e.key === "PrintScreen" || e.key === "Snapshot";
-      const isMacScreenshot = (e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === "3" || e.key === "4" || e.key === "5");
+      const isPrintScreen = e.key === "PrintScreen" || e.key === "Snapshot" || e.keyCode === 44;
+      const isMacScreenshot = (e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === "3" || e.key === "4" || e.key === "5" || e.code === "Digit3" || e.code === "Digit4" || e.code === "Digit5");
+      const isWinSnipping = (e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === "s" || e.key === "S" || e.code === "KeyS");
 
-      if (isPrintScreen || isMacScreenshot) {
+      if (isPrintScreen || isMacScreenshot || isWinSnipping) {
         e.preventDefault();
-        setIsScreenBlackedOut(true);
-        registerViolation("captura_de_pantalla", "Intento de captura de pantalla detectado", 0);
+        activateDrmBlackout();
+        try {
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText("");
+          }
+        } catch (_) {}
+        registerViolation("captura_de_pantalla", "Intento de captura de pantalla o grabación detectado", 0);
+        if (navigator.vibrate) navigator.vibrate([350, 100, 350]);
         setTimeout(() => {
-          setIsScreenBlackedOut(false);
+          deactivateDrmBlackout();
         }, 2500);
         return;
       }
@@ -1305,7 +1377,17 @@ export default function StudentPortalView({ student, notify = () => {} }) {
       }
     };
 
-    // F. Menú contextual
+    // F. Bloqueo de copia y menú contextual
+    const handleCopy = (e) => {
+      e.preventDefault();
+      try {
+        if (e.clipboardData) e.clipboardData.setData("text/plain", "");
+      } catch (_) {}
+      activateDrmBlackout();
+      registerViolation("captura_de_pantalla", "Acción de copiado o captura de contenido bloqueada", 0);
+      setTimeout(() => deactivateDrmBlackout(), 2000);
+    };
+
     const handleContextMenu = (e) => {
       e.preventDefault();
     };
@@ -1313,23 +1395,35 @@ export default function StudentPortalView({ student, notify = () => {} }) {
     document.addEventListener("visibilitychange", handleVisibilityChange);
     window.addEventListener("blur", handleBlur);
     window.addEventListener("focus", handleFocus);
+    window.addEventListener("pagehide", handlePageHide);
     window.addEventListener("resize", handleResize);
     document.addEventListener("fullscreenchange", handleFullscreenChange);
     document.addEventListener("webkitfullscreenchange", handleFullscreenChange);
     window.addEventListener("keydown", handleKeyDown);
     window.addEventListener("contextmenu", handleContextMenu);
+    document.addEventListener("copy", handleCopy);
+
+    // Eventos táctiles móviles para borde superior y cancelación por el OS
+    window.addEventListener("touchstart", handleTouchStart, { passive: true });
+    window.addEventListener("touchmove", handleTouchMove, { passive: true });
+    window.addEventListener("touchcancel", handleTouchCancel, { passive: true });
 
     return () => {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       window.removeEventListener("blur", handleBlur);
       window.removeEventListener("focus", handleFocus);
+      window.removeEventListener("pagehide", handlePageHide);
       window.removeEventListener("resize", handleResize);
       document.removeEventListener("fullscreenchange", handleFullscreenChange);
       document.removeEventListener("webkitfullscreenchange", handleFullscreenChange);
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("contextmenu", handleContextMenu);
+      document.removeEventListener("copy", handleCopy);
+      window.removeEventListener("touchstart", handleTouchStart);
+      window.removeEventListener("touchmove", handleTouchMove);
+      window.removeEventListener("touchcancel", handleTouchCancel);
     };
-  }, [activeQuizToTake, isExamSealedOffline, registerViolation, violationModal]);
+  }, [activeQuizToTake, isExamSealedOffline, registerViolation, violationModal, notify]);
 
   // G. Auto-desplazamiento inteligente para cuando el teclado virtual de celular se abre
   useEffect(() => {
@@ -1873,12 +1967,38 @@ export default function StudentPortalView({ student, notify = () => {} }) {
             margin-top: 40vh !important;
           }
         }
-        /* Blackout total cuando la ventana pierde el foco */
+        /* Sistema DRM de Protección Anti-Capturas y Blackout Inmediato */
+        body.anticheat-blackout-on {
+          background: #000000 !important;
+          overflow: hidden !important;
+        }
         body.anticheat-blackout-on #root {
+          opacity: 0 !important;
+          visibility: hidden !important;
           filter: brightness(0) !important;
           background: #000000 !important;
           user-select: none !important;
           -webkit-user-select: none !important;
+          pointer-events: none !important;
+        }
+        #anti-cheat-blackout-curtain {
+          display: none;
+          position: fixed;
+          inset: 0;
+          width: 100vw;
+          height: 100vh;
+          z-index: 9999990;
+          background: #000000 !important;
+          color: #ffffff;
+          align-items: center;
+          justify-content: center;
+          flex-direction: column;
+          gap: 1rem;
+          pointer-events: all;
+        }
+        body.anticheat-blackout-on #anti-cheat-blackout-curtain {
+          display: flex !important;
+          opacity: 1 !important;
         }
 
         /* Grids de Contenido */
@@ -4295,22 +4415,35 @@ export default function StudentPortalView({ student, notify = () => {} }) {
         )}
 
 
-        {/* TELÓN NEGRO ANTI-CAPTURAS Y CONTROL CENTER/NOTIFICACIONES */}
-        {isScreenBlackedOut && (
-          <div
-            id="anti-cheat-blackout-curtain"
-            style={{
-              position: "fixed",
-              top: 0,
-              left: 0,
-              width: "100vw",
-              height: "100vh",
-              zIndex: 99999999,
-              background: "#000000",
-              pointerEvents: "all"
-            }}
-          />
-        )}
+        {/* TELÓN NEGRO ANTI-CAPTURAS Y CONTROL CENTER/NOTIFICACIONES (DRM STREAMING PROTECTION) */}
+        <div
+          id="anti-cheat-blackout-curtain"
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            width: "100vw",
+            height: "100vh",
+            zIndex: 9999990,
+            background: "#000000",
+            color: "#ffffff",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: "1rem",
+            pointerEvents: "all"
+          }}
+        >
+          <ShieldAlert size={48} color="#ef4444" />
+          <div style={{ textAlign: "center", padding: "0 1.5rem" }}>
+            <div style={{ fontSize: "1.15rem", fontWeight: 900, color: "#ffffff", letterSpacing: "0.5px" }}>
+              PROTECCIÓN DE INTEGRIDAD HISTOLAB
+            </div>
+            <div style={{ fontSize: "0.86rem", color: "#94a3b8", marginTop: "0.35rem" }}>
+              Intento de captura de pantalla o pérdida de foco detectado. Pantalla oscurecida por seguridad.
+            </div>
+          </div>
+        </div>
 
         {/* MODAL DE ADVERTENCIA / INFRACCIÓN DE SEGURIDAD ANTITRAMPAS */}
         {violationModal && (
@@ -4318,7 +4451,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
             style={{
               position: "fixed",
               inset: 0,
-              zIndex: 999999,
+              zIndex: 99999999,
               background: "rgba(15, 23, 42, 0.88)",
               backdropFilter: "blur(10px)",
               WebkitBackdropFilter: "blur(10px)",
