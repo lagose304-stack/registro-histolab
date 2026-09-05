@@ -1083,7 +1083,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
           strike: 3,
           isFinal: true,
           mensaje:
-            "Has alcanzado el límite de 3 advertencias de integridad (salida de app, captura de pantalla o despliegue de barra de notificaciones). Tu examen ha sido bloqueado y enviado automáticamente para revisión docente."
+            "Has alcanzado el límite de 3 advertencias de integridad (salida de app, salida de pantalla completa, captura de pantalla o despliegue de barra de notificaciones). Tu examen ha sido bloqueado y enviado automáticamente para revisión docente."
         });
         setTimeout(() => {
           handleSubmitQuiz({ motivo: "expulsion_infracciones" });
@@ -1097,6 +1097,8 @@ export default function StudentPortalView({ student, notify = () => {} }) {
           mensajePersonalizado = `Se detectó que bajaste la barra de notificaciones, Centro de Control o cambiaste de ventana${segundosFuera > 0 ? ` durante ${segundosFuera} seg` : ""}. La incidencia quedó registrada en tu bitácora de integridad.`;
         } else if (tipo === "pantalla_dividida") {
           mensajePersonalizado = "Se detectó uso de pantalla dividida o ventana flotante en el dispositivo. Esta acción no está permitida durante la evaluación.";
+        } else if (tipo === "salida_pantalla_completa") {
+          mensajePersonalizado = "Se detectó que saliste del modo de pantalla completa durante la evaluación. El examen debe realizarse en pantalla completa en todo momento.";
         } else if (segundosFuera > 0) {
           mensajePersonalizado = `Se detectó salida de la pantalla de la evaluación durante ${segundosFuera} segundos.`;
         }
@@ -1398,10 +1400,26 @@ export default function StudentPortalView({ student, notify = () => {} }) {
       }
     };
 
-    // ─── D. Pantalla completa ───
+    // ─── D. Pantalla completa — salir de fullscreen es infracción ───
     const handleFullscreenChange = () => {
       const isFs = Boolean(document.fullscreenElement || document.webkitFullscreenElement);
       setIsFullscreenActive(isFs);
+      // Si salió de pantalla completa durante la evaluación, registrar infracción
+      if (!isFs && !isSubmittingRef.current && !isConfirmingRef.current && !autoSubmitTriggeredRef.current) {
+        registerViolation(
+          "salida_pantalla_completa",
+          "El estudiante salió del modo de pantalla completa durante la evaluación",
+          0
+        );
+        // Intentar reactivar pantalla completa automáticamente
+        try {
+          if (document.documentElement.requestFullscreen) {
+            document.documentElement.requestFullscreen().catch(() => {});
+          } else if (document.documentElement.webkitRequestFullscreen) {
+            document.documentElement.webkitRequestFullscreen().catch(() => {});
+          }
+        } catch (_) {}
+      }
     };
 
     // ─── E. Atajos de teclado para capturas (desktop) ───
