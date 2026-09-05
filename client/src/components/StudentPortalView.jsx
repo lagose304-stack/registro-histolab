@@ -1658,158 +1658,270 @@ export default function StudentPortalView({ student, notify = () => {} }) {
           box-shadow: 0 2px 8px rgba(0, 0, 0, 0.02);
         }
 
-        /* AJUSTES RESPONSIVOS PARA MÓVIL (< 768px) */
+        /* AJUSTES RESPONSIVOS PARA MÓVIL (< 768px): COMPACTO, PROPORCIONAL Y ESTILO ESCRITORIO */
         @media (max-width: 768px) {
           .sp-portal-container {
-            gap: 0.85rem !important;
+            gap: 0.65rem !important;
           }
 
+          /* Alerta de prueba en vivo compacta */
           .sp-live-alert {
-            padding: 0.85rem 1rem !important;
-            border-radius: 0.85rem !important;
+            padding: 0.65rem 0.85rem !important;
+            border-radius: 0.75rem !important;
             flex-direction: column !important;
             align-items: stretch !important;
-            gap: 0.75rem !important;
+            gap: 0.5rem !important;
           }
           .sp-live-alert button {
             width: 100% !important;
             justify-content: center !important;
-            padding: 0.75rem !important;
+            padding: 0.55rem !important;
+            font-size: 0.82rem !important;
           }
 
+          /* Banner de Perfil compacto horizontal */
           .sp-profile-banner {
-            padding: 0.95rem 1rem !important;
-            border-radius: 0.85rem !important;
+            padding: 0.65rem 0.8rem !important;
+            border-radius: 0.75rem !important;
           }
           .sp-profile-inner {
-            gap: 0.75rem !important;
-            align-items: flex-start !important;
+            gap: 0.65rem !important;
+            align-items: center !important;
           }
           .sp-profile-avatar {
-            width: 42px !important;
-            height: 42px !important;
-            border-radius: 0.65rem !important;
+            width: 38px !important;
+            height: 38px !important;
+            border-radius: 0.55rem !important;
           }
           .sp-profile-avatar svg {
-            width: 22px !important;
-            height: 22px !important;
-          }
-          .sp-profile-name {
-            font-size: 1.12rem !important;
-            line-height: 1.25 !important;
-          }
-          .sp-profile-tags {
-            gap: 0.3rem !important;
-            margin-top: 0.35rem !important;
-          }
-          .sp-tag-pill {
-            font-size: 0.72rem !important;
-            padding: 0.15rem 0.45rem !important;
-            border-radius: 0.35rem !important;
-          }
-
-          .sp-metrics-grid {
-            grid-template-columns: 1fr !important;
-            gap: 0.65rem !important;
-          }
-          .sp-metric-card {
-            padding: 0.85rem 1rem !important;
-            border-radius: 0.85rem !important;
-            gap: 0.75rem !important;
-          }
-          .sp-metric-icon {
-            width: 40px !important;
-            height: 40px !important;
-            border-radius: 0.65rem !important;
-          }
-          .sp-metric-icon svg {
             width: 20px !important;
             height: 20px !important;
           }
-          .sp-metric-val {
-            font-size: 1.3rem !important;
+          .sp-profile-name {
+            font-size: 0.98rem !important;
+            line-height: 1.2 !important;
+          }
+          .sp-profile-tags {
+            gap: 0.25rem !important;
+            margin-top: 0.2rem !important;
+          }
+          .sp-tag-pill {
+            font-size: 0.66rem !important;
+            padding: 0.12rem 0.38rem !important;
+            border-radius: 0.35rem !important;
           }
 
-          /* Barra de Navegación Segmentada Estilo App Nativa en Móvil */
-          .sp-tabs-nav {
-            border-bottom: none !important;
-            padding: 0.3rem !important;
-            background: #f1f5f9 !important;
-            border-radius: 0.85rem !important;
-            border: 1px solid #e2e8f0 !important;
-            display: flex !important;
-            flex-wrap: nowrap !important;
-            overflow-x: auto !important;
-            -webkit-overflow-scrolling: touch !important;
-            scrollbar-width: none !important;
-            gap: 0.3rem !important;
+          /* 3 Métricas en fila horizontal proporcional, igual que en pantalla grande */
+          .sp-metrics-grid {
+            grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+            gap: 0.35rem !important;
           }
-          .sp-tabs-nav::-webkit-scrollbar {
-            display: none !important;
+          .sp-metric-card {
+            padding: 0.5rem 0.35rem !important;
+            border-radius: 0.65rem !important;
+            flex-direction: column !important;
+            align-items: center !important;
+            text-align: center !important;
+            gap: 0.25rem !important;
+          }
+          .sp-metric-card > div:first-child {
+            display: flex !important;
+            justify-content: center !important;
+          }
+          .sp-metric-icon {
+            width: 28px !important;
+            height: 28px !important;
+            border-radius: 0.45rem !important;
+          }
+          .sp-metric-icon svg {
+            width: 14px !important;
+            height: 14px !important;
+          }
+          .sp-metric-card span[style*="uppercase"] {
+            font-size: 0.58rem !important;
+            display: block !important;
+            white-space: nowrap !important;
+            overflow: hidden !important;
+            text-overflow: ellipsis !important;
+          }
+          .sp-metric-val {
+            font-size: 0.98rem !important;
+            line-height: 1.1 !important;
+          }
+          .sp-metric-val span {
+            font-size: 0.62rem !important;
+          }
+          .sp-metric-breakdown {
+            font-size: 0.56rem !important;
+            margin-top: 0.15rem !important;
+            line-height: 1.15 !important;
+          }
+          .sp-derecho-title {
+            font-size: 0.82rem !important;
+          }
+          .sp-derecho-badges {
+            gap: 0.18rem !important;
+            margin-top: 0.2rem !important;
+            flex-direction: column !important;
+            align-items: center !important;
+          }
+          .sp-derecho-pill {
+            font-size: 0.55rem !important;
+            padding: 0.08rem 0.25rem !important;
+            white-space: nowrap !important;
+          }
+
+          /* Barra de Navegación Segmentada compacta */
+          .sp-tabs-nav {
+            border-bottom: 1px solid #e2e8f0 !important;
+            padding: 0.2rem !important;
+            background: #f1f5f9 !important;
+            border-radius: 0.65rem !important;
+            display: flex !important;
+            gap: 0.2rem !important;
           }
           .sp-tab-btn {
-            flex: 1 0 auto !important;
+            flex: 1 1 0 !important;
             justify-content: center !important;
-            padding: 0.5rem 0.75rem !important;
-            font-size: 0.78rem !important;
-            border-radius: 0.6rem !important;
+            padding: 0.42rem 0.3rem !important;
+            font-size: 0.72rem !important;
+            border-radius: 0.5rem !important;
             border-bottom: none !important;
             white-space: nowrap !important;
+            gap: 0.25rem !important;
+          }
+          .sp-tab-btn svg {
+            width: 14px !important;
+            height: 14px !important;
           }
           .sp-tab-btn.active {
             background: #ffffff !important;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08) !important;
+            box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08) !important;
           }
           .sp-tab-btn:not(.active) {
             color: #64748b !important;
           }
 
+          /* Paneles de pestañas */
+          .sp-tab-content-container {
+            gap: 0.65rem !important;
+          }
           .sp-card-panel {
-            padding: 0.95rem !important;
-            border-radius: 0.85rem !important;
+            padding: 0.75rem 0.65rem !important;
+            border-radius: 0.75rem !important;
           }
 
-          /* Exámenes en 2 Columnas Limpias en Móvil */
+          /* Exámenes Parciales en 3 columnas proporcionales */
           .sp-exams-grid {
-            grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)) !important;
-            gap: 0.6rem !important;
+            grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+            gap: 0.35rem !important;
           }
           .sp-exam-card {
-            padding: 0.75rem 0.5rem !important;
+            padding: 0.45rem 0.35rem !important;
+            border-radius: 0.55rem !important;
+          }
+          .sp-exam-card span[style*="uppercase"] {
+            font-size: 0.62rem !important;
+          }
+          .sp-exam-card div[style*="fontSize: 1.5rem"],
+          .sp-exam-card div[style*="font-size: 1.5rem"] {
+            font-size: 1.05rem !important;
+          }
+          .sp-exam-card div span {
+            font-size: 0.64rem !important;
           }
 
+          /* Manuales y Pruebas en 2 columnas paralelas, IGUAL QUE EN ESCRITORIO */
           .sp-subscores-grid {
-            grid-template-columns: 1fr !important;
-            gap: 0.85rem !important;
+            grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+            gap: 0.45rem !important;
+          }
+          .sp-subscores-card {
+            padding: 0.55rem 0.45rem !important;
+            border-radius: 0.65rem !important;
+          }
+          .sp-subscores-header {
+            flex-direction: column !important;
+            align-items: flex-start !important;
+            gap: 0.2rem !important;
+            margin-bottom: 0.45rem !important;
+          }
+          .sp-subscores-header h3 {
+            font-size: 0.76rem !important;
+          }
+          .sp-subscores-header svg {
+            width: 14px !important;
+            height: 14px !important;
+          }
+          .sp-subscores-header span {
+            font-size: 0.62rem !important;
+            padding: 0.1rem 0.35rem !important;
+          }
+          .sp-subscore-item {
+            padding: 0.3rem 0.4rem !important;
+            border-radius: 0.4rem !important;
+            font-size: 0.7rem !important;
+          }
+          .sp-subscore-item strong {
+            font-size: 0.8rem !important;
           }
 
-          /* Calendario de Asistencia: Cuadrícula Limpia de 2 Columnas */
+          /* Control de Asistencia en cuadrícula compacta de 3 columnas */
           .sp-asistencia-grid {
-            grid-template-columns: repeat(2, 1fr) !important;
-            gap: 0.5rem !important;
+            grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+            gap: 0.35rem !important;
           }
           .sp-asistencia-item {
-            padding: 0.65rem 0.5rem !important;
-            border-radius: 0.6rem !important;
+            padding: 0.42rem 0.28rem !important;
+            border-radius: 0.5rem !important;
+            gap: 0.2rem !important;
+          }
+          .sp-asistencia-name {
+            font-size: 0.67rem !important;
+            line-height: 1.15 !important;
+          }
+          .sp-asistencia-badge {
+            font-size: 0.67rem !important;
+          }
+          .sp-asistencia-legend {
+            gap: 0.35rem !important;
+            font-size: 0.65rem !important;
+          }
+          .sp-asistencia-banner {
+            padding: 0.55rem 0.75rem !important;
+            margin-bottom: 0.75rem !important;
+            gap: 0.45rem !important;
           }
 
+          /* Módulo de Pruebas Semanales */
           .sp-quizzes-grid {
             grid-template-columns: 1fr !important;
-            gap: 0.85rem !important;
+            gap: 0.65rem !important;
+          }
+          .sp-quiz-card {
+            padding: 0.75rem 0.85rem !important;
+            border-radius: 0.75rem !important;
+            gap: 0.65rem !important;
+          }
+          .sp-quiz-card h4 {
+            font-size: 0.95rem !important;
+          }
+          .sp-quiz-card p {
+            font-size: 0.76rem !important;
           }
 
           /* Interfaz de Examen Activo en Móvil */
           .sp-quiz-take-card {
-            padding: 0.95rem !important;
-            border-radius: 0.85rem !important;
-            gap: 1rem !important;
+            padding: 0.85rem !important;
+            border-radius: 0.75rem !important;
+            gap: 0.85rem !important;
           }
           .sp-quiz-image-container img {
-            max-height: 220px !important;
+            max-height: 200px !important;
           }
           .sp-quiz-input {
-            font-size: 16px !important; /* Previene zoom involuntario en iPhone/Android */
-            padding: 0.7rem 0.85rem !important;
+            font-size: 15px !important;
+            padding: 0.65rem 0.75rem !important;
           }
         }
       `}</style>
@@ -1982,7 +2094,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                           / {maxPuntajeCarrera > 0 ? maxPuntajeCarrera : "—"} pts
                         </span>
                       </div>
-                      <div style={{ fontSize: "0.72rem", color: "#64748b", fontWeight: 600, marginTop: "0.25rem" }}>
+                      <div className="sp-metric-breakdown" style={{ fontSize: "0.72rem", color: "#64748b", fontWeight: 600, marginTop: "0.25rem" }}>
                         Manuales: <strong style={{ color: "#0284c7" }}>{notaOroManuales}</strong> • Pruebas: <strong style={{ color: "#16a34a" }}>{notaOroPruebas}</strong> • Exám: <strong style={{ color: "#7c3aed" }}>{sumaExamenes}</strong>
                       </div>
                     </>
@@ -2019,6 +2131,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                   ) : (
                     <>
                       <div
+                        className="sp-metric-val sp-derecho-title"
                         style={{
                           fontSize: "1.05rem",
                           fontWeight: 900,
@@ -2029,10 +2142,11 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                         {derechoExamenesStatus.titulo}
                       </div>
                       {/* Desglose por examen */}
-                      <div style={{ display: "flex", flexWrap: "wrap", gap: "0.3rem", marginTop: "0.35rem" }}>
+                      <div className="sp-derecho-badges" style={{ display: "flex", flexWrap: "wrap", gap: "0.3rem", marginTop: "0.35rem" }}>
                         {derechoExamenesStatus.exams.map((dex) => (
                           <span
                             key={dex.id}
+                            className="sp-derecho-pill"
                             style={{
                               fontSize: "0.68rem",
                               fontWeight: 800,
@@ -2153,9 +2267,10 @@ export default function StudentPortalView({ student, notify = () => {} }) {
         {/* PESTAÑA A: CALIFICACIONES DETALLADAS                                */}
         {/* =================================================================== */}
         {activeTab === "calificaciones" && (
-          <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
+          <div className="sp-tab-content-container" style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
             {/* 1. Exámenes Parciales */}
             <div
+              className="sp-card-panel"
               style={{
                 background: "#ffffff",
                 borderRadius: "1rem",
@@ -2231,6 +2346,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
             <div className="sp-subscores-grid">
               {/* Manuales de Laboratorio */}
               <div
+                className="sp-card-panel sp-subscores-card"
                 style={{
                   background: "#ffffff",
                   borderRadius: "1rem",
@@ -2239,7 +2355,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                   boxShadow: "0 2px 8px rgba(0, 0, 0, 0.02)"
                 }}
               >
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "0.5rem", marginBottom: "0.85rem" }}>
+                <div className="sp-subscores-header" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "0.5rem", marginBottom: "0.85rem" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
                     <BookOpen size={18} color="#0284c7" />
                     <h3 style={{ fontSize: "0.95rem", fontWeight: 800, color: "#0f172a", margin: 0 }}>
@@ -2275,6 +2391,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                     {manualesList.map((m) => (
                       <div
                         key={m.key}
+                        className="sp-subscore-item"
                         style={{
                           display: "flex",
                           alignItems: "center",
@@ -2296,6 +2413,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
 
               {/* Pruebas Semanales Cortas */}
               <div
+                className="sp-card-panel sp-subscores-card"
                 style={{
                   background: "#ffffff",
                   borderRadius: "1rem",
@@ -2304,7 +2422,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                   boxShadow: "0 2px 8px rgba(0, 0, 0, 0.02)"
                 }}
               >
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "0.5rem", marginBottom: "0.85rem" }}>
+                <div className="sp-subscores-header" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "0.5rem", marginBottom: "0.85rem" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
                     <FileEdit size={18} color="#16a34a" />
                     <h3 style={{ fontSize: "0.95rem", fontWeight: 800, color: "#0f172a", margin: 0 }}>
@@ -2340,6 +2458,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                     {pruebasList.map((p) => (
                       <div
                         key={p.key}
+                        className="sp-subscore-item"
                         style={{
                           display: "flex",
                           alignItems: "center",
@@ -2367,6 +2486,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
         {/* =================================================================== */}
         {activeTab === "asistencia" && (
           <div
+            className="sp-card-panel"
             style={{
               background: "#ffffff",
               borderRadius: "1rem",
@@ -2383,7 +2503,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                 </h3>
               </div>
 
-              <div style={{ display: "flex", gap: "0.75rem", fontSize: "0.76rem", fontWeight: 700 }}>
+              <div className="sp-asistencia-legend" style={{ display: "flex", gap: "0.75rem", fontSize: "0.76rem", fontWeight: 700 }}>
                 <span style={{ color: "#16a34a" }}>✓ Asistió ({attendanceStats.asistenciasCount})</span>
                 <span style={{ color: "#d97706" }}>FJ Falta Justificada ({attendanceStats.faltasJustificadas})</span>
                 <span style={{ color: "#dc2626" }}>FI Falta Injustificada ({attendanceStats.faltasInjustificadas})</span>
@@ -2392,6 +2512,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
 
             {/* Banner de Estado de Derecho por Examen */}
             <div
+              className="sp-asistencia-banner"
               style={{
                 background: derechoExamenesStatus.perdioAlguno ? "#fef2f2" : "#f0fdf4",
                 border: `1.5px solid ${derechoExamenesStatus.perdioAlguno ? "#f87171" : "#86efac"}`,
@@ -2496,10 +2617,10 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                         gap: "0.35rem"
                       }}
                     >
-                      <span style={{ fontSize: "0.78rem", fontWeight: 800, color: "#1e293b", lineHeight: 1.25 }}>
+                      <span className="sp-asistencia-name" style={{ fontSize: "0.78rem", fontWeight: 800, color: "#1e293b", lineHeight: 1.25 }}>
                         {displayName}
                       </span>
-                      <strong style={{ fontSize: "0.82rem", color: textColor, fontWeight: 800 }}>
+                      <strong className="sp-asistencia-badge" style={{ fontSize: "0.82rem", color: textColor, fontWeight: 800 }}>
                         {badgeText}
                       </strong>
                     </div>
