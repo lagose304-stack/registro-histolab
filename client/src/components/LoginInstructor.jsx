@@ -818,7 +818,7 @@ export default function LoginInstructor({
           <form onSubmit={handleInstructorLoginSubmit} style={{ padding: "1rem 1.5rem 1.75rem" }}>
             <div style={{ marginBottom: "1rem" }}>
               <h2 style={{ fontSize: "1.05rem", fontWeight: 800, color: "#0f172a", margin: "0 0 0.2rem 0" }}>
-                Acceso Docente e Instructores
+                Acceso de los Instructores
               </h2>
               <span style={{ fontSize: "0.76rem", color: "#64748b" }}>
                 Ingresa con tu correo institucional y contraseña docente.
