@@ -1035,13 +1035,13 @@ export default function StudentPortalView({ student, notify = () => {} }) {
     (tipo, detalle, segundosFuera = 0) => {
       if (!activeQuizToTake || autoSubmitTriggeredRef.current || isExamSealedOffline || isSubmittingRef.current || isConfirmingRef.current) return;
 
-      // Antirrebote para evitar múltiples advertencias simultáneas por el mismo evento
+      // Antirrebote ampliado para evitar múltiples advertencias simultáneas por el mismo evento
       const now = Date.now();
-      if (now - lastAlertTimestampRef.current < 1200) return;
+      if (now - lastAlertTimestampRef.current < 2500) return;
       lastAlertTimestampRef.current = now;
 
-      // Desactivar el telón negro de inmediato para asegurar que el modal de advertencia sea 100% visible e interactivo
-      deactivateDrmBlackout();
+      // NO desactivar el blackout aquí — dejarlo visible brevemente para que el usuario vea
+      // la pantalla negra antes de mostrar la advertencia. Se desactiva con un delay corto.
 
       const nextStrike = strikesCountRef.current + 1;
       strikesCountRef.current = nextStrike;
@@ -1077,6 +1077,8 @@ export default function StudentPortalView({ student, notify = () => {} }) {
       if (nextStrike >= 3) {
         // 3ª Infracción: Auto-envío forzado y cierre
         autoSubmitTriggeredRef.current = true;
+        // Desactivar blackout para mostrar modal de expulsión
+        setTimeout(() => { deactivateDrmBlackout(); }, 600);
         setViolationModal({
           strike: 3,
           isFinal: true,
@@ -1085,7 +1087,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
         });
         setTimeout(() => {
           handleSubmitQuiz({ motivo: "expulsion_infracciones" });
-        }, 2200);
+        }, 2800);
       } else {
         // Advertencia intermedia 1 o 2
         let mensajePersonalizado = detalle;
@@ -1098,6 +1100,9 @@ export default function StudentPortalView({ student, notify = () => {} }) {
         } else if (segundosFuera > 0) {
           mensajePersonalizado = `Se detectó salida de la pantalla de la evaluación durante ${segundosFuera} segundos.`;
         }
+
+        // Desactivar blackout después de un breve momento para que el modal sea visible
+        setTimeout(() => { deactivateDrmBlackout(); }, 500);
 
         setViolationModal({
           strike: nextStrike,
@@ -1250,43 +1255,117 @@ export default function StudentPortalView({ student, notify = () => {} }) {
     return () => clearInterval(interval);
   }, [activeQuizToTake, isExamSealedOffline]);
 
-  // Listeners del navegador para control antitrampas estricto en móvil y escritorio (Tecnología DRM Streaming)
+  // =====================================================================================
+  // SISTEMA ANTITRAMPAS UNIFICADO v3 — Detección de pérdida de foco, capturas, notificaciones
+  // =====================================================================================
+  // Principio: En móvil, el navegador NO puede detectar capturas de pantalla directamente.
+  // Lo que SÍ puede detectar de forma fiable:
+  //   1. visibilitychange (pestaña oculta / app en segundo plano)
+  //   2. blur/focus (pérdida/recuperación de foco de la ventana)
+  //   3. touchcancel (el OS interrumpió un gesto — ej. notificación entrante)
+  //   4. resize (pantalla dividida / teclado)
+  //
+  // Estrategia:
+  //   - Al PERDER foco: activar blackout inmediatamente, registrar timestamp.
+  //   - Al RECUPERAR foco: desactivar blackout, registrar violación con tiempo fuera.
+  //   - Los eventos blur y visibilitychange se unifican con un solo ref para evitar doble conteo.
+  //   - El debounce de 2500ms en registerViolation impide que blur+visibilitychange generen 2 strikes.
+  // =====================================================================================
   useEffect(() => {
     if (!activeQuizToTake || isExamSealedOffline) return;
 
-    // A. Sensores táctiles para barra de notificaciones y Control Center en móviles (Android & iPhone)
-    const handleTouchStart = (e) => {
+    // ─── A. Pérdida y recuperación de foco unificada ───
+    // Usamos focusLossRecordRef como la ÚNICA fuente de verdad.
+    // Tanto blur como visibilitychange escriben en él pero solo si no hay ya un registro activo.
+    // Solo se registra la violación al VOLVER (focus / visibilitychange visible).
+
+    const markFocusLost = (reason) => {
       if (isSubmittingRef.current || isConfirmingRef.current) return;
-      // Detección de captura con 3 dedos (Android)
-      if (e.touches && e.touches.length >= 3) {
-        activateDrmBlackout(2000);
-        registerViolation("captura_de_pantalla", "Gesto de captura de pantalla con 3 dedos detectado", 0);
+      // Activar blackout de inmediato para oscurecer la pantalla
+      activateDrmBlackout(4000);
+      if (!focusLossRecordRef.current.lostAt) {
+        focusLossRecordRef.current = { lostAt: Date.now(), reason };
+      }
+    };
+
+    const markFocusRestored = () => {
+      if (isSubmittingRef.current || isConfirmingRef.current) {
+        focusLossRecordRef.current = { lostAt: null, reason: null };
+        deactivateDrmBlackout();
+        return;
+      }
+      if (!focusLossRecordRef.current.lostAt) {
+        // No había pérdida registrada, solo limpiar blackout
+        deactivateDrmBlackout();
         return;
       }
 
+      const elapsed = Math.max(1, Math.round((Date.now() - focusLossRecordRef.current.lostAt) / 1000));
+      const reason = focusLossRecordRef.current.reason || "salida_de_pantalla";
+      focusLossRecordRef.current = { lostAt: null, reason: null };
+      totalTimeOutRef.current += elapsed;
+
+      // Registrar la violación (el blackout se desactivará dentro de registerViolation tras un delay)
+      const violationType = reason === "barra_notificaciones" ? "barra_notificaciones_o_salida" : "salida_de_pantalla";
+      const violationDetail = reason === "barra_notificaciones"
+        ? `Despliegue de barra de notificaciones o Centro de Control durante ${elapsed} seg`
+        : `Salida de la evaluación / cambio de aplicación durante ${elapsed} seg`;
+      registerViolation(violationType, violationDetail, elapsed);
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        markFocusLost(isFromTopBorderRef.current ? "barra_notificaciones" : "salida_de_pantalla");
+      } else {
+        markFocusRestored();
+      }
+    };
+
+    const handleBlur = () => {
+      const wasTop = isFromTopBorderRef.current;
+      isFromTopBorderRef.current = false;
+      markFocusLost(wasTop ? "barra_notificaciones" : "salida_de_pantalla");
+    };
+
+    const handleFocus = () => {
+      isFromTopBorderRef.current = false;
+      markFocusRestored();
+    };
+
+    const handlePageHide = () => {
+      markFocusLost("salida_de_pantalla");
+    };
+
+    // ─── B. Sensores táctiles para barra de notificaciones (Android & iPhone) ───
+    const handleTouchStart = (e) => {
+      if (isSubmittingRef.current || isConfirmingRef.current) return;
+      // Gesto de 3 dedos (screenshot en algunos Android)
+      if (e.touches && e.touches.length >= 3) {
+        activateDrmBlackout(2500);
+        registerViolation("captura_de_pantalla", "Gesto de captura de pantalla con 3 dedos detectado", 0);
+        return;
+      }
       const touch = e.touches?.[0];
       if (!touch) return;
       touchStartYRef.current = touch.clientY;
-      // Zona superior extendida: 80px del viewport o 120px de pantalla
-      if (touch.clientY <= 80 || touch.screenY <= 120) {
-        isFromTopBorderRef.current = true;
-      } else {
-        isFromTopBorderRef.current = false;
-      }
+      // Zona superior del viewport: posible barra de notificaciones
+      const isTopZone = touch.clientY <= 50 || touch.screenY <= 80;
+      isFromTopBorderRef.current = isTopZone;
     };
 
     const handleTouchMove = (e) => {
       if (isSubmittingRef.current || isConfirmingRef.current) return;
+      if (!isFromTopBorderRef.current) return;
       const touch = e.touches?.[0];
-      if (!touch || !isFromTopBorderRef.current) return;
+      if (!touch) return;
       const deltaY = touch.clientY - touchStartYRef.current;
-      // Desplazamiento hacia abajo desde la zona superior = Intento de bajar barra de notificaciones
-      if (deltaY > 16) {
+      if (deltaY > 30) {
+        // Swipe hacia abajo desde el borde superior detectado dentro del viewport
         isFromTopBorderRef.current = false;
-        activateDrmBlackout(2000);
+        activateDrmBlackout(2500);
         registerViolation(
           "barra_notificaciones_o_salida",
-          "Despliegue de barra de notificaciones o Centro de Control detectado",
+          "Despliegue de barra de notificaciones o Centro de Control detectado (gesto)",
           1
         );
       }
@@ -1296,110 +1375,15 @@ export default function StudentPortalView({ student, notify = () => {} }) {
       isFromTopBorderRef.current = false;
     };
 
+    // touchcancel: Disparado cuando el OS interrumpe el gesto (notificación/control center reales)
     const handleTouchCancel = () => {
       if (isSubmittingRef.current || isConfirmingRef.current) return;
-      if (isFromTopBorderRef.current) {
-        isFromTopBorderRef.current = false;
-        activateDrmBlackout(2000);
-        registerViolation(
-          "barra_notificaciones_o_salida",
-          "Interrupción por barra de notificaciones o Centro de Control",
-          1
-        );
-      }
-    };
-
-    // B. Pérdida de foco, cambio de app y minimización (unificado con focusLossRecordRef)
-    const handleVisibilityChange = () => {
-      if (isSubmittingRef.current || isConfirmingRef.current) {
-        focusLossRecordRef.current = { lostAt: null, reason: null };
-        return;
-      }
-      if (document.hidden) {
-        activateDrmBlackout(2500);
-        if (!focusLossRecordRef.current.lostAt) {
-          focusLossRecordRef.current = {
-            lostAt: Date.now(),
-            reason: isFromTopBorderRef.current ? "barra_notificaciones" : "salida_de_pantalla"
-          };
-        }
-      } else {
-        deactivateDrmBlackout();
-        if (focusLossRecordRef.current.lostAt) {
-          const elapsed = Math.max(1, Math.round((Date.now() - focusLossRecordRef.current.lostAt) / 1000));
-          const reason = focusLossRecordRef.current.reason || "salida_de_pantalla";
-          focusLossRecordRef.current = { lostAt: null, reason: null };
-          totalTimeOutRef.current += elapsed;
-          registerViolation(
-            reason === "barra_notificaciones" ? "barra_notificaciones_o_salida" : "salida_de_pantalla",
-            reason === "barra_notificaciones"
-              ? `Despliegue de barra de notificaciones o Centro de Control durante ${elapsed} seg`
-              : `Salida de la evaluación / cambio de aplicación durante ${elapsed} seg`,
-            elapsed
-          );
-        }
-      }
-    };
-
-    const handleBlur = () => {
-      if (isSubmittingRef.current || isConfirmingRef.current) {
-        focusLossRecordRef.current = { lostAt: null, reason: null };
-        return;
-      }
-      const wasTop = isFromTopBorderRef.current;
+      // touchcancel es la señal más confiable de que el OS tomó control (barra de notificaciones, etc.)
       isFromTopBorderRef.current = false;
-
-      // Apagón temporal preventivo estilo DRM (máximo 2.5s con watchdog)
-      activateDrmBlackout(2500);
-
-      if (!focusLossRecordRef.current.lostAt) {
-        focusLossRecordRef.current = {
-          lostAt: Date.now(),
-          reason: wasTop ? "barra_notificaciones" : "salida_de_pantalla"
-        };
-      }
-
-      // Si bajó la barra de notificaciones en móvil, registrar de inmediato
-      if (wasTop) {
-        registerViolation(
-          "barra_notificaciones_o_salida",
-          "Despliegue de barra de notificaciones o Centro de Control detectado",
-          1
-        );
-      }
+      markFocusLost("barra_notificaciones");
     };
 
-    const handleFocus = () => {
-      isFromTopBorderRef.current = false;
-      deactivateDrmBlackout();
-
-      if (isSubmittingRef.current || isConfirmingRef.current) {
-        focusLossRecordRef.current = { lostAt: null, reason: null };
-        return;
-      }
-      if (focusLossRecordRef.current.lostAt) {
-        const elapsed = Math.max(1, Math.round((Date.now() - focusLossRecordRef.current.lostAt) / 1000));
-        const reason = focusLossRecordRef.current.reason || "barra_notificaciones";
-        focusLossRecordRef.current = { lostAt: null, reason: null };
-        totalTimeOutRef.current += elapsed;
-
-        if (!violationModalRef.current || elapsed > 1) {
-          registerViolation(
-            reason === "barra_notificaciones" ? "barra_notificaciones_o_salida" : "salida_de_pantalla",
-            reason === "barra_notificaciones"
-              ? `Despliegue de barra de notificaciones, Centro de Control o pérdida de foco durante ${elapsed} seg`
-              : `Salida de la evaluación / cambio de aplicación durante ${elapsed} seg`,
-            elapsed
-          );
-        }
-      }
-    };
-
-    const handlePageHide = () => {
-      handleBlur();
-    };
-
-    // C. Detección de pantalla dividida (Split-Screen en Android / iPad)
+    // ─── C. Detección de pantalla dividida (Split-Screen en Android / iPad) ───
     const handleResize = () => {
       const isInputActive = Boolean(
         document.activeElement &&
@@ -1414,13 +1398,13 @@ export default function StudentPortalView({ student, notify = () => {} }) {
       }
     };
 
-    // D. Pantalla completa
+    // ─── D. Pantalla completa ───
     const handleFullscreenChange = () => {
       const isFs = Boolean(document.fullscreenElement || document.webkitFullscreenElement);
       setIsFullscreenActive(isFs);
     };
 
-    // E. Detección de atajos de captura de pantalla y recorte (PrintScreen, Win+Shift+S, Cmd+Shift+3/4/5)
+    // ─── E. Atajos de teclado para capturas (desktop) ───
     const handleKeyDown = (e) => {
       const isPrintScreen = e.key === "PrintScreen" || e.key === "Snapshot" || e.keyCode === 44;
       const isMacScreenshot = (e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === "3" || e.key === "4" || e.key === "5" || e.code === "Digit3" || e.code === "Digit4" || e.code === "Digit5");
@@ -1428,7 +1412,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
 
       if (isPrintScreen || isMacScreenshot || isWinSnipping) {
         e.preventDefault();
-        activateDrmBlackout(2000);
+        activateDrmBlackout(2500);
         try {
           if (navigator.clipboard && navigator.clipboard.writeText) {
             navigator.clipboard.writeText("");
@@ -1449,13 +1433,13 @@ export default function StudentPortalView({ student, notify = () => {} }) {
       }
     };
 
-    // F. Bloqueo de copia y menú contextual
+    // ─── F. Bloqueo de copia y menú contextual ───
     const handleCopy = (e) => {
       e.preventDefault();
       try {
         if (e.clipboardData) e.clipboardData.setData("text/plain", "");
       } catch (_) {}
-      activateDrmBlackout(1500);
+      activateDrmBlackout(2000);
       registerViolation("captura_de_pantalla", "Acción de copiado o captura de contenido bloqueada", 0);
     };
 
@@ -1463,6 +1447,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
       e.preventDefault();
     };
 
+    // ─── Registrar todos los listeners ───
     document.addEventListener("visibilitychange", handleVisibilityChange);
     window.addEventListener("blur", handleBlur);
     window.addEventListener("focus", handleFocus);
@@ -1473,8 +1458,6 @@ export default function StudentPortalView({ student, notify = () => {} }) {
     window.addEventListener("keydown", handleKeyDown, { capture: true });
     window.addEventListener("contextmenu", handleContextMenu);
     document.addEventListener("copy", handleCopy);
-
-    // Eventos táctiles móviles para borde superior y cancelación por el OS
     window.addEventListener("touchstart", handleTouchStart, { passive: true });
     window.addEventListener("touchmove", handleTouchMove, { passive: true });
     window.addEventListener("touchend", handleTouchEnd, { passive: true });
