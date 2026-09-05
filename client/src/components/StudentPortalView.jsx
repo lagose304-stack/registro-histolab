@@ -1049,11 +1049,12 @@ export default function StudentPortalView({ student, notify = () => {} }) {
           strike: nextStrike,
           isFinal: false,
           segundosFuera,
-          mensaje: `${mensajePersonalizado} A la 3ª advertencia, la prueba se sellará y enviará automáticamente sin derecho a reintento.`
+          mensaje: `${mensajePersonalizado} Advertencia ${nextStrike} de 3. A la 3ª advertencia, la prueba se sellará y enviará automáticamente sin derecho a reintento.`
         });
+        notify(`⚠️ Advertencia ${nextStrike}/3: ${mensajePersonalizado}`, "warning");
       }
     },
-    [activeQuizToTake, isExamSealedOffline, saveActiveAttemptToDisk, shuffledQuestions, quizAnswers]
+    [activeQuizToTake, isExamSealedOffline, saveActiveAttemptToDisk, shuffledQuestions, quizAnswers, notify]
   );
 
   // Sincronización en vivo vía Heartbeat con el servidor durante la prueba
@@ -1223,29 +1224,41 @@ export default function StudentPortalView({ student, notify = () => {} }) {
     };
 
     // A. Sensores táctiles para barra de notificaciones y Control Center en móviles (Android & iPhone)
+    let touchStartY = 0;
+    let isFromTopBorder = false;
+
     const handleTouchStart = (e) => {
       if (isSubmittingRef.current || isConfirmingRef.current) return;
-      const touch = e.touches?.[0];
-      // Si el toque inicia en los primeros 36px del borde superior (zona exclusiva de barra de notificaciones)
-      if (touch && (touch.clientY <= 36 || touch.screenY <= 60)) {
+      // Detección de captura con 3 dedos (Android)
+      if (e.touches && e.touches.length >= 3) {
         activateDrmBlackout();
-        registerViolation(
-          "barra_notificaciones_o_salida",
-          "Gesto detectado en el borde superior (despliegue de barra de notificaciones o Centro de Control)",
-          1
-        );
-        if (navigator.vibrate) navigator.vibrate([300, 100, 300]);
+        registerViolation("captura_de_pantalla", "Gesto de captura de pantalla con 3 dedos detectado", 0);
+        return;
+      }
+
+      const touch = e.touches?.[0];
+      if (!touch) return;
+      touchStartY = touch.clientY;
+      // Zona superior extendida a 85px (cubre notch, barra de estado y borde en cualquier teléfono)
+      if (touch.clientY <= 85 || touch.screenY <= 110) {
+        isFromTopBorder = true;
+      } else {
+        isFromTopBorder = false;
       }
     };
 
     const handleTouchMove = (e) => {
       if (isSubmittingRef.current || isConfirmingRef.current) return;
       const touch = e.touches?.[0];
-      if (touch && touch.clientY <= 55 && e.movementY > 0) {
+      if (!touch || !isFromTopBorder) return;
+      const deltaY = touch.clientY - touchStartY;
+      // Desplazamiento hacia abajo desde la zona superior = Intento de bajar barra de notificaciones
+      if (deltaY > 18) {
+        isFromTopBorder = false;
         activateDrmBlackout();
         registerViolation(
           "barra_notificaciones_o_salida",
-          "Desplazamiento hacia abajo desde la barra de estado superior",
+          "Despliegue de barra de notificaciones o Centro de Control detectado",
           1
         );
       }
@@ -1253,13 +1266,15 @@ export default function StudentPortalView({ student, notify = () => {} }) {
 
     const handleTouchCancel = () => {
       if (isSubmittingRef.current || isConfirmingRef.current) return;
-      // El OS (Android/iOS) interrumpió el toque para desplegar notificaciones, llamada o menú flotante
-      activateDrmBlackout();
-      registerViolation(
-        "barra_notificaciones_o_salida",
-        "Interrupción del sistema operativo en pantalla (despliegue de notificaciones o menú del sistema)",
-        1
-      );
+      if (isFromTopBorder) {
+        isFromTopBorder = false;
+        activateDrmBlackout();
+        registerViolation(
+          "barra_notificaciones_o_salida",
+          "Interrupción de pantalla por el sistema operativo (barra de notificaciones)",
+          1
+        );
+      }
     };
 
     // B. Pérdida de foco, cambio de app y minimización (unificado con focusLossRecordRef)
@@ -1972,33 +1987,42 @@ export default function StudentPortalView({ student, notify = () => {} }) {
           background: #000000 !important;
           overflow: hidden !important;
         }
-        body.anticheat-blackout-on #root {
+        body.anticheat-blackout-on .sp-portal-container {
           opacity: 0 !important;
           visibility: hidden !important;
           filter: brightness(0) !important;
-          background: #000000 !important;
-          user-select: none !important;
-          -webkit-user-select: none !important;
           pointer-events: none !important;
         }
         #anti-cheat-blackout-curtain {
           display: none;
-          position: fixed;
-          inset: 0;
-          width: 100vw;
-          height: 100vh;
-          z-index: 9999990;
+          position: fixed !important;
+          inset: 0 !important;
+          width: 100vw !important;
+          height: 100vh !important;
+          z-index: 2000000000 !important;
           background: #000000 !important;
           color: #ffffff;
           align-items: center;
           justify-content: center;
           flex-direction: column;
           gap: 1rem;
-          pointer-events: all;
+          pointer-events: all !important;
         }
         body.anticheat-blackout-on #anti-cheat-blackout-curtain {
           display: flex !important;
           opacity: 1 !important;
+          visibility: visible !important;
+        }
+        .sp-violation-modal-overlay {
+          position: fixed !important;
+          inset: 0 !important;
+          z-index: 2147483647 !important;
+          display: flex !important;
+          align-items: center !important;
+          justify-content: center !important;
+          visibility: visible !important;
+          opacity: 1 !important;
+          pointer-events: all !important;
         }
 
         /* Grids de Contenido */
@@ -4448,6 +4472,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
         {/* MODAL DE ADVERTENCIA / INFRACCIÓN DE SEGURIDAD ANTITRAMPAS */}
         {violationModal && (
           <div
+            className="sp-violation-modal-overlay"
             style={{
               position: "fixed",
               inset: 0,
