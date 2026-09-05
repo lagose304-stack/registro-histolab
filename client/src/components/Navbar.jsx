@@ -50,20 +50,23 @@ export default function Navbar({
         }}
       >
         {/* Logo y Marca Oficial */}
-        <div style={{ display: "flex", alignItems: "center", gap: "0.65rem", flexShrink: 0 }}>
-          <div style={{
-            width: "40px",
-            height: "40px",
-            background: "#ffffff",
-            border: "1px solid #e2e8f0",
-            padding: "0.2rem",
-            borderRadius: "var(--radius-md)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            boxShadow: "0 2px 8px rgba(2, 132, 199, 0.15)",
-            flexShrink: 0
-          }}>
+        <div className="navbar-brand-group" style={{ display: "flex", alignItems: "center", gap: "0.65rem", flexShrink: 0 }}>
+          <div
+            className="navbar-logo-box"
+            style={{
+              width: "40px",
+              height: "40px",
+              background: "#ffffff",
+              border: "1px solid #e2e8f0",
+              padding: "0.2rem",
+              borderRadius: "var(--radius-md)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              boxShadow: "0 2px 8px rgba(2, 132, 199, 0.15)",
+              flexShrink: 0
+            }}
+          >
             <img
               src={laboratorioLogo}
               alt="Logo Registro Histolab"
@@ -72,7 +75,8 @@ export default function Navbar({
           </div>
           <div>
             <h1 className="navbar-logo-title" style={{ fontSize: "1.25rem", fontWeight: 800, lineHeight: 1.1, color: "var(--text-main)", margin: 0 }}>
-              <span className="text-gradient">REGISTRO HISTOLAB</span>
+              <span className="text-gradient navbar-brand-full">REGISTRO HISTOLAB</span>
+              <span className="text-gradient navbar-brand-short">HISTOLAB</span>
             </h1>
           </div>
         </div>
@@ -94,25 +98,28 @@ export default function Navbar({
                 maxWidth: "240px"
               }}
             >
-              <div style={{
-                width: "28px",
-                height: "28px",
-                borderRadius: "50%",
-                background: isStudent
-                  ? "linear-gradient(135deg, #0284c7 0%, #0369a1 100%)"
-                  : "linear-gradient(135deg, #075985 0%, #0c4a6e 100%)",
-                color: "#ffffff",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                fontWeight: 700,
-                fontSize: "0.78rem",
-                flexShrink: 0
-              }}>
+              <div
+                className="navbar-user-avatar"
+                style={{
+                  width: "28px",
+                  height: "28px",
+                  borderRadius: "50%",
+                  background: isStudent
+                    ? "linear-gradient(135deg, #0284c7 0%, #0369a1 100%)"
+                    : "linear-gradient(135deg, #075985 0%, #0c4a6e 100%)",
+                  color: "#ffffff",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontWeight: 700,
+                  fontSize: "0.78rem",
+                  flexShrink: 0
+                }}
+              >
                 {initial}
               </div>
 
-              <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", minWidth: 0 }}>
+              <div className="navbar-user-details" style={{ display: "flex", alignItems: "center", gap: "0.4rem", minWidth: 0 }}>
                 <span
                   className="navbar-user-name"
                   style={{
@@ -153,6 +160,8 @@ export default function Navbar({
             <button
               onClick={onLogout}
               className="btn btn-danger navbar-logout-btn"
+              title="Cerrar sesión"
+              aria-label="Cerrar sesión"
               style={{
                 padding: "0.45rem 0.85rem",
                 fontSize: "0.85rem",
@@ -167,7 +176,8 @@ export default function Navbar({
                 cursor: "pointer",
                 transition: "all 0.15s ease",
                 boxShadow: "0 1px 2px rgba(220, 38, 38, 0.05)",
-                whiteSpace: "nowrap"
+                whiteSpace: "nowrap",
+                flexShrink: 0
               }}
               onMouseEnter={(e) => {
                 e.currentTarget.style.background = "#dc2626";
@@ -177,7 +187,6 @@ export default function Navbar({
                 e.currentTarget.style.background = "#fef2f2";
                 e.currentTarget.style.color = "#dc2626";
               }}
-              title="Cerrar sesión y proteger portal"
             >
               <LogOut size={16} />
               <span className="navbar-logout-text">Cerrar Sesión</span>
