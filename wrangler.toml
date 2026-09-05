@@ -1,0 +1,16 @@
+name = "registro-histolab"
+main = "server/src/worker.js"
+compatibility_date = "2026-08-04"
+compatibility_flags = ["nodejs_compat"]
+
+[assets]
+directory = "./client/dist"
+not_found_handling = "single-page-application"
+run_worker_first = ["/api/*"]
+
+[vars]
+NODE_ENV = "production"
+PORT = "8080"
+SUPABASE_URL = "https://dghmrqyxrjgxceolqplt.supabase.co"
+SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRnaG1ycXl4cmpneGNlb2xxcGx0Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4NzM2NjE0MywiZXhwIjoyMTAyOTQyMTQzfQ.NcoTIrHLkAR3amOxx6Yv1OA97aYPOnIYgOnpc8AjFnA"
+JWT_SECRET = "histolab_super_secret_jwt_key_2026"
