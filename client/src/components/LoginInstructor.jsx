@@ -3,7 +3,6 @@ import {
   Lock,
   Mail,
   GraduationCap,
-  Sparkles,
   ArrowRight,
   Eye,
   EyeOff,
@@ -214,14 +213,7 @@ export default function LoginInstructor({
     }
   };
 
-  // Relleno demo para instructor
-  const handleFillDemoInstructor = () => {
-    setInstructorData({
-      email: "instructor@histolab.com",
-      password: "admin123"
-    });
-    setErrorMsg("");
-  };
+
 
   return (
     <div
@@ -342,15 +334,12 @@ export default function LoginInstructor({
               fontSize: "1.35rem",
               fontWeight: 900,
               color: "#0f172a",
-              margin: "0 0 0.2rem 0",
+              margin: 0,
               letterSpacing: "-0.01em"
             }}
           >
-            Histolab UNAH
+            Registro HistoLab
           </h1>
-          <p style={{ margin: 0, fontSize: "0.78rem", color: "#64748b", fontWeight: 600 }}>
-            Departamento de Ciencias Morfológicas • Histología
-          </p>
         </div>
 
         {/* =================================================================== */}
@@ -742,9 +731,6 @@ export default function LoginInstructor({
                   {showStudentPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                 </button>
               </div>
-              <span style={{ fontSize: "0.7rem", color: "#64748b", marginTop: "0.25rem", display: "block" }}>
-                💡 Contraseña por defecto inicial: <strong>histolab123</strong>
-              </span>
             </div>
 
             {/* RECORDAR USUARIO ESTUDIANTE */}
@@ -805,6 +791,23 @@ export default function LoginInstructor({
                 </>
               )}
             </button>
+
+            {/* Créditos y Copyright */}
+            <div
+              style={{
+                marginTop: "1.25rem",
+                paddingTop: "0.85rem",
+                borderTop: "1px solid #f1f5f9",
+                textAlign: "center"
+              }}
+            >
+              <p style={{ margin: 0, fontSize: "0.75rem", color: "#64748b", fontWeight: 600 }}>
+                Hecho por <span style={{ color: "#0f172a", fontWeight: 700 }}>Elam Lagos</span>
+              </p>
+              <p style={{ margin: "0.25rem 0 0 0", fontSize: "0.7rem", color: "#94a3b8" }}>
+                © {new Date().getFullYear()} Registro HistoLab • Todos los derechos reservados
+              </p>
+            </div>
           </form>
         )}
 
@@ -951,25 +954,6 @@ export default function LoginInstructor({
                 />
                 <span>Recordar usuario</span>
               </label>
-
-              <button
-                type="button"
-                onClick={handleFillDemoInstructor}
-                style={{
-                  background: "none",
-                  border: "none",
-                  color: "#0284c7",
-                  fontSize: "0.75rem",
-                  fontWeight: 700,
-                  cursor: "pointer",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "0.25rem"
-                }}
-              >
-                <Sparkles size={12} />
-                <span>Autollenar Demo</span>
-              </button>
             </div>
 
             {/* Botón Ingresar Instructor */}
@@ -1003,6 +987,23 @@ export default function LoginInstructor({
                 </>
               )}
             </button>
+
+            {/* Créditos y Copyright */}
+            <div
+              style={{
+                marginTop: "1.25rem",
+                paddingTop: "0.85rem",
+                borderTop: "1px solid #f1f5f9",
+                textAlign: "center"
+              }}
+            >
+              <p style={{ margin: 0, fontSize: "0.75rem", color: "#64748b", fontWeight: 600 }}>
+                Hecho por <span style={{ color: "#0f172a", fontWeight: 700 }}>Elam Lagos</span>
+              </p>
+              <p style={{ margin: "0.25rem 0 0 0", fontSize: "0.7rem", color: "#94a3b8" }}>
+                © {new Date().getFullYear()} Registro HistoLab • Todos los derechos reservados
+              </p>
+            </div>
           </form>
         )}
       </div>
