@@ -2,6 +2,10 @@
   "name": "registro-histolab",
   "version": "1.0.0",
   "private": true,
+  "workspaces": [
+    "client",
+    "server"
+  ],
   "description": "Base Full-Stack para Registro Histolab (React + Node.js/Express)",
   "scripts": {
     "dev": "concurrently -n \"SERVER,CLIENT\" -c \"cyan,magenta\" \"npm run dev:server\" \"npm run dev:client\"",
