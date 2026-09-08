@@ -17,9 +17,9 @@
     "numero_tema": 1,
     "activo": true,
     "created_at": "2026-09-02T04:39:00.809+00:00",
-    "updated_at": "2026-09-04T03:08:04.172+00:00",
+    "updated_at": "2026-09-08T01:44:27.889+00:00",
     "carrera": "Medicina",
-    "tiene_manual": false
+    "tiene_manual": true
   },
   {
     "id": "5c906822-c5cd-4748-8ebf-8a018ed82b09",
@@ -28,9 +28,9 @@
     "numero_tema": 2,
     "activo": true,
     "created_at": "2026-09-02T04:40:02.828+00:00",
-    "updated_at": "2026-09-04T03:08:04.309+00:00",
+    "updated_at": "2026-09-08T01:44:34.529+00:00",
     "carrera": "Medicina",
-    "tiene_manual": false
+    "tiene_manual": true
   },
   {
     "id": "4650215a-672b-4b83-9222-1213b4aad970",

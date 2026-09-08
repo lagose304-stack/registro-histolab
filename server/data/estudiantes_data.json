@@ -7,6 +7,7 @@
       "nombre_completo": "Prueba Estudiante",
       "contrasena": "histolab123",
       "notas": {
+        "prueba_1": 0,
         "prueba_1_real": 5.251
       },
       "asistencias": {},
@@ -16,7 +17,7 @@
       "tercer_examen": 0,
       "activo": true,
       "created_at": "2026-09-04T23:21:30.465+00:00",
-      "updated_at": "2026-09-08T00:44:56.440Z"
+      "updated_at": "2026-09-08T01:14:27.497Z"
     },
     {
       "id": "179753fb-60d6-4e26-a53d-280b1ee00db9",
@@ -24,7 +25,10 @@
       "numero_cuenta": "00000000001",
       "nombre_completo": "Elam",
       "contrasena": "histolab123",
-      "notas": {},
+      "notas": {
+        "prueba_1": 5,
+        "prueba_1_real": 6
+      },
       "asistencias": {},
       "total": 0,
       "primer_examen": 0,
@@ -32,7 +36,7 @@
       "tercer_examen": 0,
       "activo": true,
       "created_at": "2026-09-08T00:43:46.409+00:00",
-      "updated_at": "2026-09-08T00:43:46.409+00:00"
+      "updated_at": "2026-09-08T01:14:30.804Z"
     }
   ],
   "estudiantes_enfermeria": [

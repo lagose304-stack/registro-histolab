@@ -3,50 +3,14 @@
     "seccion_id": "8441714f-c3c2-45da-96da-287129ac959e",
     "numero_semana": 1,
     "carrera": "Medicina",
-    "estado": "lobby",
-    "habilitada": true,
+    "estado": "inactiva",
+    "habilitada": false,
     "pregunta_actual_idx": 0,
     "duracion_segundos": 90,
     "pregunta_inicio_timestamp": null,
-    "alumnos_conectados": {
-      "00000000000": {
-        "nombre_completo": "Snoopy Maldonado",
-        "ultimo_ping": 1788828245606,
-        "pregunta_vista": -1,
-        "ha_respondido": false,
-        "ip": "::1"
-      },
-      "00000000001": {
-        "nombre_completo": "Elam",
-        "ultimo_ping": 1788828257428,
-        "pregunta_vista": -1,
-        "ha_respondido": false,
-        "ip": "::1"
-      }
-    },
-    "respuestas_globales": {
-      "00000000000": {
-        "q_1": {
-          "respuesta": ""
-        },
-        "q_2": {
-          "respuesta": ""
-        },
-        "q_3": {
-          "respuesta": ""
-        },
-        "q_4": {
-          "respuesta": ""
-        },
-        "q_5": {
-          "respuesta": ""
-        },
-        "q_6": {
-          "respuesta": ""
-        }
-      }
-    },
-    "ultima_actualizacion": 1788828255613
+    "alumnos_conectados": {},
+    "respuestas_globales": {},
+    "ultima_actualizacion": 1788832564451
   },
   "1_sem_1": {
     "seccion_id": "1",

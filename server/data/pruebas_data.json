@@ -250,6 +250,496 @@
       "fecha_envio": "2026-09-04T04:32:57.175Z",
       "updated_at": "2026-09-04T04:32:57.470Z",
       "calificado_por": "Dra. Docente Titular"
+    },
+    {
+      "id": "b7645419-05b6-480e-8008-dd1948f70247",
+      "quiz_id": "db2118f4-8244-467c-bbdc-a5a2ee1b420f",
+      "seccion_id": "8441714f-c3c2-45da-96da-287129ac959e",
+      "carrera": "Medicina",
+      "numero_semana": 1,
+      "numero_cuenta": "00000000000",
+      "nombre_completo": "Snoopy Maldonado",
+      "respuestas": {
+        "q_1": {
+          "item_1788827398942_425": [
+            "Aaaa",
+            "Aaaa",
+            "Aaaa"
+          ]
+        },
+        "q_2": {
+          "item_1788828315296_614": "Aaaa",
+          "item_1788828370961_989": [
+            "Aaaa",
+            "Aaaa",
+            "Aaaa"
+          ]
+        },
+        "q_3": {
+          "item_1788828317496_941": "A"
+        },
+        "q_4": {
+          "item_1788828319688_75": "A"
+        },
+        "q_5": {
+          "item_1788828321344_86": "A"
+        },
+        "q_6": {
+          "item_1788828323649_946": "A"
+        }
+      },
+      "estado": "calificado",
+      "nota_obtenida": 0,
+      "comentarios": "",
+      "calificado_por": "Elam Elisama Lagos Matamoros",
+      "fecha_envio": "2026-09-08T00:52:43.444+00:00",
+      "created_at": "2026-09-08T00:52:43.490921+00:00",
+      "updated_at": "2026-09-08T01:14:27.045Z",
+      "auditoria": {
+        "strikes": 1,
+        "hora_fin": "2026-09-08T00:52:43.047Z",
+        "incidentes": [
+          {
+            "hora": "6:50:34 p.m.",
+            "tipo": "salida_de_pantalla",
+            "strike": 1,
+            "detalle": "Salida de la evaluación / cambio de aplicación durante 1 seg",
+            "segundosFuera": 1
+          }
+        ],
+        "hora_inicio": "2026-09-08T00:49:10.537Z",
+        "total_salidas": 1,
+        "cadencia_escritura": {
+          "muestras": 53,
+          "promedio_ms": 293
+        },
+        "conexion_al_enviar": "online",
+        "huella_dispositivo": "45a70409b1f9ae0513dff0bb016c5693",
+        "motivo_finalizacion": "finalizada_por_docente",
+        "intentos_pegar_texto": 0,
+        "tiempo_fuera_segundos": 1,
+        "duracion_total_segundos": 213,
+        "hora_recepcion_servidor": "2026-09-08T00:52:43.444Z",
+        "pantalla_completa_solicitada": true,
+        "nota_real": 0,
+        "nota_con_bonus": 0,
+        "evaluaciones_incisos": {
+          "q_2___item_1788828315296_614": {
+            "estado": "mala",
+            "item_id": "item_1788828315296_614",
+            "puntos_max": 0.5,
+            "pregunta_id": "q_2",
+            "puntos_obtenidos": 0
+          },
+          "q_3___item_1788828317496_941": {
+            "estado": "mala",
+            "item_id": "item_1788828317496_941",
+            "puntos_max": 1,
+            "pregunta_id": "q_3",
+            "puntos_obtenidos": 0
+          },
+          "q_1___item_1788827398942_425___slot_0": {
+            "estado": "mala",
+            "item_id": "item_1788827398942_425",
+            "slot_idx": 0,
+            "puntos_max": 0.333,
+            "pregunta_id": "q_1",
+            "puntos_obtenidos": 0
+          },
+          "q_1___item_1788827398942_425___slot_1": {
+            "estado": "mala",
+            "item_id": "item_1788827398942_425",
+            "slot_idx": 1,
+            "puntos_max": 0.333,
+            "pregunta_id": "q_1",
+            "puntos_obtenidos": 0
+          },
+          "q_1___item_1788827398942_425___slot_2": {
+            "estado": "mala",
+            "item_id": "item_1788827398942_425",
+            "slot_idx": 2,
+            "puntos_max": 0.333,
+            "pregunta_id": "q_1",
+            "puntos_obtenidos": 0
+          },
+          "q_2___item_1788828370961_989___slot_0": {
+            "estado": "mala",
+            "item_id": "item_1788828370961_989",
+            "slot_idx": 0,
+            "puntos_max": 0.167,
+            "pregunta_id": "q_2",
+            "puntos_obtenidos": 0
+          },
+          "q_2___item_1788828370961_989___slot_1": {
+            "estado": "mala",
+            "item_id": "item_1788828370961_989",
+            "slot_idx": 1,
+            "puntos_max": 0.167,
+            "pregunta_id": "q_2",
+            "puntos_obtenidos": 0
+          },
+          "q_2___item_1788828370961_989___slot_2": {
+            "estado": "mala",
+            "item_id": "item_1788828370961_989",
+            "slot_idx": 2,
+            "puntos_max": 0.167,
+            "pregunta_id": "q_2",
+            "puntos_obtenidos": 0
+          },
+          "q_4___item_1788828319688_75": {
+            "estado": "mala",
+            "puntos_obtenidos": 0,
+            "puntos_max": 1,
+            "pregunta_id": "q_4",
+            "item_id": "item_1788828319688_75"
+          },
+          "q_5___item_1788828321344_86": {
+            "estado": "mala",
+            "puntos_obtenidos": 0,
+            "puntos_max": 1,
+            "pregunta_id": "q_5",
+            "item_id": "item_1788828321344_86"
+          },
+          "q_6___item_1788828323649_946": {
+            "estado": "mala",
+            "puntos_obtenidos": 0,
+            "puntos_max": 1,
+            "pregunta_id": "q_6",
+            "item_id": "item_1788828323649_946"
+          }
+        }
+      },
+      "nota_real": 0,
+      "nota_con_bonus": 0,
+      "preguntas_omitidas": [],
+      "motivo_entrega": "normal",
+      "duracion_total_segundos": 0,
+      "evaluaciones_incisos": {
+        "q_2___item_1788828315296_614": {
+          "estado": "mala",
+          "item_id": "item_1788828315296_614",
+          "puntos_max": 0.5,
+          "pregunta_id": "q_2",
+          "puntos_obtenidos": 0
+        },
+        "q_3___item_1788828317496_941": {
+          "estado": "mala",
+          "item_id": "item_1788828317496_941",
+          "puntos_max": 1,
+          "pregunta_id": "q_3",
+          "puntos_obtenidos": 0
+        },
+        "q_1___item_1788827398942_425___slot_0": {
+          "estado": "mala",
+          "item_id": "item_1788827398942_425",
+          "slot_idx": 0,
+          "puntos_max": 0.333,
+          "pregunta_id": "q_1",
+          "puntos_obtenidos": 0
+        },
+        "q_1___item_1788827398942_425___slot_1": {
+          "estado": "mala",
+          "item_id": "item_1788827398942_425",
+          "slot_idx": 1,
+          "puntos_max": 0.333,
+          "pregunta_id": "q_1",
+          "puntos_obtenidos": 0
+        },
+        "q_1___item_1788827398942_425___slot_2": {
+          "estado": "mala",
+          "item_id": "item_1788827398942_425",
+          "slot_idx": 2,
+          "puntos_max": 0.333,
+          "pregunta_id": "q_1",
+          "puntos_obtenidos": 0
+        },
+        "q_2___item_1788828370961_989___slot_0": {
+          "estado": "mala",
+          "item_id": "item_1788828370961_989",
+          "slot_idx": 0,
+          "puntos_max": 0.167,
+          "pregunta_id": "q_2",
+          "puntos_obtenidos": 0
+        },
+        "q_2___item_1788828370961_989___slot_1": {
+          "estado": "mala",
+          "item_id": "item_1788828370961_989",
+          "slot_idx": 1,
+          "puntos_max": 0.167,
+          "pregunta_id": "q_2",
+          "puntos_obtenidos": 0
+        },
+        "q_2___item_1788828370961_989___slot_2": {
+          "estado": "mala",
+          "item_id": "item_1788828370961_989",
+          "slot_idx": 2,
+          "puntos_max": 0.167,
+          "pregunta_id": "q_2",
+          "puntos_obtenidos": 0
+        },
+        "q_4___item_1788828319688_75": {
+          "estado": "mala",
+          "puntos_obtenidos": 0,
+          "puntos_max": 1,
+          "pregunta_id": "q_4",
+          "item_id": "item_1788828319688_75"
+        },
+        "q_5___item_1788828321344_86": {
+          "estado": "mala",
+          "puntos_obtenidos": 0,
+          "puntos_max": 1,
+          "pregunta_id": "q_5",
+          "item_id": "item_1788828321344_86"
+        },
+        "q_6___item_1788828323649_946": {
+          "estado": "mala",
+          "puntos_obtenidos": 0,
+          "puntos_max": 1,
+          "pregunta_id": "q_6",
+          "item_id": "item_1788828323649_946"
+        }
+      }
+    },
+    {
+      "id": "340f06d0-b7b5-49c2-a941-01e542f49cb5",
+      "quiz_id": "db2118f4-8244-467c-bbdc-a5a2ee1b420f",
+      "seccion_id": "8441714f-c3c2-45da-96da-287129ac959e",
+      "carrera": "Medicina",
+      "numero_semana": 1,
+      "numero_cuenta": "00000000001",
+      "nombre_completo": "Elam",
+      "respuestas": {
+        "q_1": {
+          "item_1788827398942_425": [
+            "Iiii",
+            "Iiiii",
+            "Iiiii"
+          ]
+        },
+        "q_2": {
+          "item_1788828315296_614": "Iiii",
+          "item_1788828370961_989": [
+            "Iiii",
+            "Iiii",
+            "Iiii"
+          ]
+        },
+        "q_3": {
+          "item_1788828317496_941": "I"
+        },
+        "q_4": {
+          "item_1788828319688_75": "I"
+        },
+        "q_5": {
+          "item_1788828321344_86": "I"
+        },
+        "q_6": {
+          "item_1788828323649_946": "I"
+        }
+      },
+      "estado": "calificado",
+      "nota_obtenida": 5,
+      "comentarios": "",
+      "calificado_por": "Elam Elisama Lagos Matamoros",
+      "fecha_envio": "2026-09-08T00:52:43.923+00:00",
+      "created_at": "2026-09-08T00:52:43.972759+00:00",
+      "updated_at": "2026-09-08T01:14:30.245Z",
+      "auditoria": {
+        "strikes": 0,
+        "hora_fin": "2026-09-08T00:52:44.076Z",
+        "incidentes": [],
+        "hora_inicio": "2026-09-08T00:49:14.136Z",
+        "total_salidas": 0,
+        "cadencia_escritura": {
+          "muestras": 36,
+          "promedio_ms": 338
+        },
+        "conexion_al_enviar": "online",
+        "huella_dispositivo": "4321ec6610a7ef0affc1e2635a0905cb",
+        "motivo_finalizacion": "finalizada_por_docente",
+        "intentos_pegar_texto": 0,
+        "tiempo_fuera_segundos": 0,
+        "duracion_total_segundos": 210,
+        "hora_recepcion_servidor": "2026-09-08T00:52:43.923Z",
+        "pantalla_completa_solicitada": true,
+        "nota_real": 6,
+        "nota_con_bonus": 6,
+        "evaluaciones_incisos": {
+          "q_2___item_1788828315296_614": {
+            "estado": "buena",
+            "item_id": "item_1788828315296_614",
+            "puntos_max": 0.5,
+            "pregunta_id": "q_2",
+            "puntos_obtenidos": 0.5
+          },
+          "q_1___item_1788827398942_425___slot_0": {
+            "estado": "buena",
+            "item_id": "item_1788827398942_425",
+            "slot_idx": 0,
+            "puntos_max": 0.333,
+            "pregunta_id": "q_1",
+            "puntos_obtenidos": 0.333
+          },
+          "q_1___item_1788827398942_425___slot_1": {
+            "estado": "buena",
+            "item_id": "item_1788827398942_425",
+            "slot_idx": 1,
+            "puntos_max": 0.333,
+            "pregunta_id": "q_1",
+            "puntos_obtenidos": 0.333
+          },
+          "q_1___item_1788827398942_425___slot_2": {
+            "estado": "buena",
+            "item_id": "item_1788827398942_425",
+            "slot_idx": 2,
+            "puntos_max": 0.333,
+            "pregunta_id": "q_1",
+            "puntos_obtenidos": 0.333
+          },
+          "q_2___item_1788828370961_989___slot_0": {
+            "estado": "buena",
+            "item_id": "item_1788828370961_989",
+            "slot_idx": 0,
+            "puntos_max": 0.167,
+            "pregunta_id": "q_2",
+            "puntos_obtenidos": 0.167
+          },
+          "q_2___item_1788828370961_989___slot_1": {
+            "estado": "buena",
+            "item_id": "item_1788828370961_989",
+            "slot_idx": 1,
+            "puntos_max": 0.167,
+            "pregunta_id": "q_2",
+            "puntos_obtenidos": 0.167
+          },
+          "q_2___item_1788828370961_989___slot_2": {
+            "estado": "buena",
+            "item_id": "item_1788828370961_989",
+            "slot_idx": 2,
+            "puntos_max": 0.167,
+            "pregunta_id": "q_2",
+            "puntos_obtenidos": 0.167
+          },
+          "q_3___item_1788828317496_941": {
+            "estado": "buena",
+            "puntos_obtenidos": 1,
+            "puntos_max": 1,
+            "pregunta_id": "q_3",
+            "item_id": "item_1788828317496_941"
+          },
+          "q_4___item_1788828319688_75": {
+            "estado": "buena",
+            "puntos_obtenidos": 1,
+            "puntos_max": 1,
+            "pregunta_id": "q_4",
+            "item_id": "item_1788828319688_75"
+          },
+          "q_5___item_1788828321344_86": {
+            "estado": "buena",
+            "puntos_obtenidos": 1,
+            "puntos_max": 1,
+            "pregunta_id": "q_5",
+            "item_id": "item_1788828321344_86"
+          },
+          "q_6___item_1788828323649_946": {
+            "estado": "buena",
+            "puntos_obtenidos": 1,
+            "puntos_max": 1,
+            "pregunta_id": "q_6",
+            "item_id": "item_1788828323649_946"
+          }
+        }
+      },
+      "nota_real": 6,
+      "nota_con_bonus": 6,
+      "preguntas_omitidas": [],
+      "motivo_entrega": "normal",
+      "duracion_total_segundos": 0,
+      "evaluaciones_incisos": {
+        "q_2___item_1788828315296_614": {
+          "estado": "buena",
+          "item_id": "item_1788828315296_614",
+          "puntos_max": 0.5,
+          "pregunta_id": "q_2",
+          "puntos_obtenidos": 0.5
+        },
+        "q_1___item_1788827398942_425___slot_0": {
+          "estado": "buena",
+          "item_id": "item_1788827398942_425",
+          "slot_idx": 0,
+          "puntos_max": 0.333,
+          "pregunta_id": "q_1",
+          "puntos_obtenidos": 0.333
+        },
+        "q_1___item_1788827398942_425___slot_1": {
+          "estado": "buena",
+          "item_id": "item_1788827398942_425",
+          "slot_idx": 1,
+          "puntos_max": 0.333,
+          "pregunta_id": "q_1",
+          "puntos_obtenidos": 0.333
+        },
+        "q_1___item_1788827398942_425___slot_2": {
+          "estado": "buena",
+          "item_id": "item_1788827398942_425",
+          "slot_idx": 2,
+          "puntos_max": 0.333,
+          "pregunta_id": "q_1",
+          "puntos_obtenidos": 0.333
+        },
+        "q_2___item_1788828370961_989___slot_0": {
+          "estado": "buena",
+          "item_id": "item_1788828370961_989",
+          "slot_idx": 0,
+          "puntos_max": 0.167,
+          "pregunta_id": "q_2",
+          "puntos_obtenidos": 0.167
+        },
+        "q_2___item_1788828370961_989___slot_1": {
+          "estado": "buena",
+          "item_id": "item_1788828370961_989",
+          "slot_idx": 1,
+          "puntos_max": 0.167,
+          "pregunta_id": "q_2",
+          "puntos_obtenidos": 0.167
+        },
+        "q_2___item_1788828370961_989___slot_2": {
+          "estado": "buena",
+          "item_id": "item_1788828370961_989",
+          "slot_idx": 2,
+          "puntos_max": 0.167,
+          "pregunta_id": "q_2",
+          "puntos_obtenidos": 0.167
+        },
+        "q_3___item_1788828317496_941": {
+          "estado": "buena",
+          "puntos_obtenidos": 1,
+          "puntos_max": 1,
+          "pregunta_id": "q_3",
+          "item_id": "item_1788828317496_941"
+        },
+        "q_4___item_1788828319688_75": {
+          "estado": "buena",
+          "puntos_obtenidos": 1,
+          "puntos_max": 1,
+          "pregunta_id": "q_4",
+          "item_id": "item_1788828319688_75"
+        },
+        "q_5___item_1788828321344_86": {
+          "estado": "buena",
+          "puntos_obtenidos": 1,
+          "puntos_max": 1,
+          "pregunta_id": "q_5",
+          "item_id": "item_1788828321344_86"
+        },
+        "q_6___item_1788828323649_946": {
+          "estado": "buena",
+          "puntos_obtenidos": 1,
+          "puntos_max": 1,
+          "pregunta_id": "q_6",
+          "item_id": "item_1788828323649_946"
+        }
+      }
     }
   ]
 }
