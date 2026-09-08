@@ -28,6 +28,12 @@ import {
 } from "lucide-react";
 import { api } from "../services/api";
 import { safeStorage } from "../utils/safeStorage";
+import {
+  isInstructorTitular,
+  isWeekAssignedToUser,
+  getAssignedRecordForWeek,
+  SECTION_ROLES
+} from "../utils/sectionRoleUtils";
 
 export default function ReviewQuizSubmissionsView({
   seccion,
@@ -50,6 +56,10 @@ export default function ReviewQuizSubmissionsView({
   const [sectionQuizzes, setSectionQuizzes] = useState([]);
   const [entregasSemana, setEntregasSemana] = useState([]);
   const [quizSemanal, setQuizSemanal] = useState(null);
+  const [asignaciones, setAsignaciones] = useState([]);
+
+  const currentUser = currentInstructor || api.auth.getCurrentInstructor();
+  const isTitular = useMemo(() => isInstructorTitular(currentUser, seccion), [currentUser, seccion]);
 
   // Modal de Calificación
   const [selectedEntrega, setSelectedEntrega] = useState(null);
@@ -88,9 +98,10 @@ export default function ReviewQuizSubmissionsView({
     if (!seccion?.id) return;
     setLoading(true);
     try {
-      const [resSemanas, resQuizzes] = await Promise.all([
+      const [resSemanas, resQuizzes, resAsig] = await Promise.all([
         api.semanas.getConfig(carrera).catch(() => ({ data: [] })),
-        api.pruebas.getBySeccion(seccion.id).catch(() => ({ data: [] }))
+        api.pruebas.getBySeccion(seccion.id).catch(() => ({ data: [] })),
+        api.asignaciones.getBySeccion(seccion.id).catch(() => ({ data: [] }))
       ]);
 
       if (resSemanas?.data) setSemanasConfig(resSemanas.data);
@@ -101,6 +112,11 @@ export default function ReviewQuizSubmissionsView({
           const firstAvailable = resQuizzes.data[0].numero_semana;
           if (firstAvailable) setSelectedSemana(Number(firstAvailable));
         }
+      }
+      if (resAsig?.data && Array.isArray(resAsig.data)) {
+        setAsignaciones(resAsig.data);
+      } else if (Array.isArray(resAsig)) {
+        setAsignaciones(resAsig);
       }
     } catch (err) {
       console.error("Error al cargar datos en Revisar Respuestas:", err);
@@ -148,8 +164,8 @@ export default function ReviewQuizSubmissionsView({
     }
   }, [selectedSemana, loadEntregasForSemana]);
 
-  // Semanas disponibles con prueba creada o configurada
-  const availableWeeks = useMemo(() => {
+  // Semanas disponibles con prueba creada o configurada (todas)
+  const allAvailableWeeks = useMemo(() => {
     const weeks = [];
     // Priorizar semanas que tienen prueba creada
     const quizWeeks = new Set(sectionQuizzes.map((q) => Number(q.numero_semana)));
@@ -187,6 +203,27 @@ export default function ReviewQuizSubmissionsView({
 
     return weeks.sort((a, b) => a.numero_semana - b.numero_semana);
   }, [semanasConfig, sectionQuizzes]);
+
+  // Semanas filtradas por rol del usuario (el titular ve todas; los asignados solo sus semanas asignadas)
+  const availableWeeks = useMemo(() => {
+    if (isTitular) return allAvailableWeeks;
+    return allAvailableWeeks.filter((w) =>
+      isWeekAssignedToUser(
+        asignaciones,
+        [SECTION_ROLES.PRUEBAS, SECTION_ROLES.PRUEBAS_LEGACY],
+        w.numero_semana,
+        currentUser,
+        seccion
+      )
+    );
+  }, [allAvailableWeeks, isTitular, asignaciones, currentUser, seccion]);
+
+  // Asegurar que la semana seleccionada pertenezca a availableWeeks
+  useEffect(() => {
+    if (availableWeeks.length > 0 && !availableWeeks.some((w) => w.numero_semana === selectedSemana)) {
+      setSelectedSemana(availableWeeks[0].numero_semana);
+    }
+  }, [availableWeeks, selectedSemana]);
 
   // Filtrar entregas por buscador y estado
   const filteredEntregas = useMemo(() => {
@@ -951,12 +988,82 @@ export default function ReviewQuizSubmissionsView({
           </button>
         </div>
 
-        {/* Selector de Semana en Formato Pills */}
-        <div>
-          <span style={{ fontSize: "0.76rem", fontWeight: 800, color: "#64748b", textTransform: "uppercase", display: "block", marginBottom: "0.5rem" }}>
-            Selecciona la Semana a Revisar:
-          </span>
-          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", overflowX: "auto", paddingBottom: "0.25rem" }}>
+        {availableWeeks.length === 0 ? (
+          <div
+            style={{
+              background: "#ffffff",
+              border: "1.5px dashed #cbd5e1",
+              borderRadius: "1rem",
+              padding: "3.5rem 2rem",
+              textAlign: "center",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: "1rem"
+            }}
+          >
+            <div
+              style={{
+                width: "56px",
+                height: "56px",
+                borderRadius: "50%",
+                background: "#f8fafc",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                color: "#64748b",
+                border: "1px solid #e2e8f0"
+              }}
+            >
+              <HelpCircle size={28} />
+            </div>
+            <h3 style={{ margin: 0, fontSize: "1.2rem", fontWeight: 800, color: "#1e293b" }}>
+              No tienes semanas asignadas para revisar pruebas
+            </h3>
+            <p style={{ margin: 0, fontSize: "0.88rem", color: "#64748b", maxWidth: "480px", lineHeight: 1.5 }}>
+              En esta sección no tienes asignado el rol oficial de <strong>Revisión de prueba semanal</strong> en ninguna semana. Si requieres acceso para revisar y calificar respuestas, contacta al instructor titular ({seccion?.coordinador || "Coordinador de Sección"}).
+            </p>
+          </div>
+        ) : (
+          <>
+            {/* Selector de Semana en Formato Pills */}
+            <div>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "0.5rem", marginBottom: "0.5rem" }}>
+                <span style={{ fontSize: "0.76rem", fontWeight: 800, color: "#64748b", textTransform: "uppercase" }}>
+                  Selecciona la Semana a Revisar:
+                </span>
+
+                {/* Docente asignado a la revisión de esta semana */}
+                {(() => {
+                  const assignedRecord = getAssignedRecordForWeek(
+                    asignaciones,
+                    [SECTION_ROLES.PRUEBAS, SECTION_ROLES.PRUEBAS_LEGACY],
+                    selectedSemana
+                  );
+                  const assignedName = assignedRecord?.instructor_nombre || null;
+                  return (
+                    <div
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "0.35rem",
+                        fontSize: "0.74rem",
+                        fontWeight: 800,
+                        padding: "0.2rem 0.65rem",
+                        borderRadius: "9999px",
+                        background: assignedName ? "#ecfdf5" : "#f8fafc",
+                        color: assignedName ? "#047857" : "#64748b",
+                        border: `1px solid ${assignedName ? "#a7f3d0" : "#e2e8f0"}`
+                      }}
+                    >
+                      <User size={13} color={assignedName ? "#059669" : "#94a3b8"} />
+                      <span>{assignedName ? `Docente asignado: ${assignedName}` : "Sin docente asignado"}</span>
+                    </div>
+                  );
+                })()}
+              </div>
+
+              <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", overflowX: "auto", paddingBottom: "0.25rem" }}>
             {availableWeeks.map((w) => {
               const isSelected = selectedSemana === w.numero_semana;
               return (
@@ -1037,8 +1144,12 @@ export default function ReviewQuizSubmissionsView({
             </div>
           </div>
         </div>
+        </>
+        )}
       </div>
 
+      {availableWeeks.length > 0 && (
+      <>
       {/* 2. Filtros y Búsqueda */}
       <div
         style={{
@@ -1470,6 +1581,8 @@ export default function ReviewQuizSubmissionsView({
             );
           })}
         </div>
+      )}
+      </>
       )}
 
       {/* =================================================================== */}

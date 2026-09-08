@@ -164,7 +164,7 @@ export default function DashboardInstructor({ instructor, notify = () => {} }) {
   // Si se abre la vista de la sección como Instructor Asignado
   if (selectedInstructorSeccion) {
     return (
-      <InstructorSectionView
+      <CoordinatorSectionView
         seccion={selectedInstructorSeccion}
         currentInstructor={instructor}
         onClose={() => setSelectedInstructorSeccion(null)}

@@ -23,9 +23,16 @@ import {
   Sparkles,
   BookOpen,
   RotateCcw,
-  Radio
+  Radio,
+  User
 } from "lucide-react";
 import { api } from "../services/api";
+import {
+  isInstructorTitular,
+  isWeekAssignedToUser,
+  getAssignedRecordForWeek,
+  SECTION_ROLES
+} from "../utils/sectionRoleUtils";
 
 const createDefaultQuestions = () => [
   { id: "q_1", numero: 1, enunciado: "", puntos: 1.0, es_bonus: false, items: [] },
@@ -114,6 +121,10 @@ export default function WeeklyQuizCreationView({
   const [semanasConfig, setSemanasConfig] = useState([]);
   const [temario, setTemario] = useState([]);
   const [sectionQuizzes, setSectionQuizzes] = useState([]);
+  const [asignaciones, setAsignaciones] = useState([]);
+
+  const currentUser = currentInstructor || api.auth.getCurrentInstructor();
+  const isTitular = useMemo(() => isInstructorTitular(currentUser, seccion), [currentUser, seccion]);
 
   const carrera = seccion?.carrera || "Medicina";
 
@@ -152,16 +163,22 @@ export default function WeeklyQuizCreationView({
     setLoading(true);
 
     try {
-      const [resSemanas, resTemario, resQuizzes] = await Promise.all([
+      const [resSemanas, resTemario, resQuizzes, resAsig] = await Promise.all([
         api.semanas.getConfig(carrera).catch(() => ({ data: [] })),
         api.temario.getAll({ carrera }).catch(() => ({ data: [] })),
-        api.pruebas.getBySeccion(seccion.id).catch(() => ({ data: [] }))
+        api.pruebas.getBySeccion(seccion.id).catch(() => ({ data: [] })),
+        api.asignaciones.getBySeccion(seccion.id).catch(() => ({ data: [] }))
       ]);
 
       if (resSemanas?.data) setSemanasConfig(resSemanas.data);
       if (resTemario?.data) setTemario(resTemario.data);
       if (resQuizzes?.data && Array.isArray(resQuizzes.data)) {
         setSectionQuizzes(resQuizzes.data);
+      }
+      if (resAsig?.data && Array.isArray(resAsig.data)) {
+        setAsignaciones(resAsig.data);
+      } else if (Array.isArray(resAsig)) {
+        setAsignaciones(resAsig);
       }
     } catch (err) {
       console.error("Error al cargar datos en Crear prueba semanal:", err);
@@ -233,6 +250,14 @@ export default function WeeklyQuizCreationView({
       .filter((w) => !w.esExamen)
       .sort((a, b) => a.numero_semana - b.numero_semana);
   }, [semanasConfig, temario]);
+
+  // Semanas filtradas por rol del docente (el titular ve todas; los asignados solo las suyas)
+  const visibleWeeks = useMemo(() => {
+    if (isTitular) return availableWeeks;
+    return availableWeeks.filter((w) =>
+      isWeekAssignedToUser(asignaciones, SECTION_ROLES.CREAR_PRUEBA, w.numero_semana, currentUser, seccion)
+    );
+  }, [availableWeeks, isTitular, asignaciones, currentUser, seccion]);
 
   // Mapa de pruebas ya guardadas por semana
   const quizzesBySemanaMap = useMemo(() => {
@@ -874,18 +899,57 @@ export default function WeeklyQuizCreationView({
         </div>
 
         {/* Grid de Semanas Disponibles */}
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))",
-            gap: "1.25rem"
-          }}
-        >
-          {availableWeeks.map((week) => {
-            const existingQuiz = quizzesBySemanaMap.get(week.numero_semana);
-            const isPublished = existingQuiz?.publicada || existingQuiz?.estado === "publicada";
-            const isDraft = existingQuiz && !isPublished;
-            const hasQuestions = (existingQuiz?.preguntas?.length || 0) > 0;
+        {visibleWeeks.length === 0 ? (
+          <div
+            style={{
+              background: "#ffffff",
+              border: "1.5px dashed #cbd5e1",
+              borderRadius: "1rem",
+              padding: "3.5rem 2rem",
+              textAlign: "center",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: "1rem"
+            }}
+          >
+            <div
+              style={{
+                width: "56px",
+                height: "56px",
+                borderRadius: "50%",
+                background: "#f8fafc",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                color: "#64748b",
+                border: "1px solid #e2e8f0"
+              }}
+            >
+              <HelpCircle size={28} />
+            </div>
+            <h3 style={{ margin: 0, fontSize: "1.2rem", fontWeight: 800, color: "#1e293b" }}>
+              No tienes semanas asignadas para crear pruebas
+            </h3>
+            <p style={{ margin: 0, fontSize: "0.88rem", color: "#64748b", maxWidth: "480px", lineHeight: 1.5 }}>
+              En esta sección no tienes asignado el rol oficial de <strong>Crear prueba semanal</strong> en ninguna semana. Si requieres acceso para diseñar reactivos, contacta al instructor titular ({seccion?.coordinador || "Coordinador de Sección"}).
+            </p>
+          </div>
+        ) : (
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))",
+              gap: "1.25rem"
+            }}
+          >
+            {visibleWeeks.map((week) => {
+              const existingQuiz = quizzesBySemanaMap.get(week.numero_semana);
+              const isPublished = existingQuiz?.publicada || existingQuiz?.estado === "publicada";
+              const isDraft = existingQuiz && !isPublished;
+              const hasQuestions = (existingQuiz?.preguntas?.length || 0) > 0;
+              const assignedRecord = getAssignedRecordForWeek(asignaciones, SECTION_ROLES.CREAR_PRUEBA, week.numero_semana);
+              const assignedName = assignedRecord?.instructor_nombre || null;
 
             return (
               <div
@@ -989,6 +1053,26 @@ export default function WeeklyQuizCreationView({
                       ? `${existingQuiz.preguntas.length} preguntas redactadas`
                       : "Prueba semanal sin reactivos diseñados todavía."}
                   </p>
+
+                  {/* Indicador de Docente Asignado */}
+                  <div
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "0.35rem",
+                      fontSize: "0.74rem",
+                      fontWeight: 700,
+                      padding: "0.22rem 0.55rem",
+                      borderRadius: "0.45rem",
+                      background: assignedName ? "#f0f9ff" : "#f8fafc",
+                      color: assignedName ? "#0369a1" : "#94a3b8",
+                      border: `1px solid ${assignedName ? "#bae6fd" : "#e2e8f0"}`,
+                      marginTop: "0.45rem"
+                    }}
+                  >
+                    <User size={13} color={assignedName ? "#0284c7" : "#94a3b8"} />
+                    <span>{assignedName ? `Asignado: ${assignedName}` : "Sin asignar"}</span>
+                  </div>
                 </div>
 
                 {/* Métricas y Botón de Acción */}
@@ -1016,6 +1100,7 @@ export default function WeeklyQuizCreationView({
             );
           })}
         </div>
+        )}
       </div>
     );
   }

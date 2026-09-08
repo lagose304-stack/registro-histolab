@@ -41,6 +41,7 @@ import ReviewQuizSubmissionsView from "./ReviewQuizSubmissionsView";
 import SectionAwardsView from "./SectionAwardsView";
 import LiveQuizControlView from "./LiveQuizControlView";
 import { getNavState, setNavState } from "../utils/navigationState";
+import { isInstructorTitular } from "../utils/sectionRoleUtils";
 
 export default function CoordinatorSectionView({
   seccion,
@@ -49,6 +50,9 @@ export default function CoordinatorSectionView({
   notify = () => {}
 }) {
   const initialNav = getNavState();
+  const currentUser = currentInstructor || api.auth.getCurrentInstructor();
+  const isTitular = useMemo(() => isInstructorTitular(currentUser, seccion), [currentUser, seccion]);
+
   // activeModule: null (vista de tarjetas) | 'calificaciones' | 'asistencia' | 'instructores'
   const [activeModule, setActiveModuleState] = useState(
     () => initialNav.coordinatorSectionModule || null
@@ -192,17 +196,26 @@ export default function CoordinatorSectionView({
               display: "inline-flex",
               alignItems: "center",
               gap: "0.35rem",
-              background: "#fffbeb",
-              border: "1px solid #fde68a",
-              color: "#b45309",
+              background: isTitular ? "#fffbeb" : "#eff6ff",
+              border: `1px solid ${isTitular ? "#fde68a" : "#bfdbfe"}`,
+              color: isTitular ? "#b45309" : "#1d4ed8",
               padding: "0.3rem 0.75rem",
               borderRadius: "9999px",
               fontSize: "0.78rem",
               fontWeight: 800
             }}
           >
-            <Star size={13} fill="#f59e0b" color="#d97706" />
-            <span>Instructor Titular</span>
+            {isTitular ? (
+              <>
+                <Star size={13} fill="#f59e0b" color="#d97706" />
+                <span>Instructor Titular</span>
+              </>
+            ) : (
+              <>
+                <Users size={13} color="#2563eb" />
+                <span>Instructor Asignado</span>
+              </>
+            )}
           </div>
         </div>
 
@@ -558,6 +571,7 @@ export default function CoordinatorSectionView({
               </div>
 
               {/* TARJETA 4: ASIGNACIONES (PROPORCIONAR ASIGNACIONES) */}
+              {isTitular && (
               <div
                 onClick={() => setActiveModule("asignaciones")}
                 style={{
@@ -614,6 +628,7 @@ export default function CoordinatorSectionView({
                   <ArrowRight size={14} />
                 </div>
               </div>
+              )}
             </div>
           </div>
 
@@ -1114,6 +1129,7 @@ export default function CoordinatorSectionView({
           {/* ================================================================= */}
           {/* SECCIÓN 3: EXCLUSIVO DE MIGRACIÓN                                  */}
           {/* ================================================================= */}
+          {isTitular && (
           <div style={{ display: "flex", flexDirection: "column", gap: "1rem", marginTop: "0.5rem" }}>
             <div style={{ display: "flex", alignItems: "center", gap: "0.6rem" }}>
               <div
@@ -1216,6 +1232,7 @@ export default function CoordinatorSectionView({
               </div>
             </div>
           </div>
+          )}
         </div>
       )}
 

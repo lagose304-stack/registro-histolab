@@ -32,7 +32,7 @@ import { api } from "../services/api";
 const ROLES = {
   CREAR_PRUEBA: "Crear prueba semanal",
   MANUALES: "Subir nota de manuales semanal",
-  PRUEBAS: "Subir nota de prueba semanal",
+  PRUEBAS: "Revisión de prueba semanal",
   EXAMENES: "Subir nota de examen parcial",
   ASISTENCIA: "Pasar lista de asistencia semanal"
 };
@@ -157,6 +157,9 @@ export default function SectionAssignmentsView({ seccion, hideBackButton, notify
         if (a.tipo_asignacion && a.referencia_id) {
           const key = `${a.tipo_asignacion}__${a.referencia_id}`;
           map[key] = a.instructor_id || "";
+          if (a.tipo_asignacion === "Subir nota de prueba semanal") {
+            map[`${ROLES.PRUEBAS}__${a.referencia_id}`] = a.instructor_id || "";
+          }
         }
       });
 
@@ -839,7 +842,7 @@ export default function SectionAssignmentsView({ seccion, hideBackButton, notify
 
             const curCrearPruebaId = assignmentsMap[crearPruebaKey] || "";
             const curManualId = assignmentsMap[manualKey] || "";
-            const curPruebaId = assignmentsMap[pruebaKey] || "";
+            const curPruebaId = assignmentsMap[pruebaKey] || assignmentsMap[`Subir nota de prueba semanal__${semRef}`] || "";
             const curExamId = assignmentsMap[examKey] || "";
             const curAsistId = assignmentsMap[asistKey] || "";
 
@@ -1142,7 +1145,7 @@ export default function SectionAssignmentsView({ seccion, hideBackButton, notify
                         {renderInstructorSelect(ROLES.CREAR_PRUEBA, semRef, curCrearPruebaId)}
                       </div>
 
-                      {/* ROL 3: Subir nota de prueba semanal */}
+                      {/* ROL 3: Revisión de prueba semanal */}
                       <div
                         style={{
                           background: curPruebaId ? "#f0fdf4" : "#ffffff",
@@ -1162,7 +1165,7 @@ export default function SectionAssignmentsView({ seccion, hideBackButton, notify
                           </span>
                         </div>
                         <span style={{ fontSize: "0.68rem", color: "#64748b" }}>
-                          Pruebita única semanal
+                          Revisión y retroalimentación semanal
                         </span>
                         {renderInstructorSelect(ROLES.PRUEBAS, semRef, curPruebaId)}
                       </div>

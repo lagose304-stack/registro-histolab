@@ -17,13 +17,20 @@ import {
   Sparkles,
   Info,
   HelpCircle,
-  FileText
+  FileText,
+  User
 } from "lucide-react";
 import { api } from "../services/api";
 import {
   calculateStudentAcademicSummary,
   getCanonicalManualGrade
 } from "../utils/academicEngine";
+import {
+  isInstructorTitular,
+  isWeekAssignedToUser,
+  matchesInstructor,
+  SECTION_ROLES
+} from "../utils/sectionRoleUtils";
 
 export default function WeeklyManualsGradingView({
   seccion,
@@ -35,6 +42,9 @@ export default function WeeklyManualsGradingView({
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+
+  const currentUser = currentInstructor || api.auth.getCurrentInstructor();
+  const isTitular = useMemo(() => isInstructorTitular(currentUser, seccion), [currentUser, seccion]);
 
   // Referencia estable de notify
   const notifyRef = useRef(notify);
@@ -146,8 +156,8 @@ export default function WeeklyManualsGradingView({
     return `Semana ${w.numero_semana}: ${rawName}`;
   };
 
-  // Lista unificada de semanas
-  const availableWeeks = useMemo(() => {
+  // Semanas disponibles con manual (todas)
+  const allAvailableWeeks = useMemo(() => {
     const weekMap = new Map();
 
     semanasConfig.forEach((s) => {
@@ -191,6 +201,14 @@ export default function WeeklyManualsGradingView({
       .sort((a, b) => a.numero_semana - b.numero_semana);
   }, [semanasConfig, temario]);
 
+  // Semanas filtradas por rol del usuario (el titular ve todas; los asignados solo sus semanas)
+  const availableWeeks = useMemo(() => {
+    if (isTitular) return allAvailableWeeks;
+    return allAvailableWeeks.filter((w) =>
+      isWeekAssignedToUser(asignaciones, SECTION_ROLES.MANUALES, w.numero_semana, currentUser, seccion)
+    );
+  }, [allAvailableWeeks, isTitular, asignaciones, currentUser, seccion]);
+
   // Si la semana seleccionada coincide con un examen o no está en las disponibles, ajustar
   useEffect(() => {
     if (availableWeeks.length > 0 && !availableWeeks.some((w) => w.numero_semana === selectedSemana)) {
@@ -231,54 +249,15 @@ export default function WeeklyManualsGradingView({
 
   const assignedInstructorForWeek = assignedRecordForWeek?.instructor_nombre || null;
 
-  // 🛡️ REGLA ESTRICTA: El usuario solo puede editar la nota de manuales si le asignaron el rol en esta semana
+  // 🛡️ REGLA ESTRICTA: El usuario solo puede editar la nota de manuales si le asignaron el rol en esta semana o es titular
   const canEdit = useMemo(() => {
     if (currentWeekInfo.esExamen) return false;
+    if (isTitular) return true;
     if (!assignedRecordForWeek || !assignedRecordForWeek.instructor_id) {
-      // Si nadie ha sido asignado en Proporcionar Asignaciones para esta semana, queda en solo lectura
       return false;
     }
-
-    const user = currentInstructor || api.auth.getCurrentInstructor();
-    if (!user) return false;
-
-    // 1. Coincidencia por ID de instructor UUID
-    if (user.id && assignedRecordForWeek.instructor_id && String(user.id) === String(assignedRecordForWeek.instructor_id)) {
-      return true;
-    }
-
-    // 2. Coincidencia por coordinador sintetizado (coord-{seccionId})
-    if (assignedRecordForWeek.instructor_id === `coord-${seccion?.id}`) {
-      const coordName = (seccion?.coordinador || "").toLowerCase().trim();
-      const userName = (user.nombre_completo || `${user.primer_nombre || ""} ${user.primer_apellido || ""}`).toLowerCase().trim();
-      if (coordName && (userName.includes(coordName) || coordName.includes(userName))) {
-        return true;
-      }
-    }
-
-    // 3. Coincidencia por nombre completo o primer nombre + primer apellido
-    const targetName = (assignedRecordForWeek.instructor_nombre || "").toLowerCase().trim();
-    if (!targetName) return false;
-
-    const userFullName = (user.nombre_completo || "").toLowerCase().trim();
-    const userCombinedName = `${user.primer_nombre || ""} ${user.primer_apellido || ""}`.toLowerCase().trim();
-
-    if (userFullName && (userFullName === targetName || targetName.includes(userFullName))) {
-      return true;
-    }
-
-    if (userCombinedName && (userCombinedName === targetName || targetName.includes(userCombinedName))) {
-      return true;
-    }
-
-    const pNom = (user.primer_nombre || "").toLowerCase().trim();
-    const pApe = (user.primer_apellido || "").toLowerCase().trim();
-    if (pNom && pApe && targetName.includes(pNom) && targetName.includes(pApe)) {
-      return true;
-    }
-
-    return false;
-  }, [assignedRecordForWeek, currentInstructor, seccion, currentWeekInfo.esExamen]);
+    return matchesInstructor(currentUser, assignedRecordForWeek.instructor_id, assignedRecordForWeek.instructor_nombre, seccion);
+  }, [assignedRecordForWeek, currentUser, seccion, isTitular, currentWeekInfo.esExamen]);
 
   // Helper para leer la nota de manual de un estudiante para un tema
   const getStudentManualGrade = (est, tema) => {
@@ -758,6 +737,44 @@ export default function WeeklyManualsGradingView({
           </div>
         </div>
 
+        {availableWeeks.length === 0 ? (
+          <div
+            style={{
+              background: "#ffffff",
+              border: "1.5px dashed #cbd5e1",
+              borderRadius: "1rem",
+              padding: "3.5rem 2rem",
+              textAlign: "center",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: "1rem"
+            }}
+          >
+            <div
+              style={{
+                width: "56px",
+                height: "56px",
+                borderRadius: "50%",
+                background: "#f8fafc",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                color: "#64748b",
+                border: "1px solid #e2e8f0"
+              }}
+            >
+              <HelpCircle size={28} />
+            </div>
+            <h3 style={{ margin: 0, fontSize: "1.2rem", fontWeight: 800, color: "#1e293b" }}>
+              No tienes semanas asignadas para calificar manuales
+            </h3>
+            <p style={{ margin: 0, fontSize: "0.88rem", color: "#64748b", maxWidth: "480px", lineHeight: 1.5 }}>
+              En esta sección no tienes asignado el rol oficial de <strong>Subir nota de manuales semanal</strong> en ninguna semana. Si requieres acceso para ingresar notas, contacta al instructor titular ({seccion?.coordinador || "Coordinador de Sección"}).
+            </p>
+          </div>
+        ) : (
+          <>
         {/* =================================================================== */}
         {/* BANNER DE REGLA Y PERMISO DE ASIGNACIÓN                             */}
         {/* =================================================================== */}
@@ -779,6 +796,26 @@ export default function WeeklyManualsGradingView({
             <Info size={18} color="#2563eb" style={{ flexShrink: 0 }} />
             <span>
               <strong>Semana de Examen Parcial:</strong> En las semanas de examen no hay manual programado para calificar.
+            </span>
+          </div>
+        ) : isTitular ? (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "0.55rem",
+              background: "#f0fdf4",
+              border: "1.5px solid #86efac",
+              borderRadius: "0.75rem",
+              padding: "0.65rem 1rem",
+              color: "#166534",
+              fontSize: "0.82rem",
+              fontWeight: 700
+            }}
+          >
+            <ShieldCheck size={18} color="#16a34a" style={{ flexShrink: 0 }} />
+            <span>
+              Tienes acceso y autorización total como <strong>Instructor Titular</strong> de la sección. {assignedInstructorForWeek ? `Docente asignado a esta semana: ${assignedInstructorForWeek}.` : "Esta semana no tiene docente asignado."}
             </span>
           </div>
         ) : canEdit ? (
@@ -879,6 +916,26 @@ export default function WeeklyManualsGradingView({
             >
               {getWeekDisplayName(currentWeekInfo)}
             </span>
+
+            {assignedInstructorForWeek && (
+              <div
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "0.35rem",
+                  fontSize: "0.75rem",
+                  fontWeight: 800,
+                  padding: "0.2rem 0.65rem",
+                  borderRadius: "9999px",
+                  background: "#eff6ff",
+                  color: "#1e40af",
+                  border: "1px solid #bfdbfe"
+                }}
+              >
+                <User size={13} color="#2563eb" />
+                <span>Docente asignado: {assignedInstructorForWeek}</span>
+              </div>
+            )}
 
             {/* Badges de Temas programados en esta semana */}
             <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", flexWrap: "wrap" }}>
@@ -1012,11 +1069,14 @@ export default function WeeklyManualsGradingView({
             </div>
           </div>
         )}
+        </>
+        )}
       </div>
 
       {/* =================================================================== */}
       {/* 2. LISTA DE ALUMNOS CON LAS CASILLAS DE MANUAL POR TEMA             */}
       {/* =================================================================== */}
+      {availableWeeks.length > 0 && (
       <div
         style={{
           background: "#ffffff",
@@ -1334,6 +1394,7 @@ export default function WeeklyManualsGradingView({
           </>
         )}
       </div>
+      )}
     </div>
   );
 }

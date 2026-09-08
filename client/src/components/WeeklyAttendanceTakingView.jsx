@@ -19,9 +19,17 @@ import {
   ChevronRight,
   Filter,
   CheckCheck,
-  Lock
+  Lock,
+  User,
+  HelpCircle
 } from "lucide-react";
 import { api } from "../services/api";
+import {
+  isInstructorTitular,
+  isWeekAssignedToUser,
+  matchesInstructor,
+  SECTION_ROLES
+} from "../utils/sectionRoleUtils";
 
 const ESTADOS_ASISTENCIA = {
   ASISTIO: "Asistio",
@@ -39,6 +47,9 @@ export default function WeeklyAttendanceTakingView({
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+
+  const currentUser = currentInstructor || api.auth.getCurrentInstructor();
+  const isTitular = useMemo(() => isInstructorTitular(currentUser, seccion), [currentUser, seccion]);
 
   // Guardar ref de notify para que no sea dependencia inestable de loadData
   const notifyRef = useRef(notify);
@@ -145,8 +156,8 @@ export default function WeeklyAttendanceTakingView({
     return `Semana ${w.numero_semana}: ${rawName}`;
   };
 
-  // Lista unificada de semanas
-  const availableWeeks = useMemo(() => {
+  // Lista unificada de semanas (todas)
+  const allAvailableWeeks = useMemo(() => {
     const weekMap = new Map();
 
     semanasConfig.forEach((s) => {
@@ -187,6 +198,21 @@ export default function WeeklyAttendanceTakingView({
     return Array.from(weekMap.values()).sort((a, b) => a.numero_semana - b.numero_semana);
   }, [semanasConfig, temario]);
 
+  // Semanas filtradas por rol del usuario (el titular ve todas; los asignados solo sus semanas asignadas)
+  const availableWeeks = useMemo(() => {
+    if (isTitular) return allAvailableWeeks;
+    return allAvailableWeeks.filter((w) =>
+      isWeekAssignedToUser(asignaciones, SECTION_ROLES.ASISTENCIA, w.numero_semana, currentUser, seccion)
+    );
+  }, [allAvailableWeeks, isTitular, asignaciones, currentUser, seccion]);
+
+  // Si la semana seleccionada no está entre las disponibles, ajustar a la primera
+  useEffect(() => {
+    if (availableWeeks.length > 0 && !availableWeeks.some((w) => w.numero_semana === selectedSemana)) {
+      setSelectedSemana(availableWeeks[0].numero_semana);
+    }
+  }, [availableWeeks, selectedSemana]);
+
   // Información de la semana seleccionada
   const currentWeekInfo = useMemo(() => {
     return availableWeeks.find((w) => w.numero_semana === selectedSemana) || {
@@ -207,53 +233,15 @@ export default function WeeklyAttendanceTakingView({
 
   const assignedInstructorForWeek = assignedRecordForWeek?.instructor_nombre || null;
 
-  // 🛡️ REGLA ESTRICTA: El usuario solo puede editar la lista de asistencia si fue asignado a esa semana
+  // 🛡️ REGLA ESTRICTA: El usuario solo puede editar la lista de asistencia si fue asignado a esa semana o es titular
   const canEdit = useMemo(() => {
+    if (isTitular) return true;
     if (!assignedRecordForWeek || !assignedRecordForWeek.instructor_id) {
       // Si nadie ha sido asignado a esta semana en "Proporcionar Asignaciones", está bloqueado para edición
       return false;
     }
-
-    const user = currentInstructor || api.auth.getCurrentInstructor();
-    if (!user) return false;
-
-    // 1. Coincidencia por ID de instructor UUID
-    if (user.id && assignedRecordForWeek.instructor_id && String(user.id) === String(assignedRecordForWeek.instructor_id)) {
-      return true;
-    }
-
-    // 2. Coincidencia por ID sintetizado de coordinador (coord-{seccionId})
-    if (assignedRecordForWeek.instructor_id === `coord-${seccion?.id}`) {
-      const coordName = (seccion?.coordinador || "").toLowerCase().trim();
-      const userName = (user.nombre_completo || `${user.primer_nombre || ""} ${user.primer_apellido || ""}`).toLowerCase().trim();
-      if (coordName && (userName.includes(coordName) || coordName.includes(userName))) {
-        return true;
-      }
-    }
-
-    // 3. Coincidencia por nombre completo o primer nombre + primer apellido
-    const targetName = (assignedRecordForWeek.instructor_nombre || "").toLowerCase().trim();
-    if (!targetName) return false;
-
-    const userFullName = (user.nombre_completo || "").toLowerCase().trim();
-    const userCombinedName = `${user.primer_nombre || ""} ${user.primer_apellido || ""}`.toLowerCase().trim();
-
-    if (userFullName && (userFullName === targetName || targetName.includes(userFullName))) {
-      return true;
-    }
-
-    if (userCombinedName && (userCombinedName === targetName || targetName.includes(userCombinedName))) {
-      return true;
-    }
-
-    const pNom = (user.primer_nombre || "").toLowerCase().trim();
-    const pApe = (user.primer_apellido || "").toLowerCase().trim();
-    if (pNom && pApe && targetName.includes(pNom) && targetName.includes(pApe)) {
-      return true;
-    }
-
-    return false;
-  }, [assignedRecordForWeek, currentInstructor, seccion]);
+    return matchesInstructor(currentUser, assignedRecordForWeek.instructor_id, assignedRecordForWeek.instructor_nombre, seccion);
+  }, [assignedRecordForWeek, currentUser, seccion, isTitular]);
 
   // Claves de asistencia para la semana actual
   const asistKey = `asistencia_${selectedSemana}`;
@@ -637,10 +625,68 @@ export default function WeeklyAttendanceTakingView({
           </div>
         </div>
 
+        {availableWeeks.length === 0 ? (
+          <div
+            style={{
+              background: "#ffffff",
+              border: "1.5px dashed #cbd5e1",
+              borderRadius: "1rem",
+              padding: "3.5rem 2rem",
+              textAlign: "center",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: "1rem"
+            }}
+          >
+            <div
+              style={{
+                width: "56px",
+                height: "56px",
+                borderRadius: "50%",
+                background: "#f8fafc",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                color: "#64748b",
+                border: "1px solid #e2e8f0"
+              }}
+            >
+              <HelpCircle size={28} />
+            </div>
+            <h3 style={{ margin: 0, fontSize: "1.2rem", fontWeight: 800, color: "#1e293b" }}>
+              No tienes semanas asignadas para pasar lista de asistencia
+            </h3>
+            <p style={{ margin: 0, fontSize: "0.88rem", color: "#64748b", maxWidth: "480px", lineHeight: 1.5 }}>
+              En esta sección no tienes asignado el rol oficial de <strong>Pasar lista de asistencia semanal</strong> en ninguna semana. Si requieres acceso para tomar asistencia, contacta al instructor titular ({seccion?.coordinador || "Coordinador de Sección"}).
+            </p>
+          </div>
+        ) : (
+          <>
         {/* =================================================================== */}
         {/* BANNER DE REGLA Y PERMISO DE ASIGNACIÓN                             */}
         {/* =================================================================== */}
-        {canEdit ? (
+        {isTitular ? (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "0.55rem",
+              background: "#f0fdf4",
+              border: "1.5px solid #86efac",
+              borderRadius: "0.75rem",
+              padding: "0.65rem 1rem",
+              color: "#166534",
+              fontSize: "0.82rem",
+              fontWeight: 700
+            }}
+          >
+            <ShieldCheck size={18} color="#16a34a" style={{ flexShrink: 0 }} />
+            <span>
+              Tienes acceso y autorización total como <strong>Instructor Titular</strong> de la sección. {assignedInstructorForWeek ? `Docente asignado a esta semana: ${assignedInstructorForWeek}.` : "Esta semana no tiene docente asignado."}
+            </span>
+          </div>
+        ) : canEdit ? (
           <div
             style={{
               display: "flex",
@@ -738,6 +784,26 @@ export default function WeeklyAttendanceTakingView({
             >
               {getWeekDisplayName(currentWeekInfo)}
             </span>
+
+            {assignedInstructorForWeek && (
+              <div
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "0.35rem",
+                  fontSize: "0.75rem",
+                  fontWeight: 800,
+                  padding: "0.2rem 0.65rem",
+                  borderRadius: "9999px",
+                  background: "#fdf4ff",
+                  color: "#a21caf",
+                  border: "1px solid #f0abfc"
+                }}
+              >
+                <User size={13} color="#c026d3" />
+                <span>Docente asignado: {assignedInstructorForWeek}</span>
+              </div>
+            )}
 
             {currentWeekInfo.fecha_inicio && currentWeekInfo.fecha_fin && (
               <span style={{ fontSize: "0.74rem", color: "#64748b", display: "inline-flex", alignItems: "center", gap: "0.25rem" }}>
@@ -844,11 +910,14 @@ export default function WeeklyAttendanceTakingView({
             />
           </div>
         </div>
+        </>
+        )}
       </div>
 
       {/* =================================================================== */}
       {/* 2. LISTA DE ALUMNOS CON LAS 3 CASILLAS DE ASISTENCIA                */}
       {/* =================================================================== */}
+      {availableWeeks.length > 0 && (
       <div
         style={{
           background: "#ffffff",
@@ -1080,6 +1149,7 @@ export default function WeeklyAttendanceTakingView({
           </button>
         </div>
       </div>
+      )}
     </div>
   );
 }
