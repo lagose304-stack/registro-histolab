@@ -114,21 +114,31 @@ export default function DashboardInstructor({ instructor, notify = () => {} }) {
     }
   }
 
-  // Cargar secciones y filtrar aquellas donde el instructor es Coordinador
+  // Determina si el instructor actual es el Coordinador titular de una sección
+  const checkIsCoord = useCallback((sec) => {
+    if (!sec) return false;
+    const coordStr = (sec.coordinador || "").toLowerCase().trim();
+    const pNombre = (instructor?.primer_nombre || "").toLowerCase().trim();
+    const pApellido = (instructor?.primer_apellido || "").toLowerCase().trim();
+    const fName = fullName.toLowerCase().trim();
+    return (
+      Boolean(pNombre && pApellido && coordStr.includes(pNombre) && coordStr.includes(pApellido)) ||
+      coordStr === fName ||
+      (fName.length > 0 && coordStr.includes(fName))
+    );
+  }, [instructor, fullName]);
+
+  // Cargar secciones y filtrar aquellas donde el instructor es Coordinador o Instructor Asignado
   const loadMisSecciones = useCallback(async () => {
     setLoadingSecciones(true);
     try {
       const res = await api.secciones.getAll();
       if (res?.data) {
         const allSecs = res.data;
-        const pNombre = (instructor?.primer_nombre || "").toLowerCase().trim();
-        const pApellido = (instructor?.primer_apellido || "").toLowerCase().trim();
-        const fName = fullName.toLowerCase().trim();
 
         // Filtrar secciones donde el instructor es Coordinador O está Asignado
         const misSecs = allSecs.filter((sec) => {
-          const coord = (sec.coordinador || "").toLowerCase().trim();
-          const isCoord = (pNombre && pApellido && coord.includes(pNombre) && coord.includes(pApellido)) || coord === fName;
+          const isCoord = checkIsCoord(sec);
           const isAssigned = Array.isArray(sec.instructores_asignados) && (
             (instructor?.id && sec.instructores_asignados.includes(instructor.id)) ||
             (instructor?.numero_cuenta && sec.instructores_asignados.includes(instructor.numero_cuenta))
@@ -146,7 +156,7 @@ export default function DashboardInstructor({ instructor, notify = () => {} }) {
     } finally {
       setLoadingSecciones(false);
     }
-  }, [instructor, fullName]);
+  }, [instructor, checkIsCoord]);
 
   useEffect(() => {
     loadMisSecciones();
@@ -232,6 +242,9 @@ export default function DashboardInstructor({ instructor, notify = () => {} }) {
       />
     );
   }
+
+  const coordsCount = misSecciones.filter((sec) => checkIsCoord(sec)).length;
+  const assignedCount = misSecciones.length - coordsCount;
 
   return (
     <div className="animate-fade-in" style={{ display: "flex", flexDirection: "column", gap: "1.75rem" }}>
@@ -874,7 +887,11 @@ export default function DashboardInstructor({ instructor, notify = () => {} }) {
                 Mis Secciones
               </h2>
               <span style={{ fontSize: "0.82rem", color: "#64748b" }}>
-                Secciones donde estás asignado como <strong>Coordinador</strong>. Acceso a calificaciones y asistencias.
+                {coordsCount > 0 && assignedCount > 0
+                  ? "Secciones donde participas como coordinador o instructor docente. Acceso a calificaciones, pruebas y asistencias."
+                  : coordsCount > 0
+                  ? "Secciones donde estás asignado como Coordinador. Acceso a calificaciones y asistencias."
+                  : "Secciones donde participas como Instructor docente. Acceso a calificaciones, pruebas y asistencias."}
               </span>
             </div>
           </div>
@@ -890,7 +907,13 @@ export default function DashboardInstructor({ instructor, notify = () => {} }) {
               border: "1px solid #99f6e4"
             }}
           >
-            {misSecciones.length} {misSecciones.length === 1 ? "Sección Coordinada" : "Secciones Coordinadas"}
+            {coordsCount > 0 && assignedCount > 0
+              ? `${coordsCount} ${coordsCount === 1 ? "Coordinada" : "Coordinadas"} · ${assignedCount} ${assignedCount === 1 ? "Asignada" : "Asignadas"}`
+              : coordsCount > 0
+              ? `${coordsCount} ${coordsCount === 1 ? "Sección Coordinada" : "Secciones Coordinadas"}`
+              : assignedCount > 0
+              ? `${assignedCount} ${assignedCount === 1 ? "Sección Asignada" : "Secciones Asignadas"}`
+              : "0 Secciones"}
           </span>
         </div>
 
@@ -929,9 +952,9 @@ export default function DashboardInstructor({ instructor, notify = () => {} }) {
             >
               <Star size={26} fill="#fde68a" />
             </div>
-            <strong style={{ fontSize: "1.05rem", color: "#0f172a" }}>No tienes secciones asignadas como coordinador</strong>
+            <strong style={{ fontSize: "1.05rem", color: "#0f172a" }}>No tienes secciones asignadas</strong>
             <p style={{ fontSize: "0.84rem", margin: 0, maxWidth: "520px", lineHeight: 1.45 }}>
-              Cuando se cree o edite una sección en <strong>Administrar Secciones</strong> y seas asignado en el campo <em>Coordinador(a) Asignado(a)</em>, aparecerá automáticamente aquí.
+              Cuando se cree o edite una sección en <strong>Administrar Secciones</strong> y seas asignado como coordinador o docente, aparecerá automáticamente aquí.
             </p>
           </div>
         ) : (
@@ -1013,15 +1036,7 @@ export default function DashboardInstructor({ instructor, notify = () => {} }) {
 
                     {/* Insignia de Rol: Coordinador o Instructor Asignado */}
                     {(() => {
-                      const coordStr = (sec.coordinador || "").toLowerCase().trim();
-                      const pNombre = (instructor?.primer_nombre || "").toLowerCase().trim();
-                      const pApellido = (instructor?.primer_apellido || "").toLowerCase().trim();
-                      const fName = fullName.toLowerCase().trim();
-                      const isCoord = (
-                        (pNombre && pApellido && coordStr.includes(pNombre) && coordStr.includes(pApellido)) ||
-                        coordStr === fName ||
-                        coordStr.includes(fName)
-                      );
+                      const isCoord = checkIsCoord(sec);
 
                       if (isCoord) {
                         return (
@@ -1107,15 +1122,7 @@ export default function DashboardInstructor({ instructor, notify = () => {} }) {
                   {/* Botón de Acción Principal */}
                   <button
                     onClick={() => {
-                      const coordStr = (sec.coordinador || "").toLowerCase().trim();
-                      const pNombre = (instructor?.primer_nombre || "").toLowerCase().trim();
-                      const pApellido = (instructor?.primer_apellido || "").toLowerCase().trim();
-                      const fName = fullName.toLowerCase().trim();
-                      const isCoord = (
-                        (pNombre && pApellido && coordStr.includes(pNombre) && coordStr.includes(pApellido)) ||
-                        coordStr === fName ||
-                        coordStr.includes(fName)
-                      );
+                      const isCoord = checkIsCoord(sec);
 
                       if (isCoord) {
                         setSelectedCoordinatorSeccion(sec);
