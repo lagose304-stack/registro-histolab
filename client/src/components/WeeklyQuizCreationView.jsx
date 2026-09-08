@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { createPortal } from "react-dom";
 import {
   HelpCircle,
   ArrowLeft,
@@ -97,6 +98,17 @@ export default function WeeklyQuizCreationView({
 
   const notifyRef = useRef(notify);
   notifyRef.current = notify;
+
+  // Bloquear el scroll de fondo mientras el modal de reinicio esté abierto (Modal Global)
+  useEffect(() => {
+    if (showResetModal) {
+      const originalOverflow = document.body.style.overflow;
+      document.body.style.overflow = "hidden";
+      return () => {
+        document.body.style.overflow = originalOverflow;
+      };
+    }
+  }, [showResetModal]);
 
   // Datos académicos de la sección
   const [semanasConfig, setSemanasConfig] = useState([]);
@@ -256,14 +268,15 @@ export default function WeeklyQuizCreationView({
           if (res?.success && res.data && isMounted) {
             const serverQuiz = res.data;
             const normalizedPreguntas = normalizeSixQuestions(serverQuiz.preguntas);
+            const defaultWeekTitle = getWeekDisplayName(availableWeeks.find((w) => w.numero_semana === selectedSemana)) || `Prueba Semanal — Semana ${selectedSemana}`;
             setQuizData({
               id: serverQuiz.id || null,
-              titulo: serverQuiz.titulo || `Prueba Semanal ${selectedSemana}`,
+              titulo: defaultWeekTitle,
               puntajeTotal: serverQuiz.puntaje_total !== undefined ? Number(serverQuiz.puntaje_total) : 5.0,
               duracionMinutos: serverQuiz.duracion_minutos || 15,
               tiempoPorPreguntaSegundos: Number(serverQuiz.tiempo_por_pregunta_segundos) || 90,
               estado: serverQuiz.publicada ? "publicada" : (serverQuiz.estado || "borrador"),
-              instrucciones: serverQuiz.instrucciones || "",
+              instrucciones: "",
               preguntas: normalizedPreguntas
             });
             setHasUnsavedChanges(false);
@@ -291,9 +304,10 @@ export default function WeeklyQuizCreationView({
 
       // Si es una prueba nueva, inicializar con 6 preguntas vacías (la 6ta como bonus de 1.0 pt)
       if (isMounted) {
+        const defaultWeekTitle = getWeekDisplayName(availableWeeks.find((w) => w.numero_semana === selectedSemana)) || `Prueba Semanal — Semana ${selectedSemana}`;
         setQuizData({
           id: null,
-          titulo: `Prueba Semanal ${selectedSemana}`,
+          titulo: defaultWeekTitle,
           puntajeTotal: 6.0,
           duracionMinutos: 15,
           tiempoPorPreguntaSegundos: 90,
@@ -467,9 +481,7 @@ export default function WeeklyQuizCreationView({
           }
           if (field === "cantidad") {
             const newCant = Math.max(1, Math.min(10, parseInt(value, 10) || 1));
-            const currentResps = it.respuestas_esperadas || [];
-            const newResps = Array(newCant).fill("").map((_, i) => currentResps[i] || "");
-            return { ...it, cantidad: newCant, respuestas_esperadas: newResps };
+            return { ...it, cantidad: newCant };
           }
           if (field === "instruccion") {
             return { ...it, instruccion: value, etiqueta: value };
@@ -490,7 +502,35 @@ export default function WeeklyQuizCreationView({
     setHasUnsavedChanges(true);
   };
 
-  // Modificar respuesta esperada en sub-ítem de listado
+  // Modificar texto de respuestas posibles / modelo (en ambas opciones: texto y listado)
+  const handleUpdatePossibleAnswersText = (qId, itemId, text) => {
+    setQuizData((prev) => ({
+      ...prev,
+      preguntas: prev.preguntas.map((q) => {
+        if (q.id !== qId) return q;
+        return {
+          ...q,
+          items: (q.items || []).map((it) => {
+            if (it.id !== itemId) return it;
+            const parsed = text
+              .split(/[\n,]+/)
+              .map((s) => s.trim())
+              .filter(Boolean);
+
+            return {
+              ...it,
+              respuestas_posibles_texto: text,
+              respuesta_modelo: text,
+              respuestas_esperadas: parsed
+            };
+          })
+        };
+      })
+    }));
+    setHasUnsavedChanges(true);
+  };
+
+  // Modificar respuesta esperada en sub-ítem de listado (compatibilidad)
   const handleUpdateExpectedAnswer = (qId, itemId, index, text) => {
     setQuizData((prev) => ({
       ...prev,
@@ -568,8 +608,11 @@ export default function WeeklyQuizCreationView({
       const tiempoPorPregunta = quizData.tiempoPorPreguntaSegundos || 90;
       const estimatedMins = Math.ceil((quizData.preguntas.length * tiempoPorPregunta) / 60);
 
+      const defaultWeekTitle = getWeekDisplayName(currentWeekInfo) || `Prueba Semanal — Semana ${selectedSemana}`;
+
       const payload = {
         ...quizData,
+        titulo: defaultWeekTitle,
         puntajeTotal: cleanOfficialPoints,
         puntaje_total: cleanOfficialPoints,
         puntaje_maximo_con_bonus: cleanTotalPoints,
@@ -1292,50 +1335,116 @@ export default function WeeklyQuizCreationView({
               Vista Previa • Portal del Estudiante
             </span>
             <h3 style={{ margin: "0.35rem 0", fontSize: "1.35rem", fontWeight: 900, color: "#0f172a" }}>
-              {quizData.titulo || `Prueba Semanal — ${getWeekDisplayName(currentWeekInfo)}`}
+              {getWeekDisplayName(currentWeekInfo) || `Prueba Semanal — Semana ${selectedSemana}`}
             </h3>
-            {quizData.instrucciones && (
-              <p style={{ margin: "0.5rem 0 0 0", fontSize: "0.88rem", color: "#475569", lineHeight: 1.45 }}>
-                {quizData.instrucciones}
-              </p>
-            )}
           </div>
 
-          {quizData.preguntas.map((q, idx) => (
-            <div
-              key={q.id}
-              style={{
-                border: q.es_bonus ? "1.5px solid #f59e0b" : "1px solid #e2e8f0",
-                borderRadius: "0.85rem",
-                padding: "1.35rem",
-                background: q.es_bonus ? "#fffdfa" : "#f8fafc"
-              }}
-            >
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "0.85rem", flexWrap: "wrap", gap: "0.5rem" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                  <span style={{ fontSize: "0.85rem", fontWeight: 800, color: "#0f172a" }}>
-                    Pregunta #{idx + 1}
-                  </span>
-                  {q.es_bonus && (
-                    <span
-                      style={{
-                        background: "#fef3c7",
-                        border: "1px solid #fde68a",
-                        color: "#92400e",
-                        fontSize: "0.72rem",
-                        fontWeight: 900,
-                        padding: "0.15rem 0.5rem",
-                        borderRadius: "9999px"
-                      }}
-                    >
-                      ⭐ BONUS (+1.0 PT)
+          {quizData.preguntas.map((q, idx) => {
+            const isBonus = Boolean(q.es_bonus || idx === 5);
+
+            return (
+              <React.Fragment key={q.id}>
+                {idx > 0 && (
+                  <div style={{ display: "flex", alignItems: "center", gap: "1rem", margin: "0.6rem 0" }}>
+                    <div style={{ flex: 1, height: "1.5px", background: "linear-gradient(to right, transparent, #cbd5e1, transparent)" }} />
+                    <span style={{ fontSize: "0.74rem", fontWeight: 800, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+                      • Reactivo {idx + 1} de {quizData.preguntas.length} •
                     </span>
-                  )}
-                </div>
-                <span style={{ fontSize: "0.75rem", fontWeight: 800, color: "#059669", background: "#dcfce7", padding: "0.15rem 0.5rem", borderRadius: "9999px" }}>
-                  Valor: {Number(q.puntos).toFixed(3)} pt(s)
-                </span>
-              </div>
+                    <div style={{ flex: 1, height: "1.5px", background: "linear-gradient(to right, transparent, #cbd5e1, transparent)" }} />
+                  </div>
+                )}
+
+                <div
+                  style={{
+                    borderRadius: "1rem",
+                    border: isBonus ? "2px solid #fde68a" : "2px solid #cbd5e1",
+                    borderLeft: isBonus ? "7px solid #f59e0b" : "7px solid #0284c7",
+                    background: "#ffffff",
+                    boxShadow: isBonus
+                      ? "0 8px 24px -4px rgba(245, 158, 11, 0.15)"
+                      : "0 8px 24px -4px rgba(15, 23, 42, 0.08)",
+                    overflow: "hidden",
+                    display: "flex",
+                    flexDirection: "column"
+                  }}
+                >
+                  {/* Barra de Título / Identificador Superior de la Pregunta */}
+                  <div
+                    style={{
+                      padding: "0.8rem 1.25rem",
+                      background: isBonus
+                        ? "linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%)"
+                        : "linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)",
+                      borderBottom: isBonus ? "1.5px solid #fde68a" : "1.5px solid #e2e8f0",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      flexWrap: "wrap",
+                      gap: "0.6rem"
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: "0.65rem", flexWrap: "wrap" }}>
+                      <span
+                        style={{
+                          background: isBonus ? "#d97706" : "#0284c7",
+                          color: "#ffffff",
+                          fontWeight: 900,
+                          fontSize: "0.82rem",
+                          padding: "0.25rem 0.75rem",
+                          borderRadius: "0.5rem",
+                          letterSpacing: "0.04em",
+                          textTransform: "uppercase",
+                          boxShadow: isBonus
+                            ? "0 2px 6px rgba(217, 119, 6, 0.3)"
+                            : "0 2px 6px rgba(2, 132, 199, 0.3)"
+                        }}
+                      >
+                        {isBonus ? "⭐ PREGUNTA BONUS" : `PREGUNTA ${idx + 1}`}
+                      </span>
+
+                      <span style={{ fontSize: "0.82rem", fontWeight: 800, color: isBonus ? "#92400e" : "#475569" }}>
+                        Valor: {Number(q.puntos).toFixed(2)} pts {isBonus ? "(Extra)" : ""}
+                      </span>
+                    </div>
+
+                    <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                      <span
+                        style={{
+                          fontSize: "0.78rem",
+                          fontWeight: 800,
+                          color: "#64748b",
+                          background: "#ffffff",
+                          padding: "0.2rem 0.6rem",
+                          borderRadius: "0.4rem",
+                          border: "1px solid #cbd5e1"
+                        }}
+                      >
+                        Reactivo {idx + 1} de {quizData.preguntas.length}
+                      </span>
+
+                      {isBonus && (
+                        <span
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "0.25rem",
+                            background: "#ffffff",
+                            color: "#b45309",
+                            border: "1px solid #fde68a",
+                            padding: "0.2rem 0.55rem",
+                            borderRadius: "9999px",
+                            fontSize: "0.72rem",
+                            fontWeight: 900
+                          }}
+                        >
+                          +1.0 pt para Premios
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Cuerpo de la Pregunta en Vista Previa */}
+                  <div style={{ padding: "1.25rem", display: "flex", flexDirection: "column", gap: "1rem" }}>
 
               {q.enunciado ? (
                 <p style={{ margin: "0 0 1rem 0", fontSize: "0.92rem", fontWeight: 700, color: "#1e293b" }}>
@@ -1392,10 +1501,13 @@ export default function WeeklyQuizCreationView({
                 ))}
               </div>
             </div>
-          ))}
-        </div>
-      ) : (
-        /* MODO EDITOR DE REACTIVOS */
+          </div>
+        </React.Fragment>
+      );
+    })}
+  </div>
+) : (
+  /* MODO EDITOR DE REACTIVOS */
         <div style={{ display: "flex", flexDirection: "column", gap: "1.75rem" }}>
           {/* 2. Datos Generales de la Prueba */}
           <div
@@ -1423,24 +1535,28 @@ export default function WeeklyQuizCreationView({
                 <label style={{ display: "block", fontSize: "0.8rem", fontWeight: 800, color: "#334155", marginBottom: "0.35rem" }}>
                   Título de la Prueba Semanal:
                 </label>
-                <input
-                  type="text"
-                  value={quizData.titulo}
-                  onChange={(e) => {
-                    setQuizData((prev) => ({ ...prev, titulo: e.target.value }));
-                    setHasUnsavedChanges(true);
-                  }}
-                  placeholder="Ej: Prueba Semanal 3 — Tejido Epitelial y Conectivo"
+                <div
                   style={{
                     width: "100%",
+                    boxSizing: "border-box",
                     padding: "0.65rem 0.85rem",
                     borderRadius: "0.55rem",
                     border: "1.5px solid #cbd5e1",
                     fontSize: "0.88rem",
-                    outline: "none",
-                    background: "#ffffff"
+                    fontWeight: 800,
+                    color: "#1e293b",
+                    background: "#f8fafc",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: "0.5rem"
                   }}
-                />
+                >
+                  <span>{getWeekDisplayName(currentWeekInfo) || `Prueba Semanal — Semana ${selectedSemana}`}</span>
+                  <span style={{ fontSize: "0.72rem", color: "#64748b", fontWeight: 700, background: "#e2e8f0", padding: "0.15rem 0.5rem", borderRadius: "0.35rem" }}>
+                    Fijo por Semana
+                  </span>
+                </div>
               </div>
 
               <div>
@@ -1481,31 +1597,6 @@ export default function WeeklyQuizCreationView({
                   Duración total estimada: {Math.ceil((6 * (quizData.tiempoPorPreguntaSegundos || 90)) / 60)} min (6 preguntas × {((quizData.tiempoPorPreguntaSegundos || 90) / 60).toFixed(1)} min)
                 </div>
               </div>
-            </div>
-
-            <div>
-              <label style={{ display: "block", fontSize: "0.8rem", fontWeight: 800, color: "#334155", marginBottom: "0.35rem" }}>
-                Instrucciones Generales para el Alumno:
-              </label>
-              <textarea
-                rows={2}
-                value={quizData.instrucciones}
-                onChange={(e) => {
-                  setQuizData((prev) => ({ ...prev, instrucciones: e.target.value }));
-                  setHasUnsavedChanges(true);
-                }}
-                placeholder="Escribe las indicaciones que el alumno leerá antes de empezar a contestar..."
-                style={{
-                  width: "100%",
-                  padding: "0.65rem 0.85rem",
-                  borderRadius: "0.55rem",
-                  border: "1.5px solid #cbd5e1",
-                  fontSize: "0.85rem",
-                  outline: "none",
-                  resize: "vertical",
-                  background: "#ffffff"
-                }}
-              />
             </div>
           </div>
 
@@ -1590,160 +1681,159 @@ export default function WeeklyQuizCreationView({
               const isBonus = qIdx === 5;
 
               return (
-                <div
-                  key={pregunta.id}
-                  className="glass-panel"
-                  style={{
-                    background: isBonus ? "linear-gradient(180deg, #fffdf8 0%, #ffffff 100%)" : "#ffffff",
-                    borderRadius: "1.25rem",
-                    border: isBonus ? "2px solid #f59e0b" : "1.5px solid #cbd5e1",
-                    padding: "1.75rem 2rem",
-                    boxShadow: isBonus
-                      ? "0 6px 20px -3px rgba(245, 158, 11, 0.15)"
-                      : "0 4px 16px -2px rgba(0, 0, 0, 0.04)",
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: "1.25rem",
-                    transition: "all 0.2s ease"
-                  }}
-                >
-                  {/* Header de la Pregunta */}
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "0.75rem", borderBottom: "1px solid #f1f5f9", paddingBottom: "1rem" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", flexWrap: "wrap" }}>
-                      <span
-                        style={{
-                          width: "32px",
-                          height: "32px",
-                          borderRadius: "50%",
-                          background: isBonus
-                            ? "linear-gradient(135deg, #f59e0b 0%, #d97706 100%)"
-                            : "linear-gradient(135deg, #0284c7 0%, #0369a1 100%)",
-                          color: "#ffffff",
-                          fontSize: "0.9rem",
-                          fontWeight: 900,
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          boxShadow: isBonus ? "0 2px 8px rgba(245, 158, 11, 0.35)" : "0 2px 8px rgba(2, 132, 199, 0.3)"
-                        }}
-                      >
-                        {qIdx + 1}
+                <React.Fragment key={pregunta.id}>
+                  {qIdx > 0 && (
+                    <div style={{ display: "flex", alignItems: "center", gap: "1rem", margin: "0.6rem 0" }}>
+                      <div style={{ flex: 1, height: "1.5px", background: "linear-gradient(to right, transparent, #cbd5e1, transparent)" }} />
+                      <span style={{ fontSize: "0.74rem", fontWeight: 800, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+                        • Reactivo {qIdx + 1} de {quizData.preguntas.length} •
                       </span>
-
-                      <strong style={{ fontSize: "1.08rem", color: "#0f172a" }}>
-                        Pregunta #{qIdx + 1}
-                      </strong>
-
-                      {isBonus ? (
-                        <span
-                          style={{
-                            background: "#fef3c7",
-                            border: "1.5px solid #f59e0b",
-                            color: "#92400e",
-                            fontSize: "0.74rem",
-                            fontWeight: 900,
-                            padding: "0.2rem 0.65rem",
-                            borderRadius: "9999px",
-                            display: "inline-flex",
-                            alignItems: "center",
-                            gap: "0.3rem",
-                            boxShadow: "0 2px 5px rgba(245, 158, 11, 0.15)"
-                          }}
-                        >
-                          <Sparkles size={12} color="#d97706" />
-                          PREGUNTA BONUS (+1.0 PT EXTRA PARA PREMIOS)
-                        </span>
-                      ) : (
-                        <span
-                          style={{
-                            background: "#f8fafc",
-                            border: "1px solid #e2e8f0",
-                            color: "#64748b",
-                            fontSize: "0.74rem",
-                            fontWeight: 700,
-                            padding: "0.2rem 0.65rem",
-                            borderRadius: "9999px"
-                          }}
-                        >
-                          PREGUNTA REGULAR (1.000 PT)
-                        </span>
-                      )}
+                      <div style={{ flex: 1, height: "1.5px", background: "linear-gradient(to right, transparent, #cbd5e1, transparent)" }} />
                     </div>
+                  )}
 
-                    <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}>
-                      {/* Puntaje de la pregunta */}
-                      <div style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
-                        <span style={{ fontSize: "0.78rem", fontWeight: 700, color: "#64748b" }}>Valor:</span>
-                        {pregunta.items && pregunta.items.length > 0 ? (
-                          <div
+                  <div
+                    style={{
+                      borderRadius: "1rem",
+                      border: isBonus ? "2px solid #fde68a" : "2px solid #cbd5e1",
+                      borderLeft: isBonus ? "7px solid #f59e0b" : "7px solid #0284c7",
+                      background: "#ffffff",
+                      boxShadow: isBonus
+                        ? "0 8px 24px -4px rgba(245, 158, 11, 0.15)"
+                        : "0 8px 24px -4px rgba(15, 23, 42, 0.08)",
+                      overflow: "hidden",
+                      display: "flex",
+                      flexDirection: "column",
+                      transition: "all 0.2s ease"
+                    }}
+                  >
+                    {/* Barra de Título / Identificador Superior de la Pregunta */}
+                    <div
+                      style={{
+                        padding: "0.85rem 1.35rem",
+                        background: isBonus
+                          ? "linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%)"
+                          : "linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)",
+                        borderBottom: isBonus ? "1.5px solid #fde68a" : "1.5px solid #e2e8f0",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        flexWrap: "wrap",
+                        gap: "0.75rem"
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", gap: "0.65rem", flexWrap: "wrap" }}>
+                        <span
+                          style={{
+                            background: isBonus ? "#d97706" : "#0284c7",
+                            color: "#ffffff",
+                            fontWeight: 900,
+                            fontSize: "0.82rem",
+                            padding: "0.25rem 0.75rem",
+                            borderRadius: "0.5rem",
+                            letterSpacing: "0.04em",
+                            textTransform: "uppercase",
+                            boxShadow: isBonus
+                              ? "0 2px 6px rgba(217, 119, 6, 0.3)"
+                              : "0 2px 6px rgba(2, 132, 199, 0.3)"
+                          }}
+                        >
+                          {isBonus ? "⭐ PREGUNTA BONUS" : `PREGUNTA ${qIdx + 1}`}
+                        </span>
+
+                        <span style={{ fontSize: "0.82rem", fontWeight: 800, color: isBonus ? "#92400e" : "#475569" }}>
+                          Valor: {Number(pregunta.puntos).toFixed(2)} pts {isBonus ? "(Extra)" : ""}
+                        </span>
+
+                        <span
+                          style={{
+                            fontSize: "0.78rem",
+                            fontWeight: 800,
+                            color: "#64748b",
+                            background: "#ffffff",
+                            padding: "0.2rem 0.6rem",
+                            borderRadius: "0.4rem",
+                            border: "1px solid #cbd5e1"
+                          }}
+                        >
+                          Reactivo {qIdx + 1} de {quizData.preguntas.length}
+                        </span>
+
+                        {isBonus && (
+                          <span
                             style={{
                               display: "inline-flex",
                               alignItems: "center",
-                              gap: "0.3rem",
-                              padding: "0.3rem 0.65rem",
-                              borderRadius: "0.5rem",
-                              background: Number(pregunta.puntos) > 1.001 ? "#fee2e2" : "#f0fdf4",
-                              border: `1.5px solid ${Number(pregunta.puntos) > 1.001 ? "#fca5a5" : "#86efac"}`,
-                              color: Number(pregunta.puntos) > 1.001 ? "#dc2626" : "#166534",
-                              fontSize: "0.84rem",
+                              gap: "0.25rem",
+                              background: "#ffffff",
+                              color: "#b45309",
+                              border: "1px solid #fde68a",
+                              padding: "0.2rem 0.55rem",
+                              borderRadius: "9999px",
+                              fontSize: "0.72rem",
                               fontWeight: 900
                             }}
-                            title="El puntaje de esta pregunta se calcula sumando sus apartados (máx 1.000 pt)"
                           >
-                            <span>Σ {Number(pregunta.puntos).toFixed(3)} / 1.000 pt</span>
-                          </div>
-                        ) : (
-                          <div style={{ display: "inline-flex", alignItems: "center", gap: "0.3rem" }}>
-                            <input
-                              type="number"
-                              step="0.05"
-                              min="0.05"
-                              max="1"
-                              value={pregunta.puntos}
-                              onChange={(e) => {
-                                const val = parseFloat(e.target.value) || 0;
-                                handleUpdateQuestion(pregunta.id, "puntos", Math.min(1.0, Math.max(0, val)));
-                              }}
-                              style={{
-                                width: "68px",
-                                padding: "0.35rem 0.5rem",
-                                borderRadius: "0.45rem",
-                                border: "1.5px solid #0284c7",
-                                fontSize: "0.84rem",
-                                fontWeight: 800,
-                                textAlign: "center",
-                                background: "#f0f9ff",
-                                color: "#0369a1"
-                              }}
-                            />
-                            <span style={{ fontSize: "0.78rem", color: "#64748b", fontWeight: 700 }}>/ 1.000 pt</span>
-                          </div>
+                            +1.0 pt para Premios
+                          </span>
                         )}
                       </div>
 
-                      {/* DISTINTIVO FIJO DE BONUS PARA LA PREGUNTA 6 */}
-                      {isBonus && (
-                        <div
-                          style={{
-                            background: "linear-gradient(135deg, #fef3c7 0%, #fde68a 100%)",
-                            border: "1.5px solid #f59e0b",
-                            color: "#92400e",
-                            padding: "0.38rem 0.85rem",
-                            borderRadius: "0.55rem",
-                            fontSize: "0.78rem",
-                            fontWeight: 800,
-                            display: "inline-flex",
-                            alignItems: "center",
-                            gap: "0.35rem",
-                            boxShadow: "0 2px 6px rgba(245, 158, 11, 0.2)"
-                          }}
-                        >
-                          <Sparkles size={14} color="#d97706" />
-                          <span>⭐ Reactivo Bonus Fijo (Pregunta 6)</span>
+                      <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}>
+                        {/* Puntaje de la pregunta */}
+                        <div style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
+                          <span style={{ fontSize: "0.78rem", fontWeight: 700, color: "#64748b" }}>Puntaje:</span>
+                          {pregunta.items && pregunta.items.length > 0 ? (
+                            <div
+                              style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: "0.3rem",
+                                padding: "0.3rem 0.65rem",
+                                borderRadius: "0.5rem",
+                                background: Number(pregunta.puntos) > 1.001 ? "#fee2e2" : "#f0fdf4",
+                                border: `1.5px solid ${Number(pregunta.puntos) > 1.001 ? "#fca5a5" : "#86efac"}`,
+                                color: Number(pregunta.puntos) > 1.001 ? "#dc2626" : "#166534",
+                                fontSize: "0.84rem",
+                                fontWeight: 900
+                              }}
+                              title="El puntaje de esta pregunta se calcula sumando sus apartados (máx 1.000 pt)"
+                            >
+                              <span>Σ {Number(pregunta.puntos).toFixed(3)} / 1.000 pt</span>
+                            </div>
+                          ) : (
+                            <div style={{ display: "inline-flex", alignItems: "center", gap: "0.3rem" }}>
+                              <input
+                                type="number"
+                                step="0.05"
+                                min="0.05"
+                                max="1"
+                                value={pregunta.puntos}
+                                onChange={(e) => {
+                                  const val = parseFloat(e.target.value) || 0;
+                                  handleUpdateQuestion(pregunta.id, "puntos", Math.min(1.0, Math.max(0, val)));
+                                }}
+                                style={{
+                                  width: "68px",
+                                  padding: "0.35rem 0.5rem",
+                                  borderRadius: "0.45rem",
+                                  border: "1.5px solid #0284c7",
+                                  fontSize: "0.84rem",
+                                  fontWeight: 800,
+                                  textAlign: "center",
+                                  background: "#f0f9ff",
+                                  color: "#0369a1"
+                                }}
+                              />
+                              <span style={{ fontSize: "0.78rem", color: "#64748b", fontWeight: 700 }}>/ 1.000 pt</span>
+                            </div>
+                          )}
                         </div>
-                      )}
+                      </div>
                     </div>
-                  </div>
+
+                    {/* Cuerpo de la Pregunta en el Editor */}
+                    <div style={{ padding: "1.5rem", display: "flex", flexDirection: "column", gap: "1.25rem" }}>
 
                   {isBonus && (
                     <div
@@ -1878,211 +1968,316 @@ export default function WeeklyQuizCreationView({
                         Sin apartados secundarios. La pregunta se responderá en un único bloque de 1.000 pt (o el valor asignado arriba).
                       </div>
                     ) : (
-                      pregunta.items.map((item, itemIdx) => (
-                        <div
-                          key={item.id || itemIdx}
-                          style={{
-                            background: "#ffffff",
-                            borderRadius: "0.75rem",
-                            border: "1.5px solid #cbd5e1",
-                            padding: "1rem 1.15rem",
-                            display: "flex",
-                            flexDirection: "column",
-                            gap: "0.75rem"
-                          }}
-                        >
-                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "0.5rem" }}>
-                            <div style={{ display: "flex", alignItems: "center", gap: "0.6rem" }}>
-                              <span
+                      pregunta.items.map((item, itemIdx) => {
+                        const rawAnswersText =
+                          item.respuestas_posibles_texto !== undefined
+                            ? item.respuestas_posibles_texto
+                            : Array.isArray(item.respuestas_esperadas) && item.respuestas_esperadas.length > 0
+                            ? item.respuestas_esperadas.join("\n")
+                            : (item.respuesta_modelo || "");
+
+                        const detectedOptions = rawAnswersText
+                          .split(/[\n,]+/)
+                          .map((s) => s.trim())
+                          .filter(Boolean);
+
+                        const cantCasillas = parseInt(item.cantidad, 10) || 3;
+                        const itemPts = parseFloat(item.puntos) || 0;
+                        const ptPorCasilla = item.tipo === "texto_corto" ? itemPts : (itemPts / (cantCasillas || 1));
+
+                        return (
+                          <div
+                            key={item.id || itemIdx}
+                            style={{
+                              background: "#ffffff",
+                              borderRadius: "0.85rem",
+                              border: "1.5px solid #cbd5e1",
+                              padding: "1.15rem 1.25rem",
+                              display: "flex",
+                              flexDirection: "column",
+                              gap: "1rem",
+                              boxShadow: "0 2px 8px -2px rgba(0,0,0,0.04)"
+                            }}
+                          >
+                            {/* Cabecera del Apartado */}
+                            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "0.6rem", borderBottom: "1px solid #f1f5f9", paddingBottom: "0.75rem" }}>
+                              <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", flexWrap: "wrap" }}>
+                                <span
+                                  style={{
+                                    fontSize: "0.76rem",
+                                    fontWeight: 900,
+                                    padding: "0.2rem 0.65rem",
+                                    borderRadius: "9999px",
+                                    background: item.tipo === "texto_corto" ? "#e0f2fe" : "#f3e8ff",
+                                    color: item.tipo === "texto_corto" ? "#0369a1" : "#7e22ce",
+                                    border: `1px solid ${item.tipo === "texto_corto" ? "#bae6fd" : "#e9d5ff"}`
+                                  }}
+                                >
+                                  Apartado #{itemIdx + 1} • {item.tipo === "texto_corto" ? "Texto Abierto" : `Listado (${cantCasillas} casillas)`}
+                                </span>
+
+                                <div style={{ display: "inline-flex", alignItems: "center", gap: "0.35rem" }}>
+                                  <span style={{ fontSize: "0.74rem", fontWeight: 700, color: "#475569" }}>Valor del apartado:</span>
+                                  <input
+                                    type="number"
+                                    step="0.05"
+                                    min="0.01"
+                                    max="1"
+                                    value={item.puntos !== undefined ? item.puntos : 0.5}
+                                    onChange={(e) => handleUpdateSubItem(pregunta.id, item.id, "puntos", parseFloat(e.target.value) || 0)}
+                                    style={{
+                                      width: "65px",
+                                      padding: "0.25rem 0.4rem",
+                                      borderRadius: "0.4rem",
+                                      border: "1.5px solid #0284c7",
+                                      background: "#f0f9ff",
+                                      fontSize: "0.82rem",
+                                      fontWeight: 800,
+                                      color: "#0369a1",
+                                      textAlign: "center"
+                                    }}
+                                  />
+                                  <span style={{ fontSize: "0.74rem", fontWeight: 800, color: "#0369a1" }}>pt(s)</span>
+                                </div>
+                              </div>
+
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveSubItem(pregunta.id, item.id)}
                                 style={{
-                                  fontSize: "0.72rem",
-                                  fontWeight: 800,
-                                  padding: "0.15rem 0.55rem",
-                                  borderRadius: "9999px",
-                                  background: item.tipo === "texto_corto" ? "#e0f2fe" : "#f3e8ff",
-                                  color: item.tipo === "texto_corto" ? "#0369a1" : "#7e22ce"
+                                  background: "none",
+                                  border: "none",
+                                  color: "#ef4444",
+                                  cursor: "pointer",
+                                  fontSize: "0.76rem",
+                                  fontWeight: 700,
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: "0.25rem",
+                                  padding: "0.25rem 0.5rem",
+                                  borderRadius: "0.35rem",
+                                  transition: "background 0.15s ease"
+                                }}
+                                onMouseEnter={(e) => (e.currentTarget.style.background = "#fee2e2")}
+                                onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
+                              >
+                                <Trash2 size={13} />
+                                <span>Eliminar Apartado</span>
+                              </button>
+                            </div>
+
+                            {/* Separación en dos columnas: Izquierda (Configuración Alumno) | Derecha (Respuestas Posibles Docente) */}
+                            <div
+                              style={{
+                                display: "grid",
+                                gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
+                                gap: "1.25rem",
+                                alignItems: "stretch"
+                              }}
+                            >
+                              {/* COLUMNA IZQUIERDA: Lo que responderá el alumno */}
+                              <div
+                                style={{
+                                  background: "#f8fafc",
+                                  border: "1.5px solid #e2e8f0",
+                                  borderRadius: "0.75rem",
+                                  padding: "1rem 1.15rem",
+                                  display: "flex",
+                                  flexDirection: "column",
+                                  gap: "0.85rem"
                                 }}
                               >
-                                Apartado {itemIdx + 1}: {item.tipo === "texto_corto" ? "Texto Corto" : `Listado (${item.cantidad} casillas)`}
-                              </span>
+                                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid #e2e8f0", paddingBottom: "0.5rem" }}>
+                                  <strong style={{ fontSize: "0.82rem", color: "#1e293b", display: "flex", alignItems: "center", gap: "0.35rem" }}>
+                                    <span>📝</span> Configuración para el Estudiante
+                                  </strong>
+                                  <span
+                                    style={{
+                                      fontSize: "0.72rem",
+                                      color: item.tipo === "texto_corto" ? "#0369a1" : "#7e22ce",
+                                      fontWeight: 800,
+                                      background: item.tipo === "texto_corto" ? "#e0f2fe" : "#f3e8ff",
+                                      padding: "0.15rem 0.55rem",
+                                      borderRadius: "0.35rem",
+                                      border: `1px solid ${item.tipo === "texto_corto" ? "#bae6fd" : "#e9d5ff"}`
+                                    }}
+                                  >
+                                    {item.tipo === "texto_corto" ? "Texto Corto (1 campo)" : `Listado (${cantCasillas} casillas)`}
+                                  </span>
+                                </div>
 
-                              {/* Input de puntos por apartado */}
-                              <div style={{ display: "inline-flex", alignItems: "center", gap: "0.35rem", flexWrap: "wrap" }}>
-                                <span style={{ fontSize: "0.73rem", fontWeight: 700, color: "#475569" }}>Valor total:</span>
-                                <input
-                                  type="number"
-                                  step="0.05"
-                                  min="0.01"
-                                  max="1"
-                                  value={item.puntos !== undefined ? item.puntos : 0.5}
-                                  onChange={(e) => handleUpdateSubItem(pregunta.id, item.id, "puntos", parseFloat(e.target.value) || 0)}
-                                  style={{
-                                    width: "62px",
-                                    padding: "0.2rem 0.35rem",
-                                    borderRadius: "0.4rem",
-                                    border: "1.5px solid #0284c7",
-                                    background: "#f0f9ff",
-                                    fontSize: "0.8rem",
-                                    fontWeight: 800,
-                                    color: "#0369a1",
-                                    textAlign: "center"
-                                  }}
-                                />
-                                <span style={{ fontSize: "0.73rem", fontWeight: 800, color: "#0369a1" }}>pt(s)</span>
+                                {/* Nota contextual según el tipo ya elegido */}
+                                {item.tipo === "texto_corto" ? (
+                                  <div style={{ background: "#ffffff", padding: "0.6rem 0.8rem", borderRadius: "0.55rem", border: "1.5px solid #bae6fd", fontSize: "0.75rem", color: "#0369a1", fontWeight: 600 }}>
+                                    💡 El estudiante dispondrá de una casilla de texto único para responder (Valor: <strong>{itemPts.toFixed(3)} pt</strong>).
+                                  </div>
+                                ) : (
+                                  <div style={{ background: "#ffffff", padding: "0.65rem 0.85rem", borderRadius: "0.55rem", border: "1.5px solid #e9d5ff", display: "flex", flexDirection: "column", gap: "0.35rem" }}>
+                                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "0.4rem" }}>
+                                      <label style={{ fontSize: "0.76rem", fontWeight: 800, color: "#6b21a8" }}>
+                                        Casillas a rellenar por el alumno:
+                                      </label>
+                                      <div style={{ display: "flex", alignItems: "center", gap: "0.35rem" }}>
+                                        <input
+                                          type="number"
+                                          min="1"
+                                          max="10"
+                                          value={item.cantidad || 3}
+                                          onChange={(e) => handleUpdateSubItem(pregunta.id, item.id, "cantidad", e.target.value)}
+                                          style={{
+                                            width: "55px",
+                                            padding: "0.25rem 0.4rem",
+                                            borderRadius: "0.4rem",
+                                            border: "1.5px solid #a855f7",
+                                            fontSize: "0.82rem",
+                                            fontWeight: 900,
+                                            textAlign: "center",
+                                            color: "#6b21a8",
+                                            background: "#faf5ff"
+                                          }}
+                                        />
+                                        <span style={{ fontSize: "0.75rem", fontWeight: 800, color: "#6b21a8" }}>casillas</span>
+                                      </div>
+                                    </div>
+                                    <div style={{ fontSize: "0.72rem", color: "#7e22ce", fontWeight: 600 }}>
+                                      💡 Cada casilla acertada sumará <strong>{ptPorCasilla.toFixed(3)} pt</strong> (las falladas restan dicho valor al calificar).
+                                    </div>
+                                  </div>
+                                )}
 
-                                {item.tipo !== "texto_corto" && (
+                                {/* Instrucción o pregunta que ve el alumno */}
+                                <div>
+                                  <label style={{ display: "block", fontSize: "0.75rem", fontWeight: 700, color: "#475569", marginBottom: "0.3rem" }}>
+                                    Instrucción o pregunta para el alumno:
+                                  </label>
+                                  <input
+                                    type="text"
+                                    value={item.instruccion || ""}
+                                    onChange={(e) => handleUpdateSubItem(pregunta.id, item.id, "instruccion", e.target.value)}
+                                    placeholder={
+                                      item.tipo === "texto_corto"
+                                        ? "Ej: Identifique el órgano o tipo de epitelio enfocado"
+                                        : "Ej: Mencione 3 capas o estructuras morfológicas señaladas"
+                                    }
+                                    style={{
+                                      width: "100%",
+                                      boxSizing: "border-box",
+                                      padding: "0.55rem 0.8rem",
+                                      borderRadius: "0.5rem",
+                                      border: "1.5px solid #cbd5e1",
+                                      fontSize: "0.84rem",
+                                      fontWeight: 600,
+                                      outline: "none",
+                                      background: "#ffffff"
+                                    }}
+                                  />
+                                </div>
+                              </div>
+
+                              {/* COLUMNA DERECHA: Respuestas posibles / Modelo para el Docente */}
+                              <div
+                                style={{
+                                  background: "#f0fdf4",
+                                  border: "1.5px solid #bbf7d0",
+                                  borderRadius: "0.75rem",
+                                  padding: "1rem 1.15rem",
+                                  display: "flex",
+                                  flexDirection: "column",
+                                  gap: "0.75rem"
+                                }}
+                              >
+                                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid #bbf7d0", paddingBottom: "0.5rem" }}>
+                                  <strong style={{ fontSize: "0.82rem", color: "#166534", display: "flex", alignItems: "center", gap: "0.35rem" }}>
+                                    <span>💡</span> Respuestas Posibles / Modelo (Docente)
+                                  </strong>
                                   <span
                                     style={{
                                       fontSize: "0.72rem",
                                       fontWeight: 800,
-                                      color: "#6b21a8",
-                                      background: "#f3e8ff",
-                                      border: "1px solid #e9d5ff",
-                                      padding: "0.15rem 0.45rem",
-                                      borderRadius: "0.35rem"
+                                      padding: "0.15rem 0.5rem",
+                                      borderRadius: "9999px",
+                                      background: detectedOptions.length > 0 ? "#dcfce7" : "#ffffff",
+                                      color: detectedOptions.length > 0 ? "#15803d" : "#94a3b8",
+                                      border: "1px solid #86efac"
                                     }}
-                                    title="El valor total se divide equitativamente entre las casillas para calificar individualmente"
                                   >
-                                    ⚡ {((parseFloat(item.puntos) || 0) / (parseInt(item.cantidad, 10) || 1)).toFixed(3)} pt c/ casilla
+                                    {detectedOptions.length} opción(es) detectada(s)
                                   </span>
+                                </div>
+
+                                {/* Campo de texto libre para escribir todas las opciones posibles */}
+                                <textarea
+                                  rows={4}
+                                  value={rawAnswersText}
+                                  onChange={(e) => handleUpdatePossibleAnswersText(pregunta.id, item.id, e.target.value)}
+                                  placeholder={
+                                    item.tipo === "texto_corto"
+                                      ? "Ej:\nEpitelio cilíndrico simple\nEpitelio cilíndrico con microvellosidades"
+                                      : "Ej (una por línea o con coma):\nEstrato basal\nEstrato espinoso\nEstrato granuloso\nEstrato lúcido\nEstrato córneo"
+                                  }
+                                  style={{
+                                    width: "100%",
+                                    boxSizing: "border-box",
+                                    padding: "0.6rem 0.8rem",
+                                    borderRadius: "0.55rem",
+                                    border: "1.5px solid #86efac",
+                                    background: "#ffffff",
+                                    fontSize: "0.84rem",
+                                    lineHeight: 1.45,
+                                    fontWeight: 600,
+                                    color: "#0f172a",
+                                    outline: "none",
+                                    resize: "vertical",
+                                    minHeight: "95px",
+                                    fontFamily: "inherit"
+                                  }}
+                                />
+
+                                {/* Previsualización de Chips de Opciones Detectadas */}
+                                {detectedOptions.length > 0 && (
+                                  <div style={{ display: "flex", flexDirection: "column", gap: "0.35rem" }}>
+                                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: "0.71rem", color: "#166534", fontWeight: 700 }}>
+                                      <span>Opciones válidas guardadas para calificar:</span>
+                                      {item.tipo !== "texto_corto" && (
+                                        <span style={{ color: detectedOptions.length < cantCasillas ? "#dc2626" : "#15803d" }}>
+                                          {detectedOptions.length < cantCasillas
+                                            ? `⚠️ Tienes ${detectedOptions.length} opciones para ${cantCasillas} casillas`
+                                            : `✓ ${detectedOptions.length} opciones disponibles para ${cantCasillas} casillas`}
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div style={{ display: "flex", flexWrap: "wrap", gap: "0.3rem", maxHeight: "80px", overflowY: "auto" }}>
+                                      {detectedOptions.map((opt, oIdx) => (
+                                        <span
+                                          key={oIdx}
+                                          style={{
+                                            fontSize: "0.72rem",
+                                            fontWeight: 700,
+                                            padding: "0.15rem 0.5rem",
+                                            borderRadius: "0.35rem",
+                                            background: "#ffffff",
+                                            color: "#166534",
+                                            border: "1px solid #86efac"
+                                          }}
+                                        >
+                                          {opt}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  </div>
                                 )}
                               </div>
                             </div>
-
-                            <button
-                              type="button"
-                              onClick={() => handleRemoveSubItem(pregunta.id, item.id)}
-                              style={{
-                                background: "none",
-                                border: "none",
-                                color: "#ef4444",
-                                cursor: "pointer",
-                                fontSize: "0.75rem",
-                                fontWeight: 700,
-                                display: "inline-flex",
-                                alignItems: "center",
-                                gap: "0.25rem"
-                              }}
-                            >
-                              <Trash2 size={13} />
-                              <span>Quitar Apartado</span>
-                            </button>
                           </div>
-
-                          {/* Instrucción del sub-ítem */}
-                          <div>
-                            <label style={{ display: "block", fontSize: "0.76rem", fontWeight: 700, color: "#475569", marginBottom: "0.25rem" }}>
-                              Instrucción o pregunta para este campo:
-                            </label>
-                            <input
-                              type="text"
-                              value={item.instruccion}
-                              onChange={(e) => handleUpdateSubItem(pregunta.id, item.id, "instruccion", e.target.value)}
-                              placeholder={
-                                item.tipo === "texto_corto"
-                                  ? "Ej: Identifique la estructura u órgano enfocado"
-                                  : "Ej: Diga 3 características morfológicas observadas"
-                              }
-                              style={{
-                                width: "100%",
-                                padding: "0.5rem 0.75rem",
-                                borderRadius: "0.5rem",
-                                border: "1px solid #cbd5e1",
-                                fontSize: "0.85rem",
-                                outline: "none"
-                              }}
-                            />
-                          </div>
-
-                          {/* Si es Texto Corto: Respuesta modelo opcional */}
-                          {item.tipo === "texto_corto" ? (
-                            <div>
-                              <label style={{ display: "block", fontSize: "0.75rem", fontWeight: 700, color: "#065f46", marginBottom: "0.25rem" }}>
-                                💡 Respuesta Modelo (Guía para calificar):
-                              </label>
-                              <input
-                                type="text"
-                                value={item.respuesta_modelo || ""}
-                                onChange={(e) => handleUpdateSubItem(pregunta.id, item.id, "respuesta_modelo", e.target.value)}
-                                placeholder="Ej: Epitelio seudoestratificado cilíndrico ciliado"
-                                style={{
-                                  width: "100%",
-                                  padding: "0.5rem 0.75rem",
-                                  borderRadius: "0.5rem",
-                                  border: "1px solid #86efac",
-                                  background: "#f0fdf4",
-                                  fontSize: "0.84rem",
-                                  outline: "none"
-                                }}
-                              />
-                            </div>
-                          ) : (
-                            /* Si es Listado: Cantidad de casillas y respuestas esperadas */
-                            <div style={{ display: "flex", flexDirection: "column", gap: "0.6rem" }}>
-                              <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
-                                <label style={{ fontSize: "0.75rem", fontWeight: 700, color: "#581c87" }}>
-                                  Cantidad de casillas para el alumno:
-                                </label>
-                                <input
-                                  type="number"
-                                  min="1"
-                                  max="10"
-                                  value={item.cantidad || 3}
-                                  onChange={(e) => handleUpdateSubItem(pregunta.id, item.id, "cantidad", e.target.value)}
-                                  style={{
-                                    width: "55px",
-                                    padding: "0.2rem 0.35rem",
-                                    borderRadius: "0.4rem",
-                                    border: "1.5px solid #a855f7",
-                                    fontSize: "0.8rem",
-                                    fontWeight: 800,
-                                    textAlign: "center",
-                                    color: "#6b21a8"
-                                  }}
-                                />
-                                <span style={{ fontSize: "0.72rem", color: "#6b21a8", fontWeight: 700 }}>
-                                  (Al calificar, cada casilla vale {((parseFloat(item.puntos) || 0) / (parseInt(item.cantidad, 10) || 3)).toFixed(3)} pt: cada acierto suma y cada fallo resta dicho valor)
-                                </span>
-                              </div>
-
-                              <div>
-                                <label style={{ display: "block", fontSize: "0.74rem", fontWeight: 700, color: "#065f46", marginBottom: "0.3rem" }}>
-                                  💡 Respuestas Modelo (Guía opcional para cada casilla):
-                                </label>
-                                <div style={{ display: "flex", flexDirection: "column", gap: "0.35rem" }}>
-                                  {Array.from({ length: item.cantidad || 3 }).map((_, slotIdx) => (
-                                    <div key={slotIdx} style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
-                                      <span style={{ fontSize: "0.75rem", fontWeight: 800, color: "#059669", width: "20px" }}>
-                                        {slotIdx + 1}.
-                                      </span>
-                                      <input
-                                        type="text"
-                                        value={(item.respuestas_esperadas || [])[slotIdx] || ""}
-                                        onChange={(e) => handleUpdateExpectedAnswer(pregunta.id, item.id, slotIdx, e.target.value)}
-                                        placeholder={`Respuesta esperada para casilla #${slotIdx + 1}...`}
-                                        style={{
-                                          flex: 1,
-                                          padding: "0.4rem 0.65rem",
-                                          borderRadius: "0.45rem",
-                                          border: "1px solid #86efac",
-                                          background: "#f0fdf4",
-                                          fontSize: "0.82rem",
-                                          outline: "none"
-                                        }}
-                                      />
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      ))
+                        );
+                      })
                     )}
                   </div>
                 </div>
-              );
-            })}
+              </div>
+            </React.Fragment>
+          );
+        })}
           </div>
           {/* Barra inferior de guardado */}
           <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "0.75rem", paddingTop: "1rem", marginTop: "0.5rem", flexWrap: "wrap" }}>
@@ -2138,20 +2333,27 @@ export default function WeeklyQuizCreationView({
         </div>
       )}
 
-      {/* MODAL DE CONFIRMACIÓN PARA REINICIAR LA PRUEBA Y BORRAR TODAS LAS PREGUNTAS */}
-      {showResetModal && (
+      {/* MODAL GLOBAL DE CONFIRMACIÓN PARA REINICIAR LA PRUEBA (PORTAL EN BODY CON SCROLL BLOQUEADO) */}
+      {showResetModal && createPortal(
         <div
+          className="animate-fade-in"
           style={{
             position: "fixed",
             inset: 0,
-            zIndex: 999999,
-            background: "rgba(15, 23, 42, 0.82)",
-            backdropFilter: "blur(8px)",
-            WebkitBackdropFilter: "blur(8px)",
+            width: "100vw",
+            height: "100vh",
+            zIndex: 9999999,
+            background: "rgba(15, 23, 42, 0.78)",
+            backdropFilter: "blur(6px)",
+            WebkitBackdropFilter: "blur(6px)",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            padding: "1.25rem"
+            padding: "1.25rem",
+            boxSizing: "border-box"
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !resetting) setShowResetModal(false);
           }}
         >
           <div
@@ -2163,7 +2365,7 @@ export default function WeeklyQuizCreationView({
               maxWidth: "480px",
               width: "100%",
               padding: "2rem",
-              boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.4)",
+              boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.45)",
               textAlign: "center",
               display: "flex",
               flexDirection: "column",
@@ -2263,7 +2465,8 @@ export default function WeeklyQuizCreationView({
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

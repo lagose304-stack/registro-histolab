@@ -3491,22 +3491,106 @@ export default function StudentPortalView({ student, notify = () => {} }) {
 
                 {/* Respuestas registradas */}
                 <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
-                  {(reviewingSubmission.quiz.preguntas || []).map((pregunta, qIdx) => (
-                    <div
-                      key={pregunta.id}
-                      style={{
-                        padding: "1.25rem",
-                        borderRadius: "0.85rem",
-                        border: "1px solid #e2e8f0",
-                        background: "#f8fafc",
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: "0.85rem"
-                      }}
-                    >
-                      <div style={{ fontSize: "0.92rem", fontWeight: 800, color: "#0f172a" }}>
-                        {pregunta.numero || qIdx + 1}. {pregunta.enunciado || (pregunta.es_bonus ? "⭐ Reactivo Bonus" : `Pregunta ${pregunta.numero || qIdx + 1}`)}
-                      </div>
+                  {(reviewingSubmission.quiz.preguntas || []).map((pregunta, qIdx) => {
+                    const isBonus = Boolean(pregunta.es_bonus || qIdx === 5);
+                    const qMaxPts = Number(pregunta.puntos || 1.0);
+
+                    return (
+                      <div
+                        key={pregunta.id}
+                        style={{
+                          borderRadius: "1rem",
+                          border: isBonus ? "2px solid #fde68a" : "2px solid #cbd5e1",
+                          borderLeft: isBonus ? "7px solid #f59e0b" : "7px solid #0284c7",
+                          background: "#ffffff",
+                          boxShadow: "0 8px 24px -4px rgba(15, 23, 42, 0.08)",
+                          overflow: "hidden",
+                          display: "flex",
+                          flexDirection: "column"
+                        }}
+                      >
+                        {/* Barra de Título / Identificador Superior de la Pregunta */}
+                        <div
+                          style={{
+                            padding: "0.8rem 1.25rem",
+                            background: isBonus
+                              ? "linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%)"
+                              : "linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)",
+                            borderBottom: isBonus ? "1.5px solid #fde68a" : "1.5px solid #e2e8f0",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            flexWrap: "wrap",
+                            gap: "0.6rem"
+                          }}
+                        >
+                          <div style={{ display: "flex", alignItems: "center", gap: "0.65rem", flexWrap: "wrap" }}>
+                            <span
+                              style={{
+                                background: isBonus ? "#d97706" : "#0284c7",
+                                color: "#ffffff",
+                                fontWeight: 900,
+                                fontSize: "0.82rem",
+                                padding: "0.25rem 0.75rem",
+                                borderRadius: "0.5rem",
+                                letterSpacing: "0.04em",
+                                textTransform: "uppercase",
+                                boxShadow: isBonus
+                                  ? "0 2px 6px rgba(217, 119, 6, 0.3)"
+                                  : "0 2px 6px rgba(2, 132, 199, 0.3)"
+                              }}
+                            >
+                              {isBonus ? "⭐ PREGUNTA BONUS" : `PREGUNTA ${pregunta.numero || qIdx + 1}`}
+                            </span>
+
+                            <span style={{ fontSize: "0.82rem", fontWeight: 800, color: isBonus ? "#92400e" : "#475569" }}>
+                              Valor: {qMaxPts.toFixed(2)} pts {isBonus ? "(Extra)" : ""}
+                            </span>
+                          </div>
+
+                          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                            <span
+                              style={{
+                                fontSize: "0.78rem",
+                                fontWeight: 800,
+                                color: "#64748b",
+                                background: "#ffffff",
+                                padding: "0.2rem 0.6rem",
+                                borderRadius: "0.4rem",
+                                border: "1px solid #cbd5e1"
+                              }}
+                            >
+                              Reactivo {qIdx + 1} de {reviewingSubmission.quiz.preguntas.length}
+                            </span>
+
+                            {isBonus && (
+                              <span
+                                style={{
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: "0.25rem",
+                                  background: "#ffffff",
+                                  color: "#b45309",
+                                  border: "1px solid #fde68a",
+                                  padding: "0.2rem 0.55rem",
+                                  borderRadius: "9999px",
+                                  fontSize: "0.72rem",
+                                  fontWeight: 900
+                                }}
+                              >
+                                +1.0 pt para Premios
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Cuerpo de la Pregunta */}
+                        <div style={{ padding: "1.25rem", display: "flex", flexDirection: "column", gap: "1rem" }}>
+                          {pregunta.enunciado && (
+                            <div style={{ fontSize: "1rem", fontWeight: 800, color: "#0f172a", lineHeight: 1.45 }}>
+                              {pregunta.enunciado}
+                            </div>
+                          )}
 
                       {pregunta.imagen_url && (
                         <div style={{ textAlign: "center" }}>
@@ -3639,7 +3723,9 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                         })()}
                       </div>
                     </div>
-                  ))}
+                  </div>
+                );
+              })}
                 </div>
               </div>
             ) : (
@@ -4350,51 +4436,99 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                       <div
                         key={currentActiveQ.id}
                         style={{
-                          padding: "1.75rem",
                           borderRadius: "1rem",
-                          border: isBonusActive ? "2px solid #f59e0b" : "1.5px solid #cbd5e1",
-                          background: isBonusActive ? "linear-gradient(180deg, #fffdf8 0%, #ffffff 100%)" : "#ffffff",
-                          boxShadow: "0 4px 20px rgba(0, 0, 0, 0.05)",
+                          border: isBonusActive ? "2px solid #fde68a" : "2px solid #cbd5e1",
+                          borderLeft: isBonusActive ? "7px solid #f59e0b" : "7px solid #0284c7",
+                          background: "#ffffff",
+                          boxShadow: "0 8px 24px -4px rgba(15, 23, 42, 0.08)",
+                          overflow: "hidden",
                           display: "flex",
-                          flexDirection: "column",
-                          gap: "1.25rem"
+                          flexDirection: "column"
                         }}
                       >
-                        {/* Cabecera del Reactivo Activo */}
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "0.75rem", borderBottom: "1px solid #f1f5f9", paddingBottom: "0.85rem" }}>
-                          <div style={{ display: "flex", alignItems: "center", gap: "0.6rem" }}>
+                        {/* Barra de Título / Identificador Superior de la Pregunta */}
+                        <div
+                          style={{
+                            padding: "0.8rem 1.25rem",
+                            background: isBonusActive
+                              ? "linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%)"
+                              : "linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)",
+                            borderBottom: isBonusActive ? "1.5px solid #fde68a" : "1.5px solid #e2e8f0",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            flexWrap: "wrap",
+                            gap: "0.6rem"
+                          }}
+                        >
+                          <div style={{ display: "flex", alignItems: "center", gap: "0.65rem", flexWrap: "wrap" }}>
                             <span
                               style={{
-                                width: "32px",
-                                height: "32px",
-                                borderRadius: "50%",
-                                background: isBonusActive ? "#f59e0b" : "#0284c7",
+                                background: isBonusActive ? "#d97706" : "#0284c7",
                                 color: "#ffffff",
                                 fontWeight: 900,
-                                fontSize: "0.9rem",
-                                display: "flex",
-                                alignItems: "center",
-                                justifyContent: "center"
+                                fontSize: "0.82rem",
+                                padding: "0.25rem 0.75rem",
+                                borderRadius: "0.5rem",
+                                letterSpacing: "0.04em",
+                                textTransform: "uppercase",
+                                boxShadow: isBonusActive
+                                  ? "0 2px 6px rgba(217, 119, 6, 0.3)"
+                                  : "0 2px 6px rgba(2, 132, 199, 0.3)"
                               }}
                             >
-                              {currentActiveIdx + 1}
+                              {isBonusActive ? "⭐ PREGUNTA BONUS" : `PREGUNTA ${currentActiveQ.numero || currentActiveIdx + 1}`}
                             </span>
-                            <div style={{ fontSize: "1.1rem", fontWeight: 900, color: "#0f172a" }}>
-                              Pregunta #{currentActiveIdx + 1} de {totalQuestionsCount}
-                              {isBonusActive && (
-                                <span style={{ marginLeft: "0.5rem", fontSize: "0.78rem", color: "#92400e", background: "#fef3c7", padding: "0.2rem 0.55rem", borderRadius: "9999px", border: "1px solid #fde68a" }}>
-                                  ⭐ Reactivo Bonus
-                                </span>
-                              )}
-                            </div>
+
+                            <span style={{ fontSize: "0.82rem", fontWeight: 800, color: isBonusActive ? "#92400e" : "#475569" }}>
+                              Valor: {Number(currentActiveQ.puntos || 1.0).toFixed(2)} pts {isBonusActive ? "(Extra)" : ""}
+                            </span>
                           </div>
 
                           <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                            <span style={{ fontSize: "0.8rem", fontWeight: 800, color: "#0369a1", background: "#e0f2fe", padding: "0.25rem 0.65rem", borderRadius: "0.45rem" }}>
-                              Valor: {Number(currentActiveQ.puntos || 1.0).toFixed(3)} pts
+                            <span
+                              style={{
+                                fontSize: "0.78rem",
+                                fontWeight: 800,
+                                color: "#64748b",
+                                background: "#ffffff",
+                                padding: "0.2rem 0.6rem",
+                                borderRadius: "0.4rem",
+                                border: "1px solid #cbd5e1"
+                              }}
+                            >
+                              Reactivo {currentActiveIdx + 1} de {totalQuestionsCount}
                             </span>
+
+                            {isBonusActive && (
+                              <span
+                                style={{
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: "0.25rem",
+                                  background: "#ffffff",
+                                  color: "#b45309",
+                                  border: "1px solid #fde68a",
+                                  padding: "0.2rem 0.55rem",
+                                  borderRadius: "9999px",
+                                  fontSize: "0.72rem",
+                                  fontWeight: 900
+                                }}
+                              >
+                                +1.0 pt para Premios
+                              </span>
+                            )}
                           </div>
                         </div>
+
+                        {/* Contenedor del Cuerpo de la Pregunta */}
+                        <div style={{ padding: "1.35rem 1.5rem", display: "flex", flexDirection: "column", gap: "1.25rem" }}>
+                          {/* Enunciado Principal de la Pregunta */}
+                          {currentActiveQ.enunciado && (
+                            <div style={{ fontSize: "1.05rem", fontWeight: 800, color: "#0f172a", lineHeight: 1.5 }}>
+                              {currentActiveQ.enunciado}
+                            </div>
+                          )}
 
                         {/* Micrografía histológica protegida contra Google Lens y capturas */}
                         {currentActiveQ.imagen_url && (
@@ -4455,7 +4589,17 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                         {/* Apartados / Sub-reactivos de respuesta */}
                         <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
                           {(!currentActiveQ.items || currentActiveQ.items.length === 0) ? (
-                            <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
+                            <div
+                              style={{
+                                background: "#f8fafc",
+                                border: "1.5px solid #e2e8f0",
+                                borderRadius: "0.75rem",
+                                padding: "0.9rem 1.1rem",
+                                display: "flex",
+                                flexDirection: "column",
+                                gap: "0.5rem"
+                              }}
+                            >
                               <label style={{ fontSize: "0.88rem", fontWeight: 800, color: "#1e293b" }}>
                                 Respuesta:
                               </label>
@@ -4515,13 +4659,24 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                               const currentVal = quizAnswers?.[currentActiveQ.id]?.[item.id];
                               const itemLabel = item.instruccion || item.etiqueta || `Inciso ${itemIdx + 1}`;
                               return (
-                                <div key={item.id} style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
+                                <div
+                                  key={item.id}
+                                  style={{
+                                    background: "#f8fafc",
+                                    border: "1.5px solid #e2e8f0",
+                                    borderRadius: "0.75rem",
+                                    padding: "0.9rem 1.1rem",
+                                    display: "flex",
+                                    flexDirection: "column",
+                                    gap: "0.6rem"
+                                  }}
+                                >
                                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "0.4rem" }}>
-                                    <label style={{ fontSize: "0.85rem", fontWeight: 800, color: "#1e293b", margin: 0 }}>
+                                    <label style={{ fontSize: "0.88rem", fontWeight: 800, color: "#1e293b", margin: 0 }}>
                                       {String.fromCharCode(97 + itemIdx)}) {itemLabel}:
                                     </label>
                                     {item.puntos !== undefined && (
-                                      <span style={{ fontSize: "0.74rem", fontWeight: 800, color: "#0369a1", background: "#f0f9ff", border: "1px solid #bae6fd", padding: "0.1rem 0.45rem", borderRadius: "0.35rem" }}>
+                                      <span style={{ fontSize: "0.75rem", fontWeight: 800, color: "#0369a1", background: "#ffffff", border: "1px solid #bae6fd", padding: "0.15rem 0.5rem", borderRadius: "0.35rem" }}>
                                         {item.puntos} pt(s)
                                       </span>
                                     )}
@@ -4624,6 +4779,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                           )}
                         </div>
                       </div>
+                    </div>
 
                       {/* Barra Inferior del Reactivo */}
                       <div

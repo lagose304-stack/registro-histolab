@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { createPortal } from "react-dom";
 import {
   ArrowLeft,
   RefreshCw,
@@ -19,7 +20,11 @@ import {
   User,
   GraduationCap,
   Trash2,
-  ShieldAlert
+  ShieldAlert,
+  Zap,
+  ChevronLeft,
+  ChevronRight,
+  Trophy
 } from "lucide-react";
 import { api } from "../services/api";
 
@@ -53,6 +58,26 @@ export default function ReviewQuizSubmissionsView({
   const [evaluaciones, setEvaluaciones] = useState({});
   const [savingGrade, setSavingGrade] = useState(false);
   const [gradeError, setGradeError] = useState("");
+
+  // Estado para Revisión Rápida (Reactivo por Reactivo a todos los estudiantes)
+  const [showQuickReviewModal, setShowQuickReviewModal] = useState(false);
+  const [quickQuestionIdx, setQuickQuestionIdx] = useState(0); // 0 a 5
+  const [quickStudentIdx, setQuickStudentIdx] = useState(0); // 0 a entregasSemana.length - 1
+  const [quickEvaluations, setQuickEvaluations] = useState({}); // { [entregaId]: { [evalKey]: {...} } }
+  const [quickSaving, setQuickSaving] = useState(false);
+  const [quickQuestionFinishedPrompt, setQuickQuestionFinishedPrompt] = useState(false);
+  const [quickAllCompleted, setQuickAllCompleted] = useState(false);
+
+  // Bloquear el scroll de fondo mientras cualquier modal esté abierto
+  useEffect(() => {
+    if (selectedEntrega || showQuickReviewModal) {
+      const originalOverflow = document.body.style.overflow;
+      document.body.style.overflow = "hidden";
+      return () => {
+        document.body.style.overflow = originalOverflow;
+      };
+    }
+  }, [selectedEntrega, showQuickReviewModal]);
 
   const carrera = seccion?.carrera || "Medicina";
 
@@ -202,11 +227,26 @@ export default function ReviewQuizSubmissionsView({
                 ? Number(entrega.auditoria.nota_real)
                 : oficial));
 
-    setNotaInput(oficial !== null ? oficial.toFixed(3) : "");
-    setNotaRealInput(real !== null ? real.toFixed(3) : "");
-    setComentariosInput(entrega.comentarios || "");
     const initialEvals = entrega.evaluaciones_incisos || entrega.auditoria?.evaluaciones_incisos || {};
     setEvaluaciones(initialEvals);
+
+    // Calcular en base a las evaluaciones si existen, o a partir de notas ya registradas
+    const evalEntries = Object.values(initialEvals);
+    let calculatedRaw = 0;
+    if (evalEntries.length > 0) {
+      calculatedRaw = evalEntries.reduce((sum, item) => sum + (Number(item?.puntos_obtenidos) || 0), 0);
+      calculatedRaw = Math.round(calculatedRaw * 1000) / 1000;
+    } else if (real !== null) {
+      calculatedRaw = real;
+    } else if (oficial !== null) {
+      calculatedRaw = oficial;
+    }
+
+    const calculatedCapped = Math.min(5.0, calculatedRaw);
+
+    setNotaInput(calculatedCapped.toFixed(3));
+    setNotaRealInput(calculatedRaw.toFixed(3));
+    setComentariosInput(entrega.comentarios || "");
     setGradeError("");
   };
 
@@ -387,12 +427,12 @@ export default function ReviewQuizSubmissionsView({
 
   // Guardar calificación
   const handleSaveGrade = async (e) => {
-    e.preventDefault();
+    if (e?.preventDefault) e.preventDefault();
     if (!selectedEntrega) return;
 
     const num = Number(notaInput);
-    if (isNaN(num) || num < 0 || num > 5) {
-      setGradeError("La nota oficial debe ser un número entre 0.000 y 5.000 puntos.");
+    if (isNaN(num) || num < 0) {
+      setGradeError("Aún no se ha calculado una calificación válida. Evalúa los reactivos de la prueba.");
       return;
     }
 
@@ -400,7 +440,7 @@ export default function ReviewQuizSubmissionsView({
     setGradeError("");
 
     try {
-      const cleanNotaOficial = Math.round(num * 1000) / 1000;
+      const cleanNotaOficial = Math.min(5.0, Math.round(num * 1000) / 1000);
       const numReal = Number(notaRealInput);
       const cleanNotaReal = !isNaN(numReal) && numReal >= cleanNotaOficial
         ? Math.round(numReal * 1000) / 1000
@@ -415,7 +455,7 @@ export default function ReviewQuizSubmissionsView({
         nota_obtenida: cleanNotaOficial,
         nota_real: cleanNotaReal,
         nota_con_bonus: cleanNotaReal,
-        comentarios: comentariosInput.trim(),
+        comentarios: (selectedEntrega?.comentarios || ""),
         calificado_por: instructorName,
         carrera: seccion?.carrera || "Medicina",
         evaluaciones_incisos: evaluaciones
@@ -494,6 +534,321 @@ export default function ReviewQuizSubmissionsView({
       notifyRef.current("Error al eliminar la entrega", "error");
     } finally {
       setSavingGrade(false);
+    }
+  };
+
+  // =========================================================================
+  // FUNCIONES DE REVISIÓN RÁPIDA (REACTIVO POR REACTIVO A TODOS LOS ALUMNOS)
+  // =========================================================================
+
+  // Iniciar Revisión Rápida
+  const handleOpenQuickReview = () => {
+    if (!entregasSemana || entregasSemana.length === 0) {
+      notifyRef.current("No hay entregas recibidas en esta semana para revisar.", "warning");
+      return;
+    }
+    if (!quizSemanal || !quizSemanal.preguntas || quizSemanal.preguntas.length === 0) {
+      notifyRef.current("No se encontraron las preguntas de la prueba para esta semana.", "warning");
+      return;
+    }
+
+    // Inicializar mapa de evaluaciones de todos los estudiantes pre-poblando lo ya calificado
+    const initialMap = {};
+    entregasSemana.forEach((e) => {
+      const existing = e.evaluaciones_incisos || e.auditoria?.evaluaciones_incisos || {};
+      initialMap[e.id] = { ...existing };
+    });
+
+    setQuickEvaluations(initialMap);
+    setQuickQuestionIdx(0);
+    setQuickStudentIdx(0);
+    setQuickQuestionFinishedPrompt(false);
+    setQuickAllCompleted(false);
+    setShowQuickReviewModal(true);
+  };
+
+  // Cerrar Revisión Rápida
+  const handleCloseQuickReview = () => {
+    setShowQuickReviewModal(false);
+    setQuickQuestionFinishedPrompt(false);
+    setQuickAllCompleted(false);
+  };
+
+  // Evaluar ítem directo o texto corto en Revisión Rápida
+  const handleQuickEvaluateItem = (entregaId, preguntaId, itemId, status, maxPoints) => {
+    const numMax = Number(maxPoints) || 0;
+    let earned = 0;
+    if (status === "buena") earned = numMax;
+    else if (status === "regular") earned = Math.round((numMax / 2) * 1000) / 1000;
+    else earned = 0;
+
+    const key = itemId ? `${preguntaId}___${itemId}` : `${preguntaId}___direct`;
+
+    setQuickEvaluations((prev) => {
+      const studentMap = { ...(prev[entregaId] || {}) };
+      studentMap[key] = {
+        estado: status,
+        puntos_obtenidos: earned,
+        puntos_max: numMax,
+        pregunta_id: preguntaId,
+        item_id: itemId || null
+      };
+      return {
+        ...prev,
+        [entregaId]: studentMap
+      };
+    });
+  };
+
+  // Evaluar casilla individual de listado en Revisión Rápida
+  const handleQuickEvaluateSlot = (entregaId, preguntaId, itemId, slotIdx, status, slotMaxPoints) => {
+    const numMax = Number(slotMaxPoints) || 0;
+    let earned = 0;
+    if (status === "buena") earned = numMax;
+    else if (status === "regular") earned = Math.round((numMax / 2) * 1000) / 1000;
+    else earned = 0;
+
+    const key = `${preguntaId}___${itemId}___slot_${slotIdx}`;
+
+    setQuickEvaluations((prev) => {
+      const studentMap = { ...(prev[entregaId] || {}) };
+      delete studentMap[`${preguntaId}___${itemId}`];
+      studentMap[key] = {
+        estado: status,
+        puntos_obtenidos: earned,
+        puntos_max: numMax,
+        pregunta_id: preguntaId,
+        item_id: itemId,
+        slot_idx: slotIdx
+      };
+      return {
+        ...prev,
+        [entregaId]: studentMap
+      };
+    });
+  };
+
+  // Evaluar todas las casillas de un apartado de listado en Revisión Rápida
+  const handleQuickEvaluateAllSlotsInItem = (entregaId, preguntaId, itemId, totalSlots, status, slotMaxPoints) => {
+    const numMax = Number(slotMaxPoints) || 0;
+    setQuickEvaluations((prev) => {
+      const studentMap = { ...(prev[entregaId] || {}) };
+      delete studentMap[`${preguntaId}___${itemId}`];
+
+      for (let s = 0; s < totalSlots; s++) {
+        let earned = 0;
+        if (status === "buena") earned = numMax;
+        else if (status === "regular") earned = Math.round((numMax / 2) * 1000) / 1000;
+        else earned = 0;
+
+        studentMap[`${preguntaId}___${itemId}___slot_${s}`] = {
+          estado: status,
+          puntos_obtenidos: earned,
+          puntos_max: numMax,
+          pregunta_id: preguntaId,
+          item_id: itemId,
+          slot_idx: s
+        };
+      }
+
+      return {
+        ...prev,
+        [entregaId]: studentMap
+      };
+    });
+  };
+
+  // Evaluar todos los apartados de la pregunta actual para el alumno actual (Todo Bueno / Todo Malo)
+  const handleQuickEvaluateAllInQuestion = (entregaId, pregunta, status) => {
+    if (!pregunta) return;
+    setQuickEvaluations((prev) => {
+      const studentMap = { ...(prev[entregaId] || {}) };
+      if (!pregunta.items || pregunta.items.length === 0) {
+        const maxPts = Number(pregunta.puntos) || 1.0;
+        let earned = 0;
+        if (status === "buena") earned = maxPts;
+        else if (status === "regular") earned = Math.round((maxPts / 2) * 1000) / 1000;
+        else earned = 0;
+
+        studentMap[`${pregunta.id}___direct`] = {
+          estado: status,
+          puntos_obtenidos: earned,
+          puntos_max: maxPts,
+          pregunta_id: pregunta.id,
+          item_id: null
+        };
+      } else {
+        pregunta.items.forEach((item) => {
+          const defaultItemPts = Math.round((Number(pregunta.puntos || 1.0) / pregunta.items.length) * 1000) / 1000;
+          const itemMaxPts = item.puntos !== undefined && !isNaN(Number(item.puntos)) ? Number(item.puntos) : defaultItemPts;
+          const isList = item.tipo !== "texto_corto";
+          const cantSlots = isList ? (parseInt(item.cantidad, 10) || 3) : 1;
+          const slotPts = isList ? Math.round((itemMaxPts / cantSlots) * 1000) / 1000 : itemMaxPts;
+
+          if (isList) {
+            delete studentMap[`${pregunta.id}___${item.id}`];
+            for (let s = 0; s < cantSlots; s++) {
+              let earned = 0;
+              if (status === "buena") earned = slotPts;
+              else if (status === "regular") earned = Math.round((slotPts / 2) * 1000) / 1000;
+              else earned = 0;
+
+              studentMap[`${pregunta.id}___${item.id}___slot_${s}`] = {
+                estado: status,
+                puntos_obtenidos: earned,
+                puntos_max: slotPts,
+                pregunta_id: pregunta.id,
+                item_id: item.id,
+                slot_idx: s
+              };
+            }
+          } else {
+            let earned = 0;
+            if (status === "buena") earned = itemMaxPts;
+            else if (status === "regular") earned = Math.round((itemMaxPts / 2) * 1000) / 1000;
+            else earned = 0;
+
+            studentMap[`${pregunta.id}___${item.id}`] = {
+              estado: status,
+              puntos_obtenidos: earned,
+              puntos_max: itemMaxPts,
+              pregunta_id: pregunta.id,
+              item_id: item.id
+            };
+          }
+        });
+      }
+
+      return {
+        ...prev,
+        [entregaId]: studentMap
+      };
+    });
+  };
+
+  // Verificar si la pregunta actual está 100% evaluada para el estudiante
+  const getQuestionEvaluationStatus = (pregunta, studentEvaluations) => {
+    if (!pregunta) return { isComplete: false, total: 0, completed: 0, missing: 0 };
+    const evs = studentEvaluations || {};
+    let total = 0;
+    let completed = 0;
+
+    if (!pregunta.items || pregunta.items.length === 0) {
+      total = 1;
+      if (evs[`${pregunta.id}___direct`]?.estado) completed++;
+    } else {
+      pregunta.items.forEach((item) => {
+        const isList = item.tipo !== "texto_corto";
+        const cantSlots = isList ? (parseInt(item.cantidad, 10) || 3) : 1;
+        if (!isList) {
+          total++;
+          if (evs[`${pregunta.id}___${item.id}`]?.estado) completed++;
+        } else {
+          for (let s = 0; s < cantSlots; s++) {
+            total++;
+            if (evs[`${pregunta.id}___${item.id}___slot_${s}`]?.estado) completed++;
+          }
+        }
+      });
+    }
+
+    return {
+      isComplete: total > 0 && completed === total,
+      total,
+      completed,
+      missing: Math.max(0, total - completed)
+    };
+  };
+
+  // Guardar calificación del estudiante actual y avanzar al siguiente estudiante o siguiente pregunta
+  const handleQuickAdvance = async () => {
+    const currentStudent = entregasSemana[quickStudentIdx];
+    if (!currentStudent) return;
+
+    const studentEvals = quickEvaluations[currentStudent.id] || {};
+    const totalRaw = Object.values(studentEvals).reduce(
+      (sum, item) => sum + (Number(item?.puntos_obtenidos) || 0),
+      0
+    );
+    const cleanNotaReal = Math.round(totalRaw * 1000) / 1000;
+    const cleanNotaOficial = Math.min(5.0, cleanNotaReal);
+
+    const instructorName =
+      currentInstructor?.nombre_completo ||
+      `${currentInstructor?.primer_nombre || ""} ${currentInstructor?.primer_apellido || ""}`.trim() ||
+      "Docente";
+
+    const payload = {
+      nota_obtenida: cleanNotaOficial,
+      nota_real: cleanNotaReal,
+      nota_con_bonus: cleanNotaReal,
+      comentarios: currentStudent.comentarios || "",
+      calificado_por: instructorName,
+      carrera: seccion?.carrera || "Medicina",
+      evaluaciones_incisos: studentEvals
+    };
+
+    setQuickSaving(true);
+    try {
+      // Guardar en el servidor para este alumno específico
+      await api.pruebas.calificar(currentStudent.id, payload).catch((err) => {
+        console.warn("Aviso al sincronizar calificación en revisión rápida:", err);
+      });
+
+      // Actualizar en el estado local de entregas
+      setEntregasSemana((prev) =>
+        prev.map((it) =>
+          it.id === currentStudent.id
+            ? {
+                ...it,
+                nota_obtenida: cleanNotaOficial,
+                nota_real: cleanNotaReal,
+                nota_con_bonus: cleanNotaReal,
+                estado: "calificado",
+                calificado_por: instructorName,
+                evaluaciones_incisos: studentEvals,
+                auditoria: {
+                  ...(it.auditoria || {}),
+                  evaluaciones_incisos: studentEvals,
+                  nota_real: cleanNotaReal
+                }
+              }
+            : it
+        )
+      );
+
+      // Comprobar si aún quedan estudiantes en esta pregunta
+      if (quickStudentIdx < entregasSemana.length - 1) {
+        setQuickStudentIdx((prev) => prev + 1);
+      } else {
+        // Se terminaron de calificar todos los estudiantes para esta pregunta
+        const totalQuestions = (quizSemanal?.preguntas || []).length || 6;
+        if (quickQuestionIdx < totalQuestions - 1) {
+          setQuickQuestionFinishedPrompt(true);
+        } else {
+          // Se completaron todas las preguntas para todos los alumnos
+          setQuickAllCompleted(true);
+        }
+      }
+    } catch (err) {
+      console.error("Error al avanzar estudiante en revisión rápida:", err);
+      notifyRef.current("Error al sincronizar calificación del estudiante", "error");
+    } finally {
+      setQuickSaving(false);
+    }
+  };
+
+  // Pasar a la siguiente pregunta tras completar a todos los estudiantes
+  const handleQuickNextQuestion = () => {
+    setQuickQuestionFinishedPrompt(false);
+    setQuickQuestionIdx((prev) => prev + 1);
+    setQuickStudentIdx(0);
+  };
+
+  // Retroceder al estudiante anterior en la misma pregunta
+  const handleQuickPrevious = () => {
+    if (quickStudentIdx > 0) {
+      setQuickStudentIdx((prev) => prev - 1);
     }
   };
 
@@ -832,6 +1187,100 @@ export default function ReviewQuizSubmissionsView({
             gap: "1.25rem"
           }}
         >
+          {/* TARJETA DESTACADA: REVISIÓN RÁPIDA POR REACTIVO */}
+          <div
+            style={{
+              background: "linear-gradient(135deg, #0f172a 0%, #1e293b 100%)",
+              borderRadius: "1rem",
+              border: "2px solid #38bdf8",
+              boxShadow: "0 8px 24px -4px rgba(2, 132, 199, 0.25)",
+              padding: "1.4rem",
+              display: "flex",
+              flexDirection: "column",
+              justifyContent: "space-between",
+              gap: "1.1rem",
+              color: "#ffffff",
+              position: "relative",
+              overflow: "hidden"
+            }}
+          >
+            {/* Resplandor decorativo */}
+            <div
+              style={{
+                position: "absolute",
+                right: "-20px",
+                bottom: "-20px",
+                width: "120px",
+                height: "120px",
+                borderRadius: "50%",
+                background: "radial-gradient(circle, rgba(56, 189, 248, 0.18) 0%, transparent 70%)",
+                pointerEvents: "none"
+              }}
+            />
+
+            <div>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "0.6rem" }}>
+                <span
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "0.3rem",
+                    fontSize: "0.72rem",
+                    fontWeight: 900,
+                    padding: "0.2rem 0.6rem",
+                    borderRadius: "9999px",
+                    background: "rgba(56, 189, 248, 0.2)",
+                    color: "#38bdf8",
+                    border: "1px solid rgba(56, 189, 248, 0.4)",
+                    letterSpacing: "0.05em",
+                    textTransform: "uppercase"
+                  }}
+                >
+                  <Zap size={13} />
+                  Modo Continuo
+                </span>
+                <span style={{ fontSize: "0.74rem", color: "#94a3b8", fontWeight: 700 }}>
+                  {entregasSemana.length} {entregasSemana.length === 1 ? "entrega" : "entregas"}
+                </span>
+              </div>
+
+              <h3 style={{ margin: "0 0 0.4rem", fontSize: "1.25rem", fontWeight: 900, color: "#ffffff" }}>
+                ⚡ Revisión Rápida
+              </h3>
+              <p style={{ margin: 0, fontSize: "0.84rem", color: "#cbd5e1", lineHeight: 1.45 }}>
+                Califica la misma pregunta para todos los estudiantes de forma ágil y consecutiva: primero la Pregunta 1 a todos, luego la 2, 3, 4, 5 y por último el reactivo Bonus.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleOpenQuickReview}
+              disabled={entregasSemana.length === 0}
+              style={{
+                width: "100%",
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: "0.5rem",
+                padding: "0.75rem",
+                borderRadius: "0.7rem",
+                border: "none",
+                background: entregasSemana.length > 0
+                  ? "linear-gradient(135deg, #0284c7 0%, #0369a1 100%)"
+                  : "#334155",
+                color: "#ffffff",
+                fontSize: "0.88rem",
+                fontWeight: 800,
+                cursor: entregasSemana.length > 0 ? "pointer" : "not-allowed",
+                boxShadow: entregasSemana.length > 0 ? "0 4px 14px rgba(2, 132, 199, 0.35)" : "none",
+                transition: "all 0.15s ease"
+              }}
+            >
+              <Zap size={16} />
+              <span>{entregasSemana.length > 0 ? "Iniciar Revisión Rápida" : "Sin entregas para revisar"}</span>
+            </button>
+          </div>
+
           {filteredEntregas.map((entrega) => {
             const isGraded = entrega.estado === "calificado";
 
@@ -1073,21 +1522,25 @@ export default function ReviewQuizSubmissionsView({
       )}
 
       {/* =================================================================== */}
-      {/* 4. MODAL INTERACTIVO DE REVISIÓN Y CALIFICACIÓN                      */}
+      {/* 4. MODAL INTERACTIVO DE REVISIÓN Y CALIFICACIÓN (PORTAL GLOBAL)      */}
       {/* =================================================================== */}
-      {selectedEntrega && (
+      {selectedEntrega && createPortal(
         <div
           className="animate-fade-in"
           style={{
             position: "fixed",
             inset: 0,
-            background: "rgba(15, 23, 42, 0.7)",
-            backdropFilter: "blur(4px)",
-            zIndex: 9999,
+            width: "100vw",
+            height: "100vh",
+            background: "rgba(15, 23, 42, 0.72)",
+            backdropFilter: "blur(5px)",
+            WebkitBackdropFilter: "blur(5px)",
+            zIndex: 999999,
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            padding: "1rem"
+            padding: "1.25rem",
+            boxSizing: "border-box"
           }}
           onClick={(e) => {
             if (e.target === e.currentTarget && !savingGrade) handleCloseGradeModal();
@@ -1098,11 +1551,11 @@ export default function ReviewQuizSubmissionsView({
               background: "#ffffff",
               borderRadius: "1.2rem",
               width: "100%",
-              maxWidth: "850px",
-              maxHeight: "90vh",
+              maxWidth: "920px",
+              maxHeight: "92vh",
               display: "flex",
               flexDirection: "column",
-              boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.25)",
+              boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.35)",
               overflow: "hidden"
             }}
           >
@@ -1209,64 +1662,35 @@ export default function ReviewQuizSubmissionsView({
                   )}
                 </div>
 
-                <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
-                  <button
-                    type="button"
-                    onClick={() => handleMarkAll("buena")}
-                    style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: "0.25rem",
-                      padding: "0.35rem 0.75rem",
-                      borderRadius: "0.45rem",
-                      background: "#dcfce7",
-                      border: "1.5px solid #86efac",
-                      color: "#15803d",
-                      fontSize: "0.78rem",
-                      fontWeight: 800,
-                      cursor: "pointer"
-                    }}
-                    title="Marcar todos los reactivos como buenos automáticamente"
-                  >
-                    <Check size={14} strokeWidth={2.5} />
-                    <span>✓ Todo Bueno</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => handleMarkAll("mala")}
-                    style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: "0.25rem",
-                      padding: "0.35rem 0.75rem",
-                      borderRadius: "0.45rem",
-                      background: "#fee2e2",
-                      border: "1.5px solid #fca5a5",
-                      color: "#dc2626",
-                      fontSize: "0.78rem",
-                      fontWeight: 800,
-                      cursor: "pointer"
-                    }}
-                    title="Poner en 0 todos los reactivos"
-                  >
-                    <X size={14} strokeWidth={2.5} />
-                    <span>✗ Todo Malo</span>
-                  </button>
-
+                <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", flexWrap: "wrap" }}>
                   <span
                     style={{
                       fontWeight: 900,
                       background: "#ffffff",
-                      padding: "0.3rem 0.75rem",
+                      padding: "0.35rem 0.75rem",
                       borderRadius: "0.45rem",
                       border: "1.5px solid #0284c7",
                       color: "#0369a1",
                       fontSize: "0.84rem"
                     }}
                   >
-                    Σ Puntos: {notaInput ? `${notaInput} / 5.000` : "0.000 / 5.000"}
+                    Σ Oficial: {notaInput ? `${Number(notaInput).toFixed(3)} / 5.000` : "0.000 / 5.000"}
                   </span>
+                  {Number(notaRealInput) > 5.0 && (
+                    <span
+                      style={{
+                        fontWeight: 900,
+                        background: "#fef3c7",
+                        padding: "0.35rem 0.65rem",
+                        borderRadius: "0.45rem",
+                        border: "1.5px solid #fde68a",
+                        color: "#b45309",
+                        fontSize: "0.8rem"
+                      }}
+                    >
+                      ⭐ Con Bonus: {Number(notaRealInput).toFixed(3)} pts
+                    </span>
+                  )}
                 </div>
               </div>
 
@@ -1410,62 +1834,149 @@ export default function ReviewQuizSubmissionsView({
                   No se encontró el desglose de preguntas original para esta prueba.
                 </div>
               ) : (
-                <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
-                  {quizSemanal.preguntas.map((pregunta, qIdx) => (
-                    <div
-                      key={pregunta.id}
-                      style={{
-                        padding: "1.25rem",
-                        borderRadius: "0.85rem",
-                        border: "1.5px solid #e2e8f0",
-                        background: "#ffffff",
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: "0.85rem"
-                      }}
-                    >
-                      {/* Enunciado */}
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "0.75rem" }}>
-                        <div style={{ fontSize: "0.96rem", fontWeight: 800, color: "#0f172a" }}>
-                          <span style={{ color: "#0284c7", fontWeight: 900, marginRight: "0.4rem" }}>
-                            {pregunta.enunciado ? `${pregunta.numero || qIdx + 1}.` : `Pregunta ${pregunta.numero || qIdx + 1}:`}
-                          </span>
-                          {pregunta.enunciado || ""}
-                        </div>
-                        {(pregunta.es_bonus || qIdx === 5) && (
-                          <span
+                <div style={{ display: "flex", flexDirection: "column", gap: "2rem" }}>
+                  {quizSemanal.preguntas.map((pregunta, qIdx) => {
+                    const isBonus = Boolean(pregunta.es_bonus || qIdx === 5);
+                    const qMaxPts = Number(pregunta.puntos || 1.0);
+
+                    // Calcular puntos obtenidos en esta pregunta
+                    let qEarned = 0;
+                    if (!pregunta.items || pregunta.items.length === 0) {
+                      qEarned = Number(evaluaciones[`${pregunta.id}___direct`]?.puntos_obtenidos) || 0;
+                    } else {
+                      pregunta.items.forEach((it) => {
+                        const isList = it.tipo !== "texto_corto";
+                        const cant = isList ? (parseInt(it.cantidad, 10) || 3) : 1;
+                        if (isList && cant > 1) {
+                          for (let s = 0; s < cant; s++) {
+                            qEarned += Number(evaluaciones[`${pregunta.id}___${it.id}___slot_${s}`]?.puntos_obtenidos) || 0;
+                          }
+                        } else {
+                          qEarned += Number(evaluaciones[`${pregunta.id}___${it.id}`]?.puntos_obtenidos) || 0;
+                        }
+                      });
+                    }
+                    qEarned = Math.round(qEarned * 1000) / 1000;
+
+                    return (
+                      <React.Fragment key={pregunta.id}>
+                        {qIdx > 0 && (
+                          <div style={{ display: "flex", alignItems: "center", gap: "1rem", margin: "0.25rem 0" }}>
+                            <div style={{ flex: 1, height: "1.5px", background: "linear-gradient(to right, transparent, #cbd5e1, transparent)" }} />
+                            <span style={{ fontSize: "0.72rem", fontWeight: 800, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+                              • Reactivo {qIdx + 1} de {quizSemanal.preguntas.length} •
+                            </span>
+                            <div style={{ flex: 1, height: "1.5px", background: "linear-gradient(to right, transparent, #cbd5e1, transparent)" }} />
+                          </div>
+                        )}
+
+                        <div
+                          style={{
+                            borderRadius: "1rem",
+                            border: isBonus ? "2px solid #fde68a" : "2px solid #cbd5e1",
+                            borderLeft: isBonus ? "7px solid #f59e0b" : "7px solid #0284c7",
+                            background: "#ffffff",
+                            boxShadow: "0 8px 24px -4px rgba(15, 23, 42, 0.08)",
+                            overflow: "hidden",
+                            display: "flex",
+                            flexDirection: "column"
+                          }}
+                        >
+                          {/* Barra de Título / Identificador Superior de la Pregunta */}
+                          <div
                             style={{
-                              display: "inline-flex",
+                              padding: "0.75rem 1.25rem",
+                              background: isBonus
+                                ? "linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%)"
+                                : "linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)",
+                              borderBottom: isBonus ? "1.5px solid #fde68a" : "1.5px solid #e2e8f0",
+                              display: "flex",
                               alignItems: "center",
-                              gap: "0.25rem",
-                              background: "#fef3c7",
-                              color: "#b45309",
-                              border: "1px solid #fde68a",
-                              padding: "0.2rem 0.6rem",
-                              borderRadius: "9999px",
-                              fontSize: "0.72rem",
-                              fontWeight: 800,
-                              whiteSpace: "nowrap"
+                              justifyContent: "space-between",
+                              flexWrap: "wrap",
+                              gap: "0.6rem"
                             }}
                           >
-                            ⭐ Pregunta Bonus (+1.0 pt extra)
-                          </span>
-                        )}
-                      </div>
+                            <div style={{ display: "flex", alignItems: "center", gap: "0.65rem", flexWrap: "wrap" }}>
+                              <span
+                                style={{
+                                  background: isBonus ? "#d97706" : "#0284c7",
+                                  color: "#ffffff",
+                                  fontWeight: 900,
+                                  fontSize: "0.82rem",
+                                  padding: "0.25rem 0.75rem",
+                                  borderRadius: "0.5rem",
+                                  letterSpacing: "0.04em",
+                                  textTransform: "uppercase",
+                                  boxShadow: isBonus
+                                    ? "0 2px 6px rgba(217, 119, 6, 0.3)"
+                                    : "0 2px 6px rgba(2, 132, 199, 0.3)"
+                                }}
+                              >
+                                {isBonus ? "⭐ PREGUNTA BONUS" : `PREGUNTA ${pregunta.numero || qIdx + 1}`}
+                              </span>
 
-                      {/* Imagen / Micrografía si existe */}
-                      {pregunta.imagen_url && (
-                        <div style={{ textAlign: "center", background: "#0f172a", padding: "0.5rem", borderRadius: "0.6rem" }}>
-                          <img
-                            src={pregunta.imagen_url}
-                            alt="Micrografía"
-                            style={{ maxHeight: "220px", maxWidth: "100%", objectFit: "contain", borderRadius: "0.4rem" }}
-                          />
-                        </div>
-                      )}
+                              <span style={{ fontSize: "0.8rem", fontWeight: 800, color: isBonus ? "#92400e" : "#475569" }}>
+                                Valor Total: {qMaxPts.toFixed(2)} pts {isBonus ? "(Extra)" : ""}
+                              </span>
+                            </div>
 
-                      {/* Incisos respondidos por el alumno */}
-                      <div style={{ display: "flex", flexDirection: "column", gap: "0.85rem" }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                              <span
+                                style={{
+                                  fontSize: "0.78rem",
+                                  fontWeight: 900,
+                                  padding: "0.2rem 0.6rem",
+                                  borderRadius: "0.4rem",
+                                  background: qEarned === qMaxPts ? "#dcfce7" : qEarned > 0 ? "#fef3c7" : "#f1f5f9",
+                                  color: qEarned === qMaxPts ? "#15803d" : qEarned > 0 ? "#b45309" : "#64748b",
+                                  border: qEarned === qMaxPts ? "1px solid #86efac" : qEarned > 0 ? "1px solid #fde68a" : "1px solid #cbd5e1"
+                                }}
+                              >
+                                Puntos reactivo: +{qEarned.toFixed(3)} / {qMaxPts.toFixed(2)} pts
+                              </span>
+
+                              {isBonus && (
+                                <span
+                                  style={{
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    gap: "0.25rem",
+                                    background: "#ffffff",
+                                    color: "#b45309",
+                                    border: "1px solid #fde68a",
+                                    padding: "0.2rem 0.55rem",
+                                    borderRadius: "9999px",
+                                    fontSize: "0.72rem",
+                                    fontWeight: 900
+                                  }}
+                                >
+                                  +1.0 pt para Premios
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Cuerpo de la Pregunta */}
+                          <div style={{ padding: "1.25rem", display: "flex", flexDirection: "column", gap: "1rem" }}>
+                            {/* Enunciado */}
+                            <div style={{ fontSize: "1rem", fontWeight: 800, color: "#0f172a", lineHeight: 1.45 }}>
+                              {pregunta.enunciado || ""}
+                            </div>
+
+                            {/* Imagen / Micrografía si existe */}
+                            {pregunta.imagen_url && (
+                              <div style={{ textAlign: "center", background: "#0f172a", padding: "0.6rem", borderRadius: "0.65rem" }}>
+                                <img
+                                  src={pregunta.imagen_url}
+                                  alt="Micrografía"
+                                  style={{ maxHeight: "240px", maxWidth: "100%", objectFit: "contain", borderRadius: "0.45rem" }}
+                                />
+                              </div>
+                            )}
+
+                            {/* Incisos respondidos por el alumno */}
+                            <div style={{ display: "flex", flexDirection: "column", gap: "0.85rem" }}>
                         {(() => {
                           const entregaRespuestas =
                             typeof selectedEntrega.respuestas === "string"
@@ -1681,10 +2192,19 @@ export default function ReviewQuizSubmissionsView({
                                     </div>
                                   </div>
 
-                                  {/* Respuesta Modelo */}
-                                  {item.respuesta_modelo && (
-                                    <div style={{ padding: "0.5rem 0.75rem", borderRadius: "0.45rem", background: "#ecfdf5", border: "1px solid #a7f3d0", fontSize: "0.78rem", color: "#065f46" }}>
-                                      <strong>💡 Respuesta Modelo Docente:</strong> {item.respuesta_modelo}
+                                  {/* Respuesta Modelo o Banco de Opciones válidas */}
+                                  {(item.respuesta_modelo || (Array.isArray(item.respuestas_esperadas) && item.respuestas_esperadas.length > 0)) && (
+                                    <div style={{ padding: "0.5rem 0.75rem", borderRadius: "0.45rem", background: "#ecfdf5", border: "1px solid #a7f3d0", fontSize: "0.78rem", color: "#065f46", display: "flex", flexWrap: "wrap", alignItems: "center", gap: "0.35rem" }}>
+                                      <strong>💡 Opciones válidas docente:</strong>
+                                      {Array.isArray(item.respuestas_esperadas) && item.respuestas_esperadas.length > 0 ? (
+                                        item.respuestas_esperadas.map((ans, aIdx) => (
+                                          <span key={aIdx} style={{ background: "#ffffff", border: "1px solid #bbf7d0", padding: "0.1rem 0.4rem", borderRadius: "0.3rem", fontWeight: 700 }}>
+                                            {ans}
+                                          </span>
+                                        ))
+                                      ) : (
+                                        <span>{item.respuesta_modelo}</span>
+                                      )}
                                     </div>
                                   )}
 
@@ -1895,13 +2415,51 @@ export default function ReviewQuizSubmissionsView({
                                   </div>
                                 </div>
 
+                                {/* Banco de opciones válidas aceptadas por el docente */}
+                                {Array.isArray(item.respuestas_esperadas) && item.respuestas_esperadas.length > 0 && (
+                                  <div
+                                    style={{
+                                      padding: "0.45rem 0.65rem",
+                                      borderRadius: "0.45rem",
+                                      background: "#ecfdf5",
+                                      border: "1px dashed #a7f3d0",
+                                      fontSize: "0.75rem",
+                                      color: "#065f46",
+                                      display: "flex",
+                                      flexWrap: "wrap",
+                                      alignItems: "center",
+                                      gap: "0.35rem"
+                                    }}
+                                  >
+                                    <span style={{ fontWeight: 800 }}>
+                                      💡 Opciones válidas aceptadas ({item.respuestas_esperadas.length}):
+                                    </span>
+                                    {item.respuestas_esperadas.map((ans, aIdx) => (
+                                      <span
+                                        key={aIdx}
+                                        style={{
+                                          background: "#ffffff",
+                                          border: "1px solid #bbf7d0",
+                                          padding: "0.1rem 0.4rem",
+                                          borderRadius: "0.3rem",
+                                          fontWeight: 700,
+                                          color: "#15803d"
+                                        }}
+                                      >
+                                        {ans}
+                                      </span>
+                                    ))}
+                                  </div>
+                                )}
+
                                 {/* Listado de Casillas con evaluación individual */}
                                 <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
                                   {Array.from({ length: cantSlots }).map((_, rIdx) => {
                                     const rowVal = Array.isArray(studentAnswer)
                                       ? studentAnswer[rIdx]
                                       : (typeof studentAnswer === "object" && studentAnswer ? studentAnswer[rIdx] : "");
-                                    const expectedAns = (item.respuestas_esperadas || [])[rIdx];
+                                    const hasPool = (item.respuestas_esperadas || []).length > cantSlots;
+                                    const expectedAns = !hasPool ? (item.respuestas_esperadas || [])[rIdx] : null;
                                     const slotEval = evaluaciones[`${pregunta.id}___${item.id}___slot_${rIdx}`];
 
                                     return (
@@ -2055,7 +2613,10 @@ export default function ReviewQuizSubmissionsView({
                         })()}
                       </div>
                     </div>
-                  ))}
+                  </div>
+                </React.Fragment>
+              );
+            })}
                 </div>
               )}
             </div>
@@ -2088,105 +2649,111 @@ export default function ReviewQuizSubmissionsView({
                 </div>
               )}
 
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: "1rem" }}>
-                {/* Asignación de Calificación */}
-                <div>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "0.35rem" }}>
-                    <label style={{ fontSize: "0.82rem", fontWeight: 800, color: "#1e293b", margin: 0 }}>
-                      Calificación Oficial (Máx. 5.000 pts):
-                    </label>
-                    {Number(notaRealInput) > 5.0 && (
-                      <span style={{ fontSize: "0.72rem", fontWeight: 800, color: "#b45309", background: "#fef3c7", padding: "0.1rem 0.45rem", borderRadius: "0.3rem", border: "1px solid #fde68a" }}>
-                        ⭐ Con Bonus: {Number(notaRealInput).toFixed(3)} pts
+              {/* Resumen de Calificación Compacto (Horizontal y Delgado) */}
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 1fr",
+                  gap: "0.65rem"
+                }}
+              >
+                {/* Tarjeta 1: Nota Real Oficial (Tope 5.000 pts) */}
+                <div
+                  style={{
+                    padding: "0.45rem 0.85rem",
+                    borderRadius: "0.55rem",
+                    background: "#f0fdf4",
+                    border: "1.5px solid #86efac",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: "0.5rem"
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.45rem" }}>
+                    <span style={{ fontSize: "1.1rem" }}>🎯</span>
+                    <div style={{ display: "flex", flexDirection: "column" }}>
+                      <strong style={{ fontSize: "0.78rem", color: "#15803d", lineHeight: 1.15 }}>
+                        Calificación Oficial
+                      </strong>
+                      <span style={{ fontSize: "0.68rem", color: "#166534" }}>
+                        Tope 5.000 pts (Académica)
                       </span>
-                    )}
+                    </div>
                   </div>
-                  <div style={{ position: "relative" }}>
-                    <input
-                      type="number"
-                      step="0.001"
-                      min="0"
-                      max="5"
-                      required
-                      value={notaInput}
-                      onChange={(e) => setNotaInput(e.target.value)}
-                      placeholder="Ej. 4.850"
-                      style={{
-                        width: "100%",
-                        padding: "0.65rem 0.85rem",
-                        borderRadius: "0.6rem",
-                        border: "2px solid #10b981",
-                        fontSize: "1.15rem",
-                        fontWeight: 900,
-                        color: "#065f46",
-                        background: "#ffffff",
-                        outline: "none"
-                      }}
-                    />
-                    <span style={{ position: "absolute", right: "0.75rem", top: "50%", transform: "translateY(-50%)", fontSize: "0.8rem", fontWeight: 800, color: "#64748b" }}>
+
+                  <div style={{ display: "flex", alignItems: "baseline", gap: "0.25rem" }}>
+                    <span style={{ fontSize: "1.35rem", fontWeight: 900, color: "#065f46", lineHeight: 1 }}>
+                      {Number(notaInput || 0).toFixed(3)}
+                    </span>
+                    <span style={{ fontSize: "0.78rem", fontWeight: 800, color: "#047857" }}>
                       / 5.000
                     </span>
                   </div>
-
-                  {/* Botones de atajo rápido */}
-                  <div style={{ display: "flex", gap: "0.3rem", marginTop: "0.4rem" }}>
-                    {["5.000", "4.500", "4.000", "3.000"].map((quickVal) => (
-                      <button
-                        key={quickVal}
-                        type="button"
-                        onClick={() => setNotaInput(quickVal)}
-                        style={{
-                          flex: 1,
-                          padding: "0.25rem 0.4rem",
-                          borderRadius: "0.35rem",
-                          border: "1px solid #cbd5e1",
-                          background: "#ffffff",
-                          fontSize: "0.72rem",
-                          fontWeight: 700,
-                          cursor: "pointer",
-                          color: "#334155"
-                        }}
-                      >
-                        {quickVal}
-                      </button>
-                    ))}
-                  </div>
-
-                  {Number(notaRealInput) > 5.0 && (
-                    <div style={{ marginTop: "0.5rem", padding: "0.45rem 0.65rem", borderRadius: "0.45rem", background: "#fffbeb", border: "1px solid #fde68a", fontSize: "0.75rem", color: "#92400e", lineHeight: 1.35 }}>
-                      ⭐ <strong>Puntos con Bonus:</strong> {Number(notaRealInput).toFixed(3)} pts.
-                      <div style={{ fontSize: "0.71rem", color: "#b45309", marginTop: "0.15rem" }}>
-                        Oficialmente se registran 5.000 pts para notas académicas, y {Number(notaRealInput).toFixed(3)} pts se guardan para el Cuadro de Premios de la Sección.
-                      </div>
-                    </div>
-                  )}
                 </div>
 
-                {/* Comentarios / Retroalimentación */}
-                <div>
-                  <label style={{ fontSize: "0.82rem", fontWeight: 800, color: "#1e293b", display: "block", marginBottom: "0.35rem" }}>
-                    Retroalimentación para el Estudiante (Visible en su portal):
-                  </label>
-                  <input
-                    type="text"
-                    value={comentariosInput}
-                    onChange={(e) => setComentariosInput(e.target.value)}
-                    placeholder="Ej. Excelente identificación histológica y precisión morfológica."
-                    style={{
-                      width: "100%",
-                      padding: "0.65rem 0.85rem",
-                      borderRadius: "0.6rem",
-                      border: "1.5px solid #cbd5e1",
-                      fontSize: "0.85rem",
-                      background: "#ffffff",
-                      outline: "none"
-                    }}
-                  />
+                {/* Tarjeta 2: Puntaje para Cuadro de Premios (con Bonus) */}
+                <div
+                  style={{
+                    padding: "0.45rem 0.85rem",
+                    borderRadius: "0.55rem",
+                    background: Number(notaRealInput) > 5.0 ? "#fffbeb" : "#f8fafc",
+                    border: Number(notaRealInput) > 5.0 ? "1.5px solid #fde68a" : "1.5px solid #cbd5e1",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: "0.5rem"
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.45rem" }}>
+                    <span style={{ fontSize: "1.1rem" }}>⭐</span>
+                    <div style={{ display: "flex", flexDirection: "column" }}>
+                      <strong
+                        style={{
+                          fontSize: "0.78rem",
+                          color: Number(notaRealInput) > 5.0 ? "#92400e" : "#334155",
+                          lineHeight: 1.15
+                        }}
+                      >
+                        Puntaje Premios {Number(notaRealInput) > 5.0 ? "(Bonus)" : ""}
+                      </strong>
+                      <span
+                        style={{
+                          fontSize: "0.68rem",
+                          color: Number(notaRealInput) > 5.0 ? "#b45309" : "#64748b"
+                        }}
+                      >
+                        Cuadro de Honor de Sección
+                      </span>
+                    </div>
+                  </div>
+
+                  <div style={{ display: "flex", alignItems: "baseline", gap: "0.25rem" }}>
+                    <span
+                      style={{
+                        fontSize: "1.35rem",
+                        fontWeight: 900,
+                        color: Number(notaRealInput) > 5.0 ? "#b45309" : "#334155",
+                        lineHeight: 1
+                      }}
+                    >
+                      {Number(notaRealInput || 0).toFixed(3)}
+                    </span>
+                    <span
+                      style={{
+                        fontSize: "0.78rem",
+                        fontWeight: 800,
+                        color: Number(notaRealInput) > 5.0 ? "#b45309" : "#64748b"
+                      }}
+                    >
+                      pts
+                    </span>
+                  </div>
                 </div>
               </div>
 
               {/* Botones de acción */}
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "0.75rem", borderTop: "1px solid #e2e8f0", paddingTop: "0.85rem" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "0.75rem", borderTop: "1px solid #e2e8f0", paddingTop: "0.55rem" }}>
                 <button
                   type="button"
                   onClick={handleDeleteSubmission}
@@ -2255,7 +2822,1041 @@ export default function ReviewQuizSubmissionsView({
               </div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
+      )}
+
+      {/* =================================================================== */}
+      {/* 5. MODAL GLOBAL DE REVISIÓN RÁPIDA REACTIVO POR REACTIVO (PORTAL)   */}
+      {/* =================================================================== */}
+      {showQuickReviewModal && createPortal(
+        <div
+          className="animate-fade-in"
+          style={{
+            position: "fixed",
+            inset: 0,
+            width: "100vw",
+            height: "100vh",
+            zIndex: 9999999,
+            background: "rgba(15, 23, 42, 0.85)",
+            backdropFilter: "blur(6px)",
+            WebkitBackdropFilter: "blur(6px)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "1rem",
+            boxSizing: "border-box"
+          }}
+        >
+          <div
+            className="animate-scale-in"
+            style={{
+              background: "#ffffff",
+              borderRadius: "1.25rem",
+              width: "100%",
+              maxWidth: "1320px",
+              height: "92vh",
+              maxHeight: "92vh",
+              display: "flex",
+              flexDirection: "column",
+              boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.5)",
+              border: "1.5px solid #cbd5e1",
+              overflow: "hidden"
+            }}
+          >
+            {/* PANTALLA A: REVISIÓN RÁPIDA FINALIZADA (TODAS LAS PREGUNTAS LISTAS) */}
+            {quickAllCompleted ? (
+              <div
+                style={{
+                  padding: "3.5rem 2rem",
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  textAlign: "center",
+                  gap: "1.25rem",
+                  margin: "auto",
+                  maxWidth: "580px"
+                }}
+              >
+                <div
+                  style={{
+                    width: "75px",
+                    height: "75px",
+                    borderRadius: "50%",
+                    background: "#fef3c7",
+                    border: "2px solid #fde68a",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    color: "#d97706",
+                    boxShadow: "0 8px 24px rgba(217, 119, 6, 0.2)"
+                  }}
+                >
+                  <Trophy size={40} />
+                </div>
+
+                <div>
+                  <span style={{ fontSize: "0.82rem", fontWeight: 900, color: "#d97706", textTransform: "uppercase", letterSpacing: "1px" }}>
+                    ¡Proceso Concluido!
+                  </span>
+                  <h2 style={{ margin: "0.3rem 0", fontSize: "1.75rem", fontWeight: 900, color: "#0f172a" }}>
+                    ¡Revisión Rápida Completada!
+                  </h2>
+                  <p style={{ margin: "0.5rem 0 0", fontSize: "0.92rem", color: "#475569", lineHeight: 1.55 }}>
+                    Has evaluado con éxito todas las 6 preguntas (incluyendo la pregunta Bonus) para los <strong>{entregasSemana.length} estudiantes</strong>. Todas las notas oficiales (tope 5.000 pts) y los puntajes de premios han sido guardados individualmente para cada alumno.
+                  </p>
+                </div>
+
+                <div style={{ display: "flex", gap: "1rem", marginTop: "0.5rem", width: "100%", justifyContent: "center" }}>
+                  <button
+                    type="button"
+                    onClick={handleCloseQuickReview}
+                    style={{
+                      padding: "0.85rem 2rem",
+                      borderRadius: "0.75rem",
+                      border: "none",
+                      background: "linear-gradient(135deg, #10b981 0%, #059669 100%)",
+                      color: "#ffffff",
+                      fontSize: "0.95rem",
+                      fontWeight: 900,
+                      cursor: "pointer",
+                      boxShadow: "0 4px 14px rgba(16, 185, 129, 0.35)",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "0.5rem"
+                    }}
+                  >
+                    <CheckCircle2 size={18} />
+                    <span>Volver al Listado de Entregas</span>
+                  </button>
+                </div>
+              </div>
+            ) : quickQuestionFinishedPrompt ? (
+              /* PANTALLA B: PREGUNTA X COMPLETADA PARA TODOS LOS ALUMNOS (AVANCE A PREGUNTA X+1) */
+              <div
+                style={{
+                  padding: "3.5rem 2rem",
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  textAlign: "center",
+                  gap: "1.25rem",
+                  margin: "auto",
+                  maxWidth: "580px"
+                }}
+              >
+                <div
+                  style={{
+                    width: "70px",
+                    height: "70px",
+                    borderRadius: "50%",
+                    background: "#ecfdf5",
+                    border: "2px solid #a7f3d0",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    color: "#059669",
+                    boxShadow: "0 8px 24px rgba(5, 150, 105, 0.2)"
+                  }}
+                >
+                  <Sparkles size={36} />
+                </div>
+
+                <div>
+                  <span style={{ fontSize: "0.82rem", fontWeight: 900, color: "#059669", textTransform: "uppercase", letterSpacing: "1px" }}>
+                    Reactivo Concluido
+                  </span>
+                  <h2 style={{ margin: "0.3rem 0", fontSize: "1.65rem", fontWeight: 900, color: "#0f172a" }}>
+                    ¡Pregunta {quickQuestionIdx + 1} completada para todos los estudiantes!
+                  </h2>
+                  <p style={{ margin: "0.5rem 0 0", fontSize: "0.92rem", color: "#475569", lineHeight: 1.55 }}>
+                    Se han calificado las respuestas de los <strong>{entregasSemana.length} estudiantes</strong> para la Pregunta {quickQuestionIdx + 1}. Las notas han quedado asignadas en la ficha de cada estudiante sin mezclarse.
+                  </p>
+                </div>
+
+                <div
+                  style={{
+                    background: "#f8fafc",
+                    border: "1.5px solid #e2e8f0",
+                    borderRadius: "0.75rem",
+                    padding: "0.85rem 1.25rem",
+                    width: "100%",
+                    boxSizing: "border-box",
+                    textAlign: "left"
+                  }}
+                >
+                  <span style={{ fontSize: "0.72rem", fontWeight: 800, color: "#64748b", textTransform: "uppercase" }}>
+                    Siguiente paso:
+                  </span>
+                  <div style={{ fontSize: "0.95rem", fontWeight: 800, color: "#0f172a", marginTop: "0.15rem" }}>
+                    Pregunta {quickQuestionIdx + 2} de {(quizSemanal?.preguntas || []).length}
+                    {quickQuestionIdx + 1 === 5 && " • ⭐ Reactivo BONUS para Premios"}
+                  </div>
+                </div>
+
+                <div style={{ display: "flex", gap: "0.75rem", width: "100%", marginTop: "0.5rem" }}>
+                  <button
+                    type="button"
+                    onClick={handleCloseQuickReview}
+                    style={{
+                      flex: 1,
+                      padding: "0.75rem",
+                      borderRadius: "0.7rem",
+                      border: "1.5px solid #cbd5e1",
+                      background: "#ffffff",
+                      color: "#475569",
+                      fontSize: "0.88rem",
+                      fontWeight: 700,
+                      cursor: "pointer"
+                    }}
+                  >
+                    Salir de Revisión
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleQuickNextQuestion}
+                    style={{
+                      flex: 1.5,
+                      padding: "0.75rem",
+                      borderRadius: "0.7rem",
+                      border: "none",
+                      background: "linear-gradient(135deg, #0284c7 0%, #0369a1 100%)",
+                      color: "#ffffff",
+                      fontSize: "0.92rem",
+                      fontWeight: 900,
+                      cursor: "pointer",
+                      boxShadow: "0 4px 14px rgba(2, 132, 199, 0.35)",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: "0.45rem"
+                    }}
+                  >
+                    <span>Continuar a Pregunta {quickQuestionIdx + 2}</span>
+                    <ChevronRight size={17} />
+                  </button>
+                </div>
+              </div>
+            ) : (() => {
+              /* PANTALLA C: EVALUACIÓN ACTIVA DEL ESTUDIANTE ACTUAL EN LA PREGUNTA ACTUAL */
+              const currentQ = (quizSemanal?.preguntas || [])[quickQuestionIdx];
+              const currentStudent = (entregasSemana || [])[quickStudentIdx];
+              if (!currentQ || !currentStudent) return null;
+
+              const isBonus = quickQuestionIdx === 5;
+              const currentStudentEvals = quickEvaluations[currentStudent.id] || {};
+              const qStatus = getQuestionEvaluationStatus(currentQ, currentStudentEvals);
+
+              const entregaRespuestas =
+                typeof currentStudent.respuestas === "string"
+                  ? JSON.parse(currentStudent.respuestas || "{}")
+                  : (currentStudent.respuestas || {});
+
+              return (
+                <>
+                  {/* 1. CABECERA MODAL DE REVISIÓN RÁPIDA */}
+                  <div
+                    style={{
+                      padding: "1rem 1.5rem",
+                      background: isBonus
+                        ? "linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%)"
+                        : "linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)",
+                      borderBottom: isBonus ? "1.5px solid #fde68a" : "1.5px solid #e2e8f0",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "0.75rem"
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "0.75rem" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", flexWrap: "wrap" }}>
+                        <span
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "0.3rem",
+                            fontSize: "0.74rem",
+                            fontWeight: 900,
+                            padding: "0.25rem 0.65rem",
+                            borderRadius: "0.45rem",
+                            background: isBonus ? "#d97706" : "#0284c7",
+                            color: "#ffffff",
+                            letterSpacing: "0.04em",
+                            textTransform: "uppercase"
+                          }}
+                        >
+                          <Zap size={13} />
+                          Revisión Rápida
+                        </span>
+
+                        <span style={{ fontSize: "0.82rem", fontWeight: 800, color: "#334155" }}>
+                          Semana {selectedSemana} • Sección {seccion?.codigo || ""}
+                        </span>
+
+                        {/* Pills de Preguntas */}
+                        <div style={{ display: "flex", alignItems: "center", gap: "0.3rem", marginLeft: "0.5rem" }}>
+                          {(quizSemanal?.preguntas || []).map((q, idx) => {
+                            const isCur = idx === quickQuestionIdx;
+                            const isPast = idx < quickQuestionIdx;
+                            const isQBonus = idx === 5;
+                            return (
+                              <span
+                                key={q.id || idx}
+                                style={{
+                                  fontSize: "0.72rem",
+                                  fontWeight: 800,
+                                  padding: "0.15rem 0.5rem",
+                                  borderRadius: "0.35rem",
+                                  background: isCur ? (isQBonus ? "#f59e0b" : "#0284c7") : isPast ? "#dcfce7" : "#e2e8f0",
+                                  color: isCur ? "#ffffff" : isPast ? "#15803d" : "#64748b",
+                                  border: isCur ? (isQBonus ? "1.5px solid #d97706" : "1.5px solid #0369a1") : "1px solid #cbd5e1"
+                                }}
+                              >
+                                {isPast ? "✓ " : ""}{isQBonus ? "⭐ Bonus" : `P${idx + 1}`}
+                              </span>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={handleCloseQuickReview}
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "0.3rem",
+                          padding: "0.35rem 0.75rem",
+                          borderRadius: "0.45rem",
+                          border: "1px solid #cbd5e1",
+                          background: "#ffffff",
+                          color: "#475569",
+                          fontSize: "0.8rem",
+                          fontWeight: 700,
+                          cursor: "pointer"
+                        }}
+                      >
+                        <X size={15} />
+                        <span>Salir de Revisión</span>
+                      </button>
+                    </div>
+
+                    {/* Barra de progreso de alumnos en esta pregunta */}
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "0.6rem" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "0.6rem" }}>
+                        <h2 style={{ margin: 0, fontSize: "1.3rem", fontWeight: 900, color: "#0f172a" }}>
+                          {isBonus ? "⭐ PREGUNTA 6 (BONUS PREMIOS)" : `PREGUNTA ${quickQuestionIdx + 1}`}
+                        </h2>
+                        <span
+                          style={{
+                            fontSize: "0.74rem",
+                            fontWeight: 800,
+                            padding: "0.15rem 0.5rem",
+                            borderRadius: "0.35rem",
+                            background: "#ffffff",
+                            color: "#0369a1",
+                            border: "1px solid #bae6fd"
+                          }}
+                        >
+                          Valor: {Number(currentQ.puntos || 1.0).toFixed(3)} pt
+                        </span>
+                      </div>
+
+                      {/* Contador de estudiantes */}
+                      <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+                        <div style={{ textAlign: "right" }}>
+                          <span style={{ fontSize: "0.84rem", fontWeight: 900, color: "#0f172a" }}>
+                            Estudiante {quickStudentIdx + 1} de {entregasSemana.length}
+                          </span>
+                          <span style={{ fontSize: "0.72rem", color: "#64748b", display: "block" }}>
+                            {Math.round(((quickStudentIdx + 1) / Math.max(1, entregasSemana.length)) * 100)}% evaluado en esta pregunta
+                          </span>
+                        </div>
+                        <div style={{ width: "90px", height: "8px", background: "#cbd5e1", borderRadius: "9999px", overflow: "hidden" }}>
+                          <div
+                            style={{
+                              width: `${((quickStudentIdx + 1) / Math.max(1, entregasSemana.length)) * 100}%`,
+                              height: "100%",
+                              background: "linear-gradient(90deg, #0284c7 0%, #10b981 100%)",
+                              transition: "width 0.25s ease"
+                            }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 2. ÁREA CENTRAL SCROLLABLE: ENUNCIADO + PANEL DIVIDIDO EN 2 COLUMNAS */}
+                  <div
+                    style={{
+                      flex: 1,
+                      overflowY: "auto",
+                      padding: "1.25rem 1.5rem",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "1.25rem",
+                      background: "#f8fafc"
+                    }}
+                  >
+                    {/* Enunciado General y Micrografía de la pregunta */}
+                    <div
+                      style={{
+                        background: "#ffffff",
+                        padding: "1rem 1.25rem",
+                        borderRadius: "0.75rem",
+                        border: "1.5px solid #e2e8f0",
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: "0.65rem"
+                      }}
+                    >
+                      <span style={{ fontSize: "0.72rem", fontWeight: 800, color: "#64748b", textTransform: "uppercase" }}>
+                        Enunciado de la Pregunta:
+                      </span>
+                      <div style={{ fontSize: "0.98rem", fontWeight: 800, color: "#0f172a", lineHeight: 1.45 }}>
+                        {currentQ.enunciado || "(Pregunta sin enunciado general configurado)"}
+                      </div>
+
+                      {currentQ.imagen_url && (
+                        <div style={{ marginTop: "0.25rem", textAlign: "center", background: "#0f172a", padding: "0.5rem", borderRadius: "0.5rem" }}>
+                          <img
+                            src={currentQ.imagen_url}
+                            alt="Micrografía Pregunta"
+                            style={{ maxHeight: "200px", maxWidth: "100%", objectFit: "contain", borderRadius: "0.35rem" }}
+                          />
+                        </div>
+                      )}
+                    </div>
+
+                    {/* CUERPO PRINCIPAL: 2 COLUMNAS (IZQUIERDA: ALUMNO | DERECHA: DOCENTE) */}
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "repeat(auto-fit, minmax(420px, 1fr))",
+                        gap: "1.25rem",
+                        alignItems: "start"
+                      }}
+                    >
+                      {/* COLUMNA IZQUIERDA: RESPUESTAS DEL ESTUDIANTE */}
+                      <div
+                        style={{
+                          background: "#ffffff",
+                          borderRadius: "0.9rem",
+                          border: "2px solid #bae6fd",
+                          padding: "1.25rem",
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: "1rem",
+                          boxShadow: "0 4px 14px -2px rgba(2, 132, 199, 0.08)"
+                        }}
+                      >
+                        {/* Cabecera del Estudiante */}
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "0.5rem", borderBottom: "1.5px solid #e0f2fe", paddingBottom: "0.75rem" }}>
+                          <div>
+                            <span style={{ fontSize: "0.72rem", fontWeight: 800, color: "#0284c7", textTransform: "uppercase" }}>
+                              ✍️ Estudiante en evaluación:
+                            </span>
+                            <h3 style={{ margin: "0.15rem 0 0", fontSize: "1.1rem", fontWeight: 900, color: "#0f172a" }}>
+                              {currentStudent.nombre_completo}
+                            </h3>
+                            <span style={{ fontSize: "0.76rem", color: "#64748b", fontWeight: 700 }}>
+                              Cuenta: <strong style={{ color: "#0284c7" }}>{currentStudent.numero_cuenta}</strong>
+                            </span>
+                          </div>
+
+                          {/* Botones de acción rápida en esta pregunta */}
+                          <div style={{ display: "flex", gap: "0.35rem" }}>
+                            <button
+                              type="button"
+                              onClick={() => handleQuickEvaluateAllInQuestion(currentStudent.id, currentQ, "buena")}
+                              style={{
+                                padding: "0.25rem 0.55rem",
+                                borderRadius: "0.35rem",
+                                border: "1px solid #86efac",
+                                background: "#f0fdf4",
+                                color: "#15803d",
+                                fontSize: "0.72rem",
+                                fontWeight: 800,
+                                cursor: "pointer"
+                              }}
+                              title="Marcar todo este reactivo como Bueno para este alumno"
+                            >
+                              ⚡ Todo Bueno
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleQuickEvaluateAllInQuestion(currentStudent.id, currentQ, "mala")}
+                              style={{
+                                padding: "0.25rem 0.55rem",
+                                borderRadius: "0.35rem",
+                                border: "1px solid #fca5a5",
+                                background: "#fef2f2",
+                                color: "#dc2626",
+                                fontSize: "0.72rem",
+                                fontWeight: 800,
+                                cursor: "pointer"
+                              }}
+                              title="Marcar todo este reactivo como Malo para este alumno"
+                            >
+                              Todo Malo
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Contenido de Respuestas del Estudiante */}
+                        <div style={{ display: "flex", flexDirection: "column", gap: "0.85rem" }}>
+                          {(!currentQ.items || currentQ.items.length === 0) ? (
+                            /* Caso sin apartados: respuesta única */
+                            (() => {
+                              const directAnswer =
+                                entregaRespuestas?.[currentQ.id]?.respuesta ??
+                                entregaRespuestas?.[currentQ.id] ??
+                                null;
+                              const maxPts = Number(currentQ.puntos) || 1.0;
+                              const curEval = currentStudentEvals[`${currentQ.id}___direct`];
+
+                              return (
+                                <div style={{ padding: "0.85rem", borderRadius: "0.6rem", background: "#f8fafc", border: "1px solid #e2e8f0", display: "flex", flexDirection: "column", gap: "0.6rem" }}>
+                                  <div style={{ fontSize: "0.88rem", fontWeight: 700, color: directAnswer ? "#0f172a" : "#94a3b8" }}>
+                                    {directAnswer && String(directAnswer).trim() ? String(directAnswer) : "— (Sin respuesta enviada) —"}
+                                  </div>
+
+                                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "0.4rem", paddingTop: "0.4rem", borderTop: "1px dashed #cbd5e1" }}>
+                                    <span style={{ fontSize: "0.74rem", fontWeight: 800, color: "#64748b" }}>
+                                      Calificar: {curEval ? `(+${curEval.puntos_obtenidos.toFixed(3)} pt)` : "(Pendiente)"}
+                                    </span>
+                                    <div style={{ display: "flex", gap: "0.3rem" }}>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleQuickEvaluateItem(currentStudent.id, currentQ.id, null, "buena", maxPts)}
+                                        style={{
+                                          padding: "0.3rem 0.6rem",
+                                          borderRadius: "0.4rem",
+                                          border: curEval?.estado === "buena" ? "2px solid #16a34a" : "1.5px solid #cbd5e1",
+                                          background: curEval?.estado === "buena" ? "#16a34a" : "#ffffff",
+                                          color: curEval?.estado === "buena" ? "#ffffff" : "#15803d",
+                                          fontSize: "0.76rem",
+                                          fontWeight: 800,
+                                          cursor: "pointer"
+                                        }}
+                                      >
+                                        ✓ Buena
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleQuickEvaluateItem(currentStudent.id, currentQ.id, null, "regular", maxPts)}
+                                        style={{
+                                          padding: "0.3rem 0.55rem",
+                                          borderRadius: "0.4rem",
+                                          border: curEval?.estado === "regular" ? "2px solid #d97706" : "1.5px solid #cbd5e1",
+                                          background: curEval?.estado === "regular" ? "#d97706" : "#ffffff",
+                                          color: curEval?.estado === "regular" ? "#ffffff" : "#b45309",
+                                          fontSize: "0.76rem",
+                                          fontWeight: 800,
+                                          cursor: "pointer"
+                                        }}
+                                      >
+                                        ½ Media
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleQuickEvaluateItem(currentStudent.id, currentQ.id, null, "mala", maxPts)}
+                                        style={{
+                                          padding: "0.3rem 0.6rem",
+                                          borderRadius: "0.4rem",
+                                          border: curEval?.estado === "mala" ? "2px solid #dc2626" : "1.5px solid #cbd5e1",
+                                          background: curEval?.estado === "mala" ? "#dc2626" : "#ffffff",
+                                          color: curEval?.estado === "mala" ? "#ffffff" : "#dc2626",
+                                          fontSize: "0.76rem",
+                                          fontWeight: 800,
+                                          cursor: "pointer"
+                                        }}
+                                      >
+                                        ✗ Mala
+                                      </button>
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })()
+                          ) : (
+                            /* Caso con apartados configurados */
+                            currentQ.items.map((item, itemIdx) => {
+                              const studentAnswer =
+                                entregaRespuestas?.[currentQ.id]?.[item.id] ??
+                                entregaRespuestas?.[item.id] ??
+                                entregaRespuestas?.[currentQ.id] ??
+                                null;
+
+                              const itemLabel = item.instruccion || item.etiqueta || `Apartado ${itemIdx + 1}`;
+                              const defaultItemPts = Math.round((Number(currentQ.puntos || 1.0) / currentQ.items.length) * 1000) / 1000;
+                              const itemMaxPts = item.puntos !== undefined && !isNaN(Number(item.puntos)) ? Number(item.puntos) : defaultItemPts;
+                              const isList = item.tipo !== "texto_corto";
+                              const cantSlots = isList ? (parseInt(item.cantidad, 10) || 3) : 1;
+                              const slotPts = isList ? Math.round((itemMaxPts / cantSlots) * 1000) / 1000 : itemMaxPts;
+
+                              if (!isList) {
+                                // Apartado Texto Corto
+                                const curEval = currentStudentEvals[`${currentQ.id}___${item.id}`];
+                                return (
+                                  <div
+                                    key={item.id}
+                                    style={{
+                                      padding: "0.8rem",
+                                      borderRadius: "0.6rem",
+                                      background: "#f8fafc",
+                                      border: "1px solid #e2e8f0",
+                                      display: "flex",
+                                      flexDirection: "column",
+                                      gap: "0.55rem"
+                                    }}
+                                  >
+                                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap" }}>
+                                      <strong style={{ fontSize: "0.82rem", color: "#334155" }}>
+                                        {String.fromCharCode(97 + itemIdx)}) {itemLabel} ({itemMaxPts.toFixed(3)} pt):
+                                      </strong>
+                                      {curEval && (
+                                        <span style={{ fontSize: "0.72rem", fontWeight: 800, color: curEval.estado === "buena" ? "#16a34a" : curEval.estado === "regular" ? "#d97706" : "#dc2626" }}>
+                                          +{curEval.puntos_obtenidos.toFixed(3)} pt
+                                        </span>
+                                      )}
+                                    </div>
+
+                                    <div style={{ fontSize: "0.88rem", fontWeight: 700, color: studentAnswer ? "#0f172a" : "#94a3b8" }}>
+                                      {typeof studentAnswer === "string" && studentAnswer.trim() ? studentAnswer : "— (Sin respuesta) —"}
+                                    </div>
+
+                                    {/* Botones de Calificación */}
+                                    <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.3rem", paddingTop: "0.35rem", borderTop: "1px dashed #cbd5e1" }}>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleQuickEvaluateItem(currentStudent.id, currentQ.id, item.id, "buena", itemMaxPts)}
+                                        style={{
+                                          padding: "0.25rem 0.55rem",
+                                          borderRadius: "0.4rem",
+                                          border: curEval?.estado === "buena" ? "2px solid #16a34a" : "1.5px solid #cbd5e1",
+                                          background: curEval?.estado === "buena" ? "#16a34a" : "#ffffff",
+                                          color: curEval?.estado === "buena" ? "#ffffff" : "#15803d",
+                                          fontSize: "0.74rem",
+                                          fontWeight: 800,
+                                          cursor: "pointer"
+                                        }}
+                                      >
+                                        ✓ Buena
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleQuickEvaluateItem(currentStudent.id, currentQ.id, item.id, "regular", itemMaxPts)}
+                                        style={{
+                                          padding: "0.25rem 0.5rem",
+                                          borderRadius: "0.4rem",
+                                          border: curEval?.estado === "regular" ? "2px solid #d97706" : "1.5px solid #cbd5e1",
+                                          background: curEval?.estado === "regular" ? "#d97706" : "#ffffff",
+                                          color: curEval?.estado === "regular" ? "#ffffff" : "#b45309",
+                                          fontSize: "0.74rem",
+                                          fontWeight: 800,
+                                          cursor: "pointer"
+                                        }}
+                                      >
+                                        ½ Media
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleQuickEvaluateItem(currentStudent.id, currentQ.id, item.id, "mala", itemMaxPts)}
+                                        style={{
+                                          padding: "0.25rem 0.55rem",
+                                          borderRadius: "0.4rem",
+                                          border: curEval?.estado === "mala" ? "2px solid #dc2626" : "1.5px solid #cbd5e1",
+                                          background: curEval?.estado === "mala" ? "#dc2626" : "#ffffff",
+                                          color: curEval?.estado === "mala" ? "#ffffff" : "#dc2626",
+                                          fontSize: "0.74rem",
+                                          fontWeight: 800,
+                                          cursor: "pointer"
+                                        }}
+                                      >
+                                        ✗ Mala
+                                      </button>
+                                    </div>
+                                  </div>
+                                );
+                              }
+
+                              // Apartado Listado con N Casillas
+                              return (
+                                <div
+                                  key={item.id}
+                                  style={{
+                                    padding: "0.8rem",
+                                    borderRadius: "0.6rem",
+                                    background: "#f8fafc",
+                                    border: "1px solid #e2e8f0",
+                                    display: "flex",
+                                    flexDirection: "column",
+                                    gap: "0.55rem"
+                                  }}
+                                >
+                                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap" }}>
+                                    <strong style={{ fontSize: "0.82rem", color: "#334155" }}>
+                                      {String.fromCharCode(97 + itemIdx)}) {itemLabel} ({cantSlots} casillas • {slotPts.toFixed(3)} pt c/u):
+                                    </strong>
+                                    <div style={{ display: "flex", gap: "0.3rem" }}>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleQuickEvaluateAllSlotsInItem(currentStudent.id, currentQ.id, item.id, cantSlots, "buena", slotPts)}
+                                        style={{ padding: "0.15rem 0.4rem", fontSize: "0.7rem", fontWeight: 800, background: "#f0fdf4", color: "#15803d", border: "1px solid #86efac", borderRadius: "0.3rem", cursor: "pointer" }}
+                                      >
+                                        Todas Buenas
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleQuickEvaluateAllSlotsInItem(currentStudent.id, currentQ.id, item.id, cantSlots, "mala", slotPts)}
+                                        style={{ padding: "0.15rem 0.4rem", fontSize: "0.7rem", fontWeight: 800, background: "#fef2f2", color: "#dc2626", border: "1px solid #fca5a5", borderRadius: "0.3rem", cursor: "pointer" }}
+                                      >
+                                        Todas Malas
+                                      </button>
+                                    </div>
+                                  </div>
+
+                                  {/* Listado de Casillas */}
+                                  <div style={{ display: "flex", flexDirection: "column", gap: "0.45rem" }}>
+                                    {Array.from({ length: cantSlots }).map((_, slotIdx) => {
+                                      const rowVal = Array.isArray(studentAnswer)
+                                        ? studentAnswer[slotIdx]
+                                        : (typeof studentAnswer === "object" && studentAnswer ? studentAnswer[slotIdx] : "");
+                                      const slotEval = currentStudentEvals[`${currentQ.id}___${item.id}___slot_${slotIdx}`];
+
+                                      return (
+                                        <div
+                                          key={slotIdx}
+                                          style={{
+                                            display: "flex",
+                                            alignItems: "center",
+                                            justifyContent: "space-between",
+                                            flexWrap: "wrap",
+                                            gap: "0.4rem",
+                                            padding: "0.4rem 0.6rem",
+                                            borderRadius: "0.45rem",
+                                            background:
+                                              slotEval?.estado === "buena"
+                                                ? "#f0fdf4"
+                                                : slotEval?.estado === "regular"
+                                                ? "#fffbeb"
+                                                : slotEval?.estado === "mala"
+                                                ? "#fef2f2"
+                                                : "#ffffff",
+                                            border:
+                                              slotEval?.estado === "buena"
+                                                ? "1.5px solid #86efac"
+                                                : slotEval?.estado === "regular"
+                                                ? "1.5px solid #fde68a"
+                                                : slotEval?.estado === "mala"
+                                                ? "1.5px solid #fca5a5"
+                                                : "1.5px solid #e2e8f0"
+                                          }}
+                                        >
+                                          <div style={{ display: "flex", alignItems: "center", gap: "0.45rem", flex: 1, minWidth: "160px" }}>
+                                            <span style={{ fontSize: "0.8rem", fontWeight: 900, color: "#64748b", width: "18px" }}>
+                                              {slotIdx + 1}.
+                                            </span>
+                                            <span style={{ fontSize: "0.86rem", fontWeight: 700, color: rowVal && String(rowVal).trim() ? "#0f172a" : "#94a3b8" }}>
+                                              {rowVal && String(rowVal).trim() ? String(rowVal) : "— (Vacío) —"}
+                                            </span>
+                                          </div>
+
+                                          <div style={{ display: "flex", alignItems: "center", gap: "0.25rem" }}>
+                                            <button
+                                              type="button"
+                                              onClick={() => handleQuickEvaluateSlot(currentStudent.id, currentQ.id, item.id, slotIdx, "buena", slotPts)}
+                                              style={{
+                                                padding: "0.2rem 0.5rem",
+                                                borderRadius: "0.35rem",
+                                                border: slotEval?.estado === "buena" ? "2px solid #16a34a" : "1px solid #cbd5e1",
+                                                background: slotEval?.estado === "buena" ? "#16a34a" : "#ffffff",
+                                                color: slotEval?.estado === "buena" ? "#ffffff" : "#15803d",
+                                                fontSize: "0.72rem",
+                                                fontWeight: 800,
+                                                cursor: "pointer"
+                                              }}
+                                            >
+                                              ✓ Buena
+                                            </button>
+                                            <button
+                                              type="button"
+                                              onClick={() => handleQuickEvaluateSlot(currentStudent.id, currentQ.id, item.id, slotIdx, "regular", slotPts)}
+                                              style={{
+                                                padding: "0.2rem 0.45rem",
+                                                borderRadius: "0.35rem",
+                                                border: slotEval?.estado === "regular" ? "2px solid #d97706" : "1px solid #cbd5e1",
+                                                background: slotEval?.estado === "regular" ? "#d97706" : "#ffffff",
+                                                color: slotEval?.estado === "regular" ? "#ffffff" : "#b45309",
+                                                fontSize: "0.72rem",
+                                                fontWeight: 800,
+                                                cursor: "pointer"
+                                              }}
+                                            >
+                                              ½ Media
+                                            </button>
+                                            <button
+                                              type="button"
+                                              onClick={() => handleQuickEvaluateSlot(currentStudent.id, currentQ.id, item.id, slotIdx, "mala", slotPts)}
+                                              style={{
+                                                padding: "0.2rem 0.5rem",
+                                                borderRadius: "0.35rem",
+                                                border: slotEval?.estado === "mala" ? "2px solid #dc2626" : "1px solid #cbd5e1",
+                                                background: slotEval?.estado === "mala" ? "#dc2626" : "#ffffff",
+                                                color: slotEval?.estado === "mala" ? "#ffffff" : "#dc2626",
+                                                fontSize: "0.72rem",
+                                                fontWeight: 800,
+                                                cursor: "pointer"
+                                              }}
+                                            >
+                                              ✗ Mala
+                                            </button>
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              );
+                            })
+                          )}
+                        </div>
+                      </div>
+
+                      {/* COLUMNA DERECHA: RESPUESTAS POSIBLES / MODELO DEL DOCENTE */}
+                      <div
+                        style={{
+                          background: "#ffffff",
+                          borderRadius: "0.9rem",
+                          border: "2px solid #bbf7d0",
+                          padding: "1.25rem",
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: "1rem",
+                          boxShadow: "0 4px 14px -2px rgba(16, 185, 129, 0.08)"
+                        }}
+                      >
+                        <div style={{ borderBottom: "1.5px solid #dcfce7", paddingBottom: "0.75rem" }}>
+                          <span style={{ fontSize: "0.72rem", fontWeight: 800, color: "#166534", textTransform: "uppercase" }}>
+                            💡 Criterio Docente & Respuestas Válidas
+                          </span>
+                          <h3 style={{ margin: "0.15rem 0 0", fontSize: "1.05rem", fontWeight: 900, color: "#0f172a" }}>
+                            Respuestas configuradas para la Pregunta {quickQuestionIdx + 1}
+                          </h3>
+                        </div>
+
+                        {/* Apartados configurados por el docente */}
+                        <div style={{ display: "flex", flexDirection: "column", gap: "0.85rem" }}>
+                          {(!currentQ.items || currentQ.items.length === 0) ? (
+                            <div style={{ padding: "0.85rem", borderRadius: "0.6rem", background: "#f0fdf4", border: "1px solid #bbf7d0" }}>
+                              <span style={{ fontSize: "0.72rem", fontWeight: 800, color: "#166534", textTransform: "uppercase", display: "block", marginBottom: "0.25rem" }}>
+                                Respuesta Modelo Docente:
+                              </span>
+                              <div style={{ fontSize: "0.9rem", fontWeight: 700, color: "#065f46" }}>
+                                {currentQ.respuesta_modelo || currentQ.respuestas_esperadas?.[0] || "(Sin respuesta modelo guardada)"}
+                              </div>
+                            </div>
+                          ) : (
+                            currentQ.items.map((item, itemIdx) => {
+                              const itemLabel = item.instruccion || item.etiqueta || `Apartado ${itemIdx + 1}`;
+                              const isList = item.tipo !== "texto_corto";
+                              const cantSlots = isList ? (parseInt(item.cantidad, 10) || 3) : 1;
+
+                              return (
+                                <div
+                                  key={item.id}
+                                  style={{
+                                    padding: "0.85rem",
+                                    borderRadius: "0.65rem",
+                                    background: "#f0fdf4",
+                                    border: "1.5px solid #bbf7d0",
+                                    display: "flex",
+                                    flexDirection: "column",
+                                    gap: "0.5rem"
+                                  }}
+                                >
+                                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap" }}>
+                                    <strong style={{ fontSize: "0.82rem", color: "#166534" }}>
+                                      {String.fromCharCode(97 + itemIdx)}) {itemLabel}:
+                                    </strong>
+                                    <span style={{ fontSize: "0.72rem", fontWeight: 800, color: "#15803d", background: "#ffffff", padding: "0.1rem 0.45rem", borderRadius: "0.35rem", border: "1px solid #86efac" }}>
+                                      {isList ? `Listado (${cantSlots} casillas solicitadas)` : "Texto Corto"}
+                                    </span>
+                                  </div>
+
+                                  {/* Banco de opciones válidas o respuesta modelo */}
+                                  {Array.isArray(item.respuestas_esperadas) && item.respuestas_esperadas.length > 0 ? (
+                                    <div style={{ display: "flex", flexDirection: "column", gap: "0.35rem" }}>
+                                      <span style={{ fontSize: "0.74rem", fontWeight: 800, color: "#166534" }}>
+                                        Opciones válidas aceptadas ({item.respuestas_esperadas.length}):
+                                      </span>
+                                      <div style={{ display: "flex", flexWrap: "wrap", gap: "0.35rem" }}>
+                                        {item.respuestas_esperadas.map((ans, aIdx) => (
+                                          <span
+                                            key={aIdx}
+                                            style={{
+                                              background: "#ffffff",
+                                              border: "1.5px solid #86efac",
+                                              padding: "0.2rem 0.55rem",
+                                              borderRadius: "0.4rem",
+                                              fontWeight: 800,
+                                              fontSize: "0.78rem",
+                                              color: "#15803d"
+                                            }}
+                                          >
+                                            {ans}
+                                          </span>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  ) : item.respuesta_modelo ? (
+                                    <div style={{ fontSize: "0.86rem", fontWeight: 700, color: "#065f46" }}>
+                                      {item.respuesta_modelo}
+                                    </div>
+                                  ) : (
+                                    <span style={{ fontSize: "0.76rem", color: "#94a3b8", fontStyle: "italic" }}>
+                                      Sin opciones modelo configuradas
+                                    </span>
+                                  )}
+                                </div>
+                              );
+                            })
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 3. BARRA DE ACCIÓN INFERIOR */}
+                  <div
+                    style={{
+                      padding: "0.85rem 1.5rem",
+                      background: "#ffffff",
+                      borderTop: "1.5px solid #e2e8f0",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      flexWrap: "wrap",
+                      gap: "0.75rem"
+                    }}
+                  >
+                    {/* Indicador de estado para este alumno */}
+                    <div>
+                      {qStatus.isComplete ? (
+                        <span
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "0.35rem",
+                            fontSize: "0.8rem",
+                            fontWeight: 800,
+                            color: "#15803d",
+                            background: "#dcfce7",
+                            padding: "0.3rem 0.75rem",
+                            borderRadius: "0.45rem",
+                            border: "1px solid #86efac"
+                          }}
+                        >
+                          <CheckCircle2 size={15} />
+                          Pregunta evaluada al 100% para {currentStudent.nombre_completo.split(" ")[0]}
+                        </span>
+                      ) : (
+                        <span
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "0.35rem",
+                            fontSize: "0.8rem",
+                            fontWeight: 800,
+                            color: "#b45309",
+                            background: "#fef3c7",
+                            padding: "0.3rem 0.75rem",
+                            borderRadius: "0.45rem",
+                            border: "1px solid #fde68a"
+                          }}
+                        >
+                          <AlertCircle size={15} />
+                          Falta calificar {qStatus.missing} casilla(s)/apartado(s) de este estudiante
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Botones de Navegación */}
+                    <div style={{ display: "flex", alignItems: "center", gap: "0.6rem" }}>
+                      <button
+                        type="button"
+                        onClick={handleQuickPrevious}
+                        disabled={quickStudentIdx === 0 || quickSaving}
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "0.35rem",
+                          padding: "0.6rem 1rem",
+                          borderRadius: "0.6rem",
+                          border: "1.5px solid #cbd5e1",
+                          background: quickStudentIdx === 0 ? "#f8fafc" : "#ffffff",
+                          color: quickStudentIdx === 0 ? "#94a3b8" : "#334155",
+                          fontSize: "0.85rem",
+                          fontWeight: 700,
+                          cursor: quickStudentIdx === 0 || quickSaving ? "not-allowed" : "pointer"
+                        }}
+                      >
+                        <ChevronLeft size={16} />
+                        <span>Anterior Alumno</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={handleQuickAdvance}
+                        disabled={!qStatus.isComplete || quickSaving}
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "0.45rem",
+                          padding: "0.6rem 1.4rem",
+                          borderRadius: "0.6rem",
+                          border: "none",
+                          background: !qStatus.isComplete || quickSaving
+                            ? "#cbd5e1"
+                            : quickStudentIdx === entregasSemana.length - 1
+                            ? "linear-gradient(135deg, #10b981 0%, #059669 100%)"
+                            : "linear-gradient(135deg, #0284c7 0%, #0369a1 100%)",
+                          color: "#ffffff",
+                          fontSize: "0.9rem",
+                          fontWeight: 900,
+                          cursor: !qStatus.isComplete || quickSaving ? "not-allowed" : "pointer",
+                          boxShadow: !qStatus.isComplete || quickSaving ? "none" : "0 4px 14px rgba(2, 132, 199, 0.35)",
+                          transition: "all 0.15s ease"
+                        }}
+                      >
+                        {quickSaving ? (
+                          <>
+                            <RefreshCw size={16} className="animate-spin" />
+                            <span>Guardando...</span>
+                          </>
+                        ) : quickStudentIdx === entregasSemana.length - 1 ? (
+                          <>
+                            <span>Finalizar Pregunta {quickQuestionIdx + 1}</span>
+                            <CheckCircle2 size={16} />
+                          </>
+                        ) : (
+                          <>
+                            <span>Siguiente Estudiante</span>
+                            <ChevronRight size={16} />
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                </>
+              );
+            })()}
+          </div>
+        </div>,
+        document.body
       )}
     </div>
   );

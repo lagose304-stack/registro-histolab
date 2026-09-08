@@ -1733,10 +1733,23 @@ export default function WeeklyQuizGradingView({
                                       background: "#ecfdf5",
                                       border: "1px solid #a7f3d0",
                                       fontSize: "0.78rem",
-                                      color: "#065f46"
+                                      color: "#065f46",
+                                      display: "flex",
+                                      flexWrap: "wrap",
+                                      alignItems: "center",
+                                      gap: "0.35rem"
                                     }}
                                   >
-                                    <strong>💡 Respuesta modelo docente:</strong> {item.respuesta_modelo}
+                                    <strong>💡 Opciones válidas docente:</strong>
+                                    {Array.isArray(item.respuestas_esperadas) && item.respuestas_esperadas.length > 0 ? (
+                                      item.respuestas_esperadas.map((ans, aIdx) => (
+                                        <span key={aIdx} style={{ background: "#ffffff", border: "1px solid #bbf7d0", padding: "0.1rem 0.4rem", borderRadius: "0.3rem", fontWeight: 700 }}>
+                                          {ans}
+                                        </span>
+                                      ))
+                                    ) : (
+                                      <span>{item.respuesta_modelo}</span>
+                                    )}
                                   </div>
                                 )}
                               </div>
@@ -1745,9 +1758,48 @@ export default function WeeklyQuizGradingView({
                                 <div style={{ fontSize: "0.78rem", color: "#64748b", fontWeight: 700 }}>
                                   Elementos listados por el estudiante ({item.cantidad || 3}):
                                 </div>
+
+                                {/* Banco de opciones aceptadas si existen */}
+                                {Array.isArray(item.respuestas_esperadas) && item.respuestas_esperadas.length > 0 && (
+                                  <div
+                                    style={{
+                                      padding: "0.45rem 0.65rem",
+                                      borderRadius: "0.45rem",
+                                      background: "#ecfdf5",
+                                      border: "1px dashed #a7f3d0",
+                                      fontSize: "0.75rem",
+                                      color: "#065f46",
+                                      display: "flex",
+                                      flexWrap: "wrap",
+                                      alignItems: "center",
+                                      gap: "0.35rem"
+                                    }}
+                                  >
+                                    <span style={{ fontWeight: 800 }}>
+                                      💡 Opciones válidas aceptadas ({item.respuestas_esperadas.length}):
+                                    </span>
+                                    {item.respuestas_esperadas.map((ans, aIdx) => (
+                                      <span
+                                        key={aIdx}
+                                        style={{
+                                          background: "#ffffff",
+                                          border: "1px solid #bbf7d0",
+                                          padding: "0.1rem 0.4rem",
+                                          borderRadius: "0.3rem",
+                                          fontWeight: 700,
+                                          color: "#15803d"
+                                        }}
+                                      >
+                                        {ans}
+                                      </span>
+                                    ))}
+                                  </div>
+                                )}
+
                                 {Array.from({ length: item.cantidad || 3 }).map((_, slotIdx) => {
                                   const ans = inspectingSubmission.respuestas?.[`${pregunta.id}_${item.id}_${slotIdx}`];
-                                  const modelAns = item.respuestas_esperadas?.[slotIdx];
+                                  const hasPool = (item.respuestas_esperadas || []).length > (item.cantidad || 3);
+                                  const modelAns = !hasPool ? item.respuestas_esperadas?.[slotIdx] : null;
                                   return (
                                     <div
                                       key={slotIdx}
