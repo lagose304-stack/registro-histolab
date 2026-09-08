@@ -8,6 +8,7 @@ import {
   GraduationCap,
   Sparkles,
   ShieldCheck,
+  Award,
   CalendarCheck,
   Users,
   Search,
