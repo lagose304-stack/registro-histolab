@@ -706,29 +706,11 @@ export default function ReviewQuizSubmissionsView({
     const nextStudent = hasNextStudent ? entregasSemana[quickStudentIdx + 1] : null;
 
     setQuickSaving(true);
-    if (hasNextStudent && nextStudent) {
-      setQuickStudentLoading({
-        title: "Cargando siguiente estudiante...",
-        subtitle: `Guardando evaluación de ${currentStudent.nombre_completo} y preparando respuestas de:`,
-        studentName: nextStudent.nombre_completo,
-        studentCuenta: nextStudent.numero_cuenta,
-        stepInfo: `Estudiante ${quickStudentIdx + 2} de ${entregasSemana.length}`,
-        type: "next"
-      });
-    } else {
-      setQuickStudentLoading({
-        title: "Guardando última evaluación...",
-        subtitle: `Sincronizando evaluación de ${currentStudent.nombre_completo}...`,
-        studentName: "",
-        studentCuenta: "",
-        stepInfo: `Completando Pregunta ${quickQuestionIdx + 1}`,
-        type: "saving"
-      });
-    }
+    setQuickStudentLoading(hasNextStudent ? "Cargando siguiente estudiante..." : "Cargando...");
 
     try {
-      // Pausa suave para apreciar la transición de carga (mínimo 600ms)
-      const minDelay = new Promise((resolve) => setTimeout(resolve, 600));
+      // Breve pausa para notar la transición de carga
+      const minDelay = new Promise((resolve) => setTimeout(resolve, 350));
 
       // Guardar en el servidor para este alumno específico
       const apiPromise = api.pruebas.calificar(currentStudent.id, payload).catch((err) => {
@@ -800,18 +782,10 @@ export default function ReviewQuizSubmissionsView({
 
   // Pasar a la siguiente pregunta tras completar a todos los estudiantes
   const handleQuickNextQuestion = async () => {
-    const firstStudent = entregasSemana[0];
     const nextQIdx = quickQuestionIdx + 1;
     setQuickQuestionFinishedPrompt(false);
-    setQuickStudentLoading({
-      title: `Cargando Pregunta ${nextQIdx + 1}...`,
-      subtitle: "Preparando reactivos y respuestas para el primer estudiante:",
-      studentName: firstStudent ? firstStudent.nombre_completo : "",
-      studentCuenta: firstStudent ? firstStudent.numero_cuenta : "",
-      stepInfo: `Estudiante 1 de ${entregasSemana.length} • Pregunta ${nextQIdx + 1}`,
-      type: "question"
-    });
-    await new Promise((r) => setTimeout(r, 550));
+    setQuickStudentLoading("Cargando...");
+    await new Promise((r) => setTimeout(r, 300));
     setQuickQuestionIdx(nextQIdx);
     setQuickStudentIdx(0);
     setQuickStudentLoading(null);
@@ -829,16 +803,8 @@ export default function ReviewQuizSubmissionsView({
   const handleQuickPrevious = async () => {
     if (quickStudentIdx > 0) {
       const prevStudentIdx = quickStudentIdx - 1;
-      const prevStudent = entregasSemana[prevStudentIdx];
-      setQuickStudentLoading({
-        title: "Cargando estudiante anterior...",
-        subtitle: "Cargando respuestas y calificaciones registradas de:",
-        studentName: prevStudent ? prevStudent.nombre_completo : "",
-        studentCuenta: prevStudent ? prevStudent.numero_cuenta : "",
-        stepInfo: `Estudiante ${quickStudentIdx} de ${entregasSemana.length}`,
-        type: "prev"
-      });
-      await new Promise((r) => setTimeout(r, 450));
+      setQuickStudentLoading("Cargando...");
+      await new Promise((r) => setTimeout(r, 300));
       setQuickStudentIdx(prevStudentIdx);
       setQuickStudentLoading(null);
       try {
@@ -2814,129 +2780,27 @@ export default function ReviewQuizSubmissionsView({
               position: "relative"
             }}
           >
-            {/* PANTALLA DE CARGA ENTRE ESTUDIANTES / TRANSICIONES */}
+            {/* PANTALLA DE CARGA SIMPLE ENTRE ESTUDIANTES */}
             {quickStudentLoading && (
               <div
                 style={{
                   position: "absolute",
                   inset: 0,
                   zIndex: 9999,
-                  background: "rgba(255, 255, 255, 0.95)",
-                  backdropFilter: "blur(8px)",
-                  WebkitBackdropFilter: "blur(8px)",
+                  background: "rgba(255, 255, 255, 0.92)",
+                  backdropFilter: "blur(4px)",
+                  WebkitBackdropFilter: "blur(4px)",
                   display: "flex",
+                  flexDirection: "column",
                   alignItems: "center",
                   justifyContent: "center",
-                  padding: "1.5rem"
+                  gap: "0.85rem"
                 }}
               >
-                <div
-                  className="animate-fade-in"
-                  style={{
-                    background: "#ffffff",
-                    borderRadius: "1.25rem",
-                    padding: "2.25rem 2.75rem",
-                    boxShadow: "0 25px 60px -15px rgba(2, 132, 199, 0.25), 0 0 0 1.5px #bae6fd",
-                    maxWidth: "540px",
-                    width: "100%",
-                    textAlign: "center",
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "center",
-                    gap: "1.25rem"
-                  }}
-                >
-                  {/* Animación del Loader con Avatar */}
-                  <div style={{ position: "relative", width: "72px", height: "72px", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                    <div
-                      style={{
-                        position: "absolute",
-                        inset: 0,
-                        borderRadius: "50%",
-                        border: "4px solid #e0f2fe",
-                        borderTopColor: "#0284c7",
-                        animation: "spin 0.85s linear infinite"
-                      }}
-                    />
-                    <div
-                      style={{
-                        width: "48px",
-                        height: "48px",
-                        borderRadius: "50%",
-                        background: "linear-gradient(135deg, #e0f2fe 0%, #bae6fd 100%)",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        color: "#0284c7"
-                      }}
-                    >
-                      <User size={24} />
-                    </div>
-                  </div>
-
-                  {/* Título y Subtítulo */}
-                  <div style={{ display: "flex", flexDirection: "column", gap: "0.35rem" }}>
-                    <h3 style={{ margin: 0, fontSize: "1.35rem", fontWeight: 900, color: "#0f172a" }}>
-                      {quickStudentLoading.title}
-                    </h3>
-                    <p style={{ margin: 0, fontSize: "0.86rem", color: "#64748b", fontWeight: 600, lineHeight: 1.45 }}>
-                      {quickStudentLoading.subtitle}
-                    </p>
-                  </div>
-
-                  {/* Tarjeta del Estudiante Siguiente */}
-                  {quickStudentLoading.studentName && (
-                    <div
-                      style={{
-                        width: "100%",
-                        background: "#f0f9ff",
-                        border: "1.5px solid #bae6fd",
-                        borderRadius: "0.9rem",
-                        padding: "0.95rem 1.25rem",
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: "0.35rem",
-                        textAlign: "left"
-                      }}
-                    >
-                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.5rem" }}>
-                        <span style={{ fontSize: "0.72rem", fontWeight: 800, color: "#0284c7", textTransform: "uppercase", letterSpacing: "0.5px" }}>
-                          👤 Estudiante en turno:
-                        </span>
-                        {quickStudentLoading.stepInfo && (
-                          <span style={{ fontSize: "0.72rem", fontWeight: 800, background: "#ffffff", padding: "0.15rem 0.5rem", borderRadius: "0.35rem", color: "#0369a1", border: "1px solid #bfdbfe" }}>
-                            {quickStudentLoading.stepInfo}
-                          </span>
-                        )}
-                      </div>
-                      <div style={{ fontSize: "1.08rem", fontWeight: 900, color: "#0f172a" }}>
-                        {quickStudentLoading.studentName}
-                      </div>
-                      {quickStudentLoading.studentCuenta && (
-                        <div style={{ fontSize: "0.8rem", color: "#64748b", fontWeight: 700 }}>
-                          No. Cuenta: <strong style={{ color: "#0284c7" }}>{quickStudentLoading.studentCuenta}</strong>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Barra de Progreso Shimmer */}
-                  <div style={{ width: "100%", height: "6px", background: "#e2e8f0", borderRadius: "9999px", overflow: "hidden" }}>
-                    <div
-                      style={{
-                        width: "100%",
-                        height: "100%",
-                        background: "linear-gradient(90deg, #0284c7, #38bdf8, #0284c7)",
-                        backgroundSize: "200% 100%",
-                        animation: "shimmer 1.2s ease-in-out infinite"
-                      }}
-                    />
-                  </div>
-
-                  <span style={{ fontSize: "0.76rem", color: "#0284c7", fontWeight: 700, display: "inline-flex", alignItems: "center", gap: "0.35rem" }}>
-                    <Sparkles size={14} /> Sincronizando respuestas y preparando evaluación...
-                  </span>
-                </div>
+                <RefreshCw size={36} className="animate-spin" color="#0284c7" />
+                <span style={{ fontSize: "1rem", fontWeight: 800, color: "#334155" }}>
+                  {typeof quickStudentLoading === "string" ? quickStudentLoading : "Cargando..."}
+                </span>
               </div>
             )}
 
