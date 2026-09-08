@@ -65,6 +65,7 @@ export default function ReviewQuizSubmissionsView({
   const [quickStudentIdx, setQuickStudentIdx] = useState(0); // 0 a entregasSemana.length - 1
   const [quickEvaluations, setQuickEvaluations] = useState({}); // { [entregaId]: { [evalKey]: {...} } }
   const [quickSaving, setQuickSaving] = useState(false);
+  const [quickStudentLoading, setQuickStudentLoading] = useState(null);
   const [quickQuestionFinishedPrompt, setQuickQuestionFinishedPrompt] = useState(false);
   const [quickAllCompleted, setQuickAllCompleted] = useState(false);
 
@@ -660,12 +661,40 @@ export default function ReviewQuizSubmissionsView({
       evaluaciones_incisos: studentEvals
     };
 
+    const hasNextStudent = quickStudentIdx < entregasSemana.length - 1;
+    const nextStudent = hasNextStudent ? entregasSemana[quickStudentIdx + 1] : null;
+
     setQuickSaving(true);
+    if (hasNextStudent && nextStudent) {
+      setQuickStudentLoading({
+        title: "Cargando siguiente estudiante...",
+        subtitle: `Guardando evaluación de ${currentStudent.nombre_completo} y preparando respuestas de:`,
+        studentName: nextStudent.nombre_completo,
+        studentCuenta: nextStudent.numero_cuenta,
+        stepInfo: `Estudiante ${quickStudentIdx + 2} de ${entregasSemana.length}`,
+        type: "next"
+      });
+    } else {
+      setQuickStudentLoading({
+        title: "Guardando última evaluación...",
+        subtitle: `Sincronizando evaluación de ${currentStudent.nombre_completo}...`,
+        studentName: "",
+        studentCuenta: "",
+        stepInfo: `Completando Pregunta ${quickQuestionIdx + 1}`,
+        type: "saving"
+      });
+    }
+
     try {
+      // Pausa suave para apreciar la transición de carga (mínimo 600ms)
+      const minDelay = new Promise((resolve) => setTimeout(resolve, 600));
+
       // Guardar en el servidor para este alumno específico
-      await api.pruebas.calificar(currentStudent.id, payload).catch((err) => {
+      const apiPromise = api.pruebas.calificar(currentStudent.id, payload).catch((err) => {
         console.warn("Aviso al sincronizar calificación en revisión rápida:", err);
       });
+
+      await Promise.all([apiPromise, minDelay]);
 
       // Actualizar en el estado local de entregas
       setEntregasSemana((prev) =>
@@ -690,7 +719,7 @@ export default function ReviewQuizSubmissionsView({
       );
 
       // Comprobar si aún quedan estudiantes en esta pregunta
-      if (quickStudentIdx < entregasSemana.length - 1) {
+      if (hasNextStudent) {
         setQuickStudentIdx((prev) => prev + 1);
       } else {
         // Se terminaron de calificar todos los estudiantes para esta pregunta
@@ -707,20 +736,43 @@ export default function ReviewQuizSubmissionsView({
       notifyRef.current("Error al sincronizar calificación del estudiante", "error");
     } finally {
       setQuickSaving(false);
+      setQuickStudentLoading(null);
     }
   };
 
   // Pasar a la siguiente pregunta tras completar a todos los estudiantes
-  const handleQuickNextQuestion = () => {
+  const handleQuickNextQuestion = async () => {
+    const firstStudent = entregasSemana[0];
     setQuickQuestionFinishedPrompt(false);
+    setQuickStudentLoading({
+      title: `Cargando Pregunta ${quickQuestionIdx + 2}...`,
+      subtitle: "Preparando reactivos y respuestas para el primer estudiante:",
+      studentName: firstStudent ? firstStudent.nombre_completo : "",
+      studentCuenta: firstStudent ? firstStudent.numero_cuenta : "",
+      stepInfo: `Estudiante 1 de ${entregasSemana.length} • Pregunta ${quickQuestionIdx + 2}`,
+      type: "question"
+    });
+    await new Promise((r) => setTimeout(r, 550));
     setQuickQuestionIdx((prev) => prev + 1);
     setQuickStudentIdx(0);
+    setQuickStudentLoading(null);
   };
 
   // Retroceder al estudiante anterior en la misma pregunta
-  const handleQuickPrevious = () => {
+  const handleQuickPrevious = async () => {
     if (quickStudentIdx > 0) {
+      const prevStudent = entregasSemana[quickStudentIdx - 1];
+      setQuickStudentLoading({
+        title: "Cargando estudiante anterior...",
+        subtitle: "Cargando respuestas y calificaciones registradas de:",
+        studentName: prevStudent ? prevStudent.nombre_completo : "",
+        studentCuenta: prevStudent ? prevStudent.numero_cuenta : "",
+        stepInfo: `Estudiante ${quickStudentIdx} de ${entregasSemana.length}`,
+        type: "prev"
+      });
+      await new Promise((r) => setTimeout(r, 450));
       setQuickStudentIdx((prev) => prev - 1);
+      setQuickStudentLoading(null);
     }
   };
 
@@ -2682,9 +2734,136 @@ export default function ReviewQuizSubmissionsView({
               flexDirection: "column",
               boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.5)",
               border: "1.5px solid #cbd5e1",
-              overflow: "hidden"
+              overflow: "hidden",
+              position: "relative"
             }}
           >
+            {/* PANTALLA DE CARGA ENTRE ESTUDIANTES / TRANSICIONES */}
+            {quickStudentLoading && (
+              <div
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  zIndex: 9999,
+                  background: "rgba(255, 255, 255, 0.95)",
+                  backdropFilter: "blur(8px)",
+                  WebkitBackdropFilter: "blur(8px)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  padding: "1.5rem"
+                }}
+              >
+                <div
+                  className="animate-fade-in"
+                  style={{
+                    background: "#ffffff",
+                    borderRadius: "1.25rem",
+                    padding: "2.25rem 2.75rem",
+                    boxShadow: "0 25px 60px -15px rgba(2, 132, 199, 0.25), 0 0 0 1.5px #bae6fd",
+                    maxWidth: "540px",
+                    width: "100%",
+                    textAlign: "center",
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    gap: "1.25rem"
+                  }}
+                >
+                  {/* Animación del Loader con Avatar */}
+                  <div style={{ position: "relative", width: "72px", height: "72px", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    <div
+                      style={{
+                        position: "absolute",
+                        inset: 0,
+                        borderRadius: "50%",
+                        border: "4px solid #e0f2fe",
+                        borderTopColor: "#0284c7",
+                        animation: "spin 0.85s linear infinite"
+                      }}
+                    />
+                    <div
+                      style={{
+                        width: "48px",
+                        height: "48px",
+                        borderRadius: "50%",
+                        background: "linear-gradient(135deg, #e0f2fe 0%, #bae6fd 100%)",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        color: "#0284c7"
+                      }}
+                    >
+                      <User size={24} />
+                    </div>
+                  </div>
+
+                  {/* Título y Subtítulo */}
+                  <div style={{ display: "flex", flexDirection: "column", gap: "0.35rem" }}>
+                    <h3 style={{ margin: 0, fontSize: "1.35rem", fontWeight: 900, color: "#0f172a" }}>
+                      {quickStudentLoading.title}
+                    </h3>
+                    <p style={{ margin: 0, fontSize: "0.86rem", color: "#64748b", fontWeight: 600, lineHeight: 1.45 }}>
+                      {quickStudentLoading.subtitle}
+                    </p>
+                  </div>
+
+                  {/* Tarjeta del Estudiante Siguiente */}
+                  {quickStudentLoading.studentName && (
+                    <div
+                      style={{
+                        width: "100%",
+                        background: "#f0f9ff",
+                        border: "1.5px solid #bae6fd",
+                        borderRadius: "0.9rem",
+                        padding: "0.95rem 1.25rem",
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: "0.35rem",
+                        textAlign: "left"
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.5rem" }}>
+                        <span style={{ fontSize: "0.72rem", fontWeight: 800, color: "#0284c7", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                          👤 Estudiante en turno:
+                        </span>
+                        {quickStudentLoading.stepInfo && (
+                          <span style={{ fontSize: "0.72rem", fontWeight: 800, background: "#ffffff", padding: "0.15rem 0.5rem", borderRadius: "0.35rem", color: "#0369a1", border: "1px solid #bfdbfe" }}>
+                            {quickStudentLoading.stepInfo}
+                          </span>
+                        )}
+                      </div>
+                      <div style={{ fontSize: "1.08rem", fontWeight: 900, color: "#0f172a" }}>
+                        {quickStudentLoading.studentName}
+                      </div>
+                      {quickStudentLoading.studentCuenta && (
+                        <div style={{ fontSize: "0.8rem", color: "#64748b", fontWeight: 700 }}>
+                          No. Cuenta: <strong style={{ color: "#0284c7" }}>{quickStudentLoading.studentCuenta}</strong>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Barra de Progreso Shimmer */}
+                  <div style={{ width: "100%", height: "6px", background: "#e2e8f0", borderRadius: "9999px", overflow: "hidden" }}>
+                    <div
+                      style={{
+                        width: "100%",
+                        height: "100%",
+                        background: "linear-gradient(90deg, #0284c7, #38bdf8, #0284c7)",
+                        backgroundSize: "200% 100%",
+                        animation: "shimmer 1.2s ease-in-out infinite"
+                      }}
+                    />
+                  </div>
+
+                  <span style={{ fontSize: "0.76rem", color: "#0284c7", fontWeight: 700, display: "inline-flex", alignItems: "center", gap: "0.35rem" }}>
+                    <Sparkles size={14} /> Sincronizando respuestas y preparando evaluación...
+                  </span>
+                </div>
+              </div>
+            )}
+
             {/* PANTALLA A: REVISIÓN RÁPIDA FINALIZADA (TODAS LAS PREGUNTAS LISTAS) */}
             {quickAllCompleted ? (
               <div
