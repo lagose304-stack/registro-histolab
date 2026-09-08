@@ -48,6 +48,7 @@ export default function LiveQuizControlView({
   const [sectionQuizzes, setSectionQuizzes] = useState([]);
   const [studentsList, setStudentsList] = useState([]);
   const [asignaciones, setAsignaciones] = useState([]);
+  const [temario, setTemario] = useState([]);
   const [selectedSemana, setSelectedSemana] = useState(initialSemana || null);
 
   // Estado de la sesión en vivo
@@ -102,20 +103,22 @@ export default function LiveQuizControlView({
     });
   }, [isTitular, semanasConfig, asignaciones, QUIZ_ROLES, currentUser, seccion]);
 
-  // Cargar semanas, pruebas, asignaciones y estudiantes de la sección
+  // Cargar semanas, temario, pruebas, asignaciones y estudiantes de la sección
   const loadInitialData = useCallback(async () => {
     if (!seccion?.id) return;
     setLoading(true);
 
     try {
-      const [resSemanas, resQuizzes, resStudents, resAsig] = await Promise.all([
+      const [resSemanas, resTemario, resQuizzes, resStudents, resAsig] = await Promise.all([
         api.semanas.getConfig(carrera).catch(() => ({ data: [] })),
+        api.temario.getAll({ carrera }).catch(() => ({ data: [] })),
         api.pruebas.getBySeccion(seccion.id).catch(() => ({ data: [] })),
         api.estudiantes.getBySeccion(seccion.id, carrera).catch(() => ({ data: [] })),
         api.asignaciones.getBySeccion(seccion.id).catch(() => ({ data: [] }))
       ]);
 
       if (resSemanas?.data) setSemanasConfig(resSemanas.data);
+      if (resTemario?.data && Array.isArray(resTemario.data)) setTemario(resTemario.data);
       if (resQuizzes?.data) setSectionQuizzes(resQuizzes.data);
       if (resStudents?.data) setStudentsList(resStudents.data);
       if (resAsig?.data && Array.isArray(resAsig.data)) {
@@ -134,6 +137,47 @@ export default function LiveQuizControlView({
   useEffect(() => {
     loadInitialData();
   }, [loadInitialData]);
+
+  // Obtener el nombre descriptivo completo de la semana académica
+  const getWeekDisplayName = useCallback(
+    (w) => {
+      if (!w) return "";
+      const semNum = Number(w.numero_semana);
+      const rawNombre = (w.nombre_semana || "").trim();
+      const rawDesc = (w.descripcion || "").trim();
+
+      // 1. Si nombre_semana tiene texto personalizado
+      if (rawNombre && !rawNombre.toLowerCase().startsWith("semana") && rawNombre !== `Semana ${semNum}`) {
+        return `Semana ${semNum}: ${rawNombre}`;
+      }
+      if (rawNombre && rawNombre.toLowerCase().startsWith("semana") && rawNombre !== `Semana ${semNum}`) {
+        return rawNombre;
+      }
+
+      // 2. Si descripcion tiene el nombre de los temas
+      if (rawDesc && !rawDesc.toLowerCase().startsWith("semana") && rawDesc !== `Semana ${semNum}`) {
+        return `Semana ${semNum}: ${rawDesc}`;
+      }
+
+      // 3. Si temario tiene temas registrados para esta semana
+      const topics = temario.filter((t) => Number(t.semana) === semNum);
+      if (topics.length > 0) {
+        const topicNames = topics.map((t) => t.titulo || `Tema ${t.numero_tema}`).join(", ");
+        return `Semana ${semNum}: ${topicNames}`;
+      }
+
+      // 4. Si la prueba tiene título descriptivo
+      const quiz = sectionQuizzes.find((q) => Number(q.numero_semana) === semNum);
+      if (quiz?.titulo && quiz.titulo.trim()) {
+        const qTitle = quiz.titulo.trim();
+        if (qTitle.toLowerCase().startsWith("semana")) return qTitle;
+        return `Semana ${semNum}: ${qTitle}`;
+      }
+
+      return `Semana ${semNum}`;
+    },
+    [temario, sectionQuizzes]
+  );
 
   // Sincronizar selectedSemana para que apunte a una semana válida dentro de las visibles
   useEffect(() => {
@@ -158,6 +202,15 @@ export default function LiveQuizControlView({
   }, [asignaciones, QUIZ_ROLES, selectedSemana]);
 
   const assignedTeacherName = assignedRecord?.instructor_nombre || assignedRecord?.nombre_instructor || "Sin asignar";
+
+  // Datos completos de la semana seleccionada actualmente
+  const selectedWeekInfo = useMemo(() => {
+    if (!selectedSemana) return null;
+    return visibleSemanasConfig.find((w) => Number(w.numero_semana) === Number(selectedSemana)) || {
+      numero_semana: selectedSemana,
+      nombre_semana: `Semana ${selectedSemana}`
+    };
+  }, [visibleSemanasConfig, selectedSemana]);
 
   // Cargar la prueba específica cuando cambia la semana seleccionada
   useEffect(() => {
@@ -556,7 +609,7 @@ export default function LiveQuizControlView({
                     onClick={() => setSelectedSemana(semNum)}
                     style={{
                       flexShrink: 0,
-                      padding: "0.55rem 0.95rem",
+                      padding: "0.55rem 1rem",
                       borderRadius: "0.65rem",
                       border: isSelected ? "2px solid #0284c7" : "1.5px solid #cbd5e1",
                       background: isSelected ? "#eff6ff" : "#ffffff",
@@ -566,15 +619,17 @@ export default function LiveQuizControlView({
                       cursor: "pointer",
                       display: "flex",
                       alignItems: "center",
-                      gap: "0.45rem",
-                      transition: "all 0.15s ease"
+                      gap: "0.5rem",
+                      transition: "all 0.15s ease",
+                      whiteSpace: "nowrap"
                     }}
+                    title={getWeekDisplayName(w)}
                   >
-                    <span>Semana {semNum}</span>
+                    <span>{getWeekDisplayName(w)}</span>
                     {isPublished ? (
-                      <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#16a34a" }} title="Publicada" />
+                      <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#16a34a", flexShrink: 0 }} title="Publicada" />
                     ) : (
-                      <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#cbd5e1" }} title="Sin publicar" />
+                      <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#cbd5e1", flexShrink: 0 }} title="Sin publicar" />
                     )}
                   </button>
                 );
@@ -650,7 +705,7 @@ export default function LiveQuizControlView({
         >
           <HelpCircle size={48} color="#94a3b8" style={{ margin: "0 auto 1rem" }} />
           <h3 style={{ fontSize: "1.2rem", fontWeight: 900, color: "#0f172a", margin: "0 0 0.4rem" }}>
-            No hay prueba creada para la Semana {selectedSemana}
+            No hay prueba creada para la {selectedWeekInfo ? getWeekDisplayName(selectedWeekInfo) : `Semana ${selectedSemana}`}
           </h3>
           <p style={{ margin: 0, fontSize: "0.88rem", color: "#64748b" }}>
             Primero debes elaborar la prueba en el módulo <strong>"Crear prueba semanal"</strong> antes de poder habilitar la sesión en directo.
@@ -671,7 +726,7 @@ export default function LiveQuizControlView({
           <AlertTriangle size={36} color="#d97706" style={{ flexShrink: 0 }} />
           <div>
             <h4 style={{ margin: "0 0 0.35rem", fontSize: "1.1rem", fontWeight: 900, color: "#92400e" }}>
-              Prueba en modo Borrador (Semana {selectedSemana})
+              Prueba en modo Borrador ({selectedWeekInfo ? getWeekDisplayName(selectedWeekInfo) : `Semana ${selectedSemana}`})
             </h4>
             <p style={{ margin: 0, fontSize: "0.88rem", color: "#b45309", lineHeight: 1.5 }}>
               Esta prueba aún está guardada como borrador. Para habilitarla en vivo a tus alumnos, entra a <strong>"Crear prueba semanal"</strong> y cámbiala a estado <strong>Publicada</strong>.
