@@ -30,6 +30,7 @@ import {
   isInstructorTitular,
   isWeekAssignedToUser,
   getAssignedRecordForWeek,
+  checkSectionSchedule,
   SECTION_ROLES
 } from "../utils/sectionRoleUtils";
 
@@ -83,6 +84,9 @@ export default function LiveQuizControlView({
   // Identificación del usuario y rol de instructor titular
   const currentUser = currentInstructor || api.auth.getCurrentInstructor();
   const isTitular = useMemo(() => isInstructorTitular(currentUser, seccion), [currentUser, seccion]);
+
+  // Verificación de horario exclusivo de la sección para el instructor asignado
+  const scheduleCheck = useMemo(() => checkSectionSchedule(seccion), [seccion]);
 
   const QUIZ_ROLES = useMemo(
     () => [SECTION_ROLES.CREAR_PRUEBA, SECTION_ROLES.PRUEBAS, SECTION_ROLES.PRUEBAS_LEGACY],
@@ -239,10 +243,22 @@ export default function LiveQuizControlView({
       return;
     }
 
+    // Regla de horario exclusivo: el instructor asignado ÚNICAMENTE puede habilitar la prueba en vivo el mismo día y dentro del rango de horario de la sección
+    if (accion === "habilitar" && !isTitular) {
+      const currentSched = checkSectionSchedule(seccion);
+      if (!currentSched.isWithin) {
+        notifyRef.current(
+          `Acceso denegado: Como instructor asignado, únicamente puedes habilitar la prueba en vivo el día ${seccion?.dia} dentro del horario exclusivo de la sección (${seccion?.hora_inicio} - ${seccion?.hora_fin || "Fin"}). ${currentSched.reason}`,
+          "error"
+        );
+        return;
+      }
+    }
+
     setActionLoading(true);
 
     try {
-      const payload = { accion, ...extra };
+      const payload = { accion, es_titular: isTitular, ...extra };
       const res = await api.pruebas.controlLive(seccion.id, selectedSemana, payload);
       if (!res?.success) {
         throw new Error(res?.message || "Error al enviar comando");
@@ -587,11 +603,36 @@ export default function LiveQuizControlView({
                   </strong>
                 </div>
 
-                {isTitular && (
-                  <span style={{ fontSize: "0.7rem", color: "#64748b" }}>
-                    Como titular puedes habilitar y controlar esta prueba en vivo sin restricciones.
-                  </span>
-                )}
+                <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", flexWrap: "wrap" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.35rem", fontSize: "0.72rem", color: "#64748b" }}>
+                    <Clock size={13} color="#0284c7" />
+                    <span>
+                      Horario de clase: <strong>{seccion?.dia || "Día pendiente"} {seccion?.hora_inicio || ""}{seccion?.hora_fin ? ` - ${seccion.hora_fin}` : ""}</strong>
+                    </span>
+                  </div>
+
+                  {!isTitular && (
+                    <span
+                      style={{
+                        padding: "0.15rem 0.55rem",
+                        borderRadius: "9999px",
+                        fontSize: "0.7rem",
+                        fontWeight: 800,
+                        background: scheduleCheck.isWithin ? "#dcfce7" : "#fef3c7",
+                        color: scheduleCheck.isWithin ? "#15803d" : "#b45309",
+                        border: `1px solid ${scheduleCheck.isWithin ? "#86efac" : "#fde68a"}`
+                      }}
+                    >
+                      {scheduleCheck.isWithin ? "🟢 Horario de Clase Activo" : "🔒 Fuera de Horario"}
+                    </span>
+                  )}
+
+                  {isTitular && (
+                    <span style={{ fontSize: "0.7rem", color: "#64748b" }}>
+                      Como titular puedes habilitar y controlar esta prueba en vivo sin restricciones.
+                    </span>
+                  )}
+                </div>
               </div>
             )}
           </div>
@@ -795,30 +836,84 @@ export default function LiveQuizControlView({
               <div style={{ display: "flex", gap: "0.85rem", flexWrap: "wrap", borderTop: "1px solid #f1f5f9", paddingTop: "1.1rem" }}>
                 {/* 1. CASO INACTIVA: BOTÓN HABILITAR */}
                 {liveSession.estado === "inactiva" && (
-                  <button
-                    type="button"
-                    onClick={() => handleExecuteControl("habilitar", { duracion_segundos: activeQuiz.tiempo_por_pregunta_segundos || 90 })}
-                    disabled={actionLoading}
-                    style={{
-                      flex: 1,
-                      padding: "0.85rem 1.5rem",
-                      borderRadius: "0.75rem",
-                      border: "none",
-                      background: "linear-gradient(135deg, #16a34a 0%, #15803d 100%)",
-                      color: "#ffffff",
-                      fontSize: "0.95rem",
-                      fontWeight: 900,
-                      cursor: actionLoading ? "not-allowed" : "pointer",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      gap: "0.5rem",
-                      boxShadow: "0 4px 14px rgba(22, 163, 74, 0.35)"
-                    }}
-                  >
-                    <Unlock size={18} />
-                    <span>Habilitar Prueba en Vivo (Abrir Sala de Espera)</span>
-                  </button>
+                  <div style={{ display: "flex", flexDirection: "column", width: "100%", gap: "0.85rem" }}>
+                    {!isTitular && !scheduleCheck.isWithin && (
+                      <div
+                        style={{
+                          background: "#fffbeb",
+                          border: "1.5px solid #fde68a",
+                          borderRadius: "0.85rem",
+                          padding: "0.95rem 1.25rem",
+                          display: "flex",
+                          alignItems: "flex-start",
+                          gap: "0.85rem",
+                          boxShadow: "0 2px 8px rgba(217, 119, 6, 0.08)"
+                        }}
+                      >
+                        <div
+                          style={{
+                            width: "36px",
+                            height: "36px",
+                            borderRadius: "0.5rem",
+                            background: "#fef3c7",
+                            border: "1px solid #fde68a",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            color: "#d97706",
+                            flexShrink: 0,
+                            marginTop: "0.1rem"
+                          }}
+                        >
+                          <Lock size={18} />
+                        </div>
+                        <div style={{ display: "flex", flexDirection: "column", gap: "0.3rem", fontSize: "0.85rem" }}>
+                          <strong style={{ color: "#78350f", fontSize: "0.9rem" }}>
+                            Habilitación restringida al horario oficial de la sección:
+                          </strong>
+                          <span style={{ color: "#92400e", lineHeight: 1.45 }}>
+                            Como instructor asignado, únicamente podrás habilitar la prueba en vivo el día <strong>{seccion?.dia}</strong> dentro del rango de tiempo exclusivo (<strong>{seccion?.hora_inicio} - {seccion?.hora_fin || "Fin"}</strong>).
+                          </span>
+                          <span style={{ fontSize: "0.78rem", color: "#b45309", fontWeight: 800, marginTop: "0.15rem" }}>
+                            ⏰ Motivo del bloqueo: {scheduleCheck.reason}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={() => handleExecuteControl("habilitar", { duracion_segundos: activeQuiz.tiempo_por_pregunta_segundos || 90 })}
+                      disabled={actionLoading || (!isTitular && !scheduleCheck.isWithin)}
+                      style={{
+                        width: "100%",
+                        padding: "0.9rem 1.5rem",
+                        borderRadius: "0.75rem",
+                        border: !isTitular && !scheduleCheck.isWithin ? "1.5px solid #cbd5e1" : "none",
+                        background: !isTitular && !scheduleCheck.isWithin
+                          ? "#f1f5f9"
+                          : "linear-gradient(135deg, #16a34a 0%, #15803d 100%)",
+                        color: !isTitular && !scheduleCheck.isWithin ? "#94a3b8" : "#ffffff",
+                        fontSize: "0.95rem",
+                        fontWeight: 900,
+                        cursor: (!isTitular && !scheduleCheck.isWithin) || actionLoading ? "not-allowed" : "pointer",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        gap: "0.55rem",
+                        boxShadow: !isTitular && !scheduleCheck.isWithin ? "none" : "0 4px 14px rgba(22, 163, 74, 0.35)",
+                        transition: "all 0.15s ease"
+                      }}
+                      title={!isTitular && !scheduleCheck.isWithin ? scheduleCheck.reason : "Habilitar sala en vivo"}
+                    >
+                      {!isTitular && !scheduleCheck.isWithin ? <Lock size={18} /> : <Unlock size={18} />}
+                      <span>
+                        {!isTitular && !scheduleCheck.isWithin
+                          ? `Habilitación Bloqueada (Fuera del Horario: ${seccion?.dia || ""} ${seccion?.hora_inicio || ""})`
+                          : "Habilitar Prueba en Vivo (Abrir Sala de Espera)"}
+                      </span>
+                    </button>
+                  </div>
                 )}
 
                 {/* 2. CASO LOBBY: BOTÓN INICIAR PREGUNTA 1 */}
