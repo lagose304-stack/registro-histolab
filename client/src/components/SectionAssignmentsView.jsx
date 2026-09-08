@@ -288,10 +288,24 @@ export default function SectionAssignmentsView({ seccion, hideBackButton, notify
   // Manejar cambio de asignación en memoria local
   const handleAssignmentChange = (tipo, referencia, instructorId) => {
     const key = `${tipo}__${referencia}`;
-    setAssignmentsMap((prev) => ({
-      ...prev,
-      [key]: instructorId || ""
-    }));
+    setAssignmentsMap((prev) => {
+      const next = {
+        ...prev,
+        [key]: instructorId || ""
+      };
+
+      // El asignado a crear la prueba y revisarla deben ser el mismo obligatoriamente
+      if (tipo === ROLES.CREAR_PRUEBA) {
+        next[`${ROLES.PRUEBAS}__${referencia}`] = instructorId || "";
+        next[`Subir nota de prueba semanal__${referencia}`] = instructorId || "";
+      } else if (tipo === ROLES.PRUEBAS || tipo === "Subir nota de prueba semanal") {
+        next[`${ROLES.CREAR_PRUEBA}__${referencia}`] = instructorId || "";
+        next[`${ROLES.PRUEBAS}__${referencia}`] = instructorId || "";
+        next[`Subir nota de prueba semanal__${referencia}`] = instructorId || "";
+      }
+
+      return next;
+    });
     setHasUnsavedChanges(true);
   };
 
@@ -1140,7 +1154,7 @@ export default function SectionAssignmentsView({ seccion, hideBackButton, notify
                           </span>
                         </div>
                         <span style={{ fontSize: "0.68rem", color: "#64748b" }}>
-                          Diseño de reactivos y prueba
+                          Diseño de reactivos y prueba • <strong style={{ color: "#0284c7" }}>🔒 Enlazado con Revisión</strong>
                         </span>
                         {renderInstructorSelect(ROLES.CREAR_PRUEBA, semRef, curCrearPruebaId)}
                       </div>
@@ -1165,7 +1179,7 @@ export default function SectionAssignmentsView({ seccion, hideBackButton, notify
                           </span>
                         </div>
                         <span style={{ fontSize: "0.68rem", color: "#64748b" }}>
-                          Revisión y retroalimentación semanal
+                          Revisión y retroalimentación • <strong style={{ color: "#16a34a" }}>🔒 Enlazado con Creación</strong>
                         </span>
                         {renderInstructorSelect(ROLES.PRUEBAS, semRef, curPruebaId)}
                       </div>

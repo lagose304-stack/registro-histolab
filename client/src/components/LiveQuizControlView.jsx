@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import {
   Radio,
   Play,
@@ -21,9 +21,17 @@ import {
   Unlock,
   Check,
   Zap,
-  Info
+  Info,
+  User,
+  Crown
 } from "lucide-react";
 import { api } from "../services/api";
+import {
+  isInstructorTitular,
+  isWeekAssignedToUser,
+  getAssignedRecordForWeek,
+  SECTION_ROLES
+} from "../utils/sectionRoleUtils";
 
 export default function LiveQuizControlView({
   seccion,
@@ -38,6 +46,7 @@ export default function LiveQuizControlView({
   const [semanasConfig, setSemanasConfig] = useState([]);
   const [sectionQuizzes, setSectionQuizzes] = useState([]);
   const [studentsList, setStudentsList] = useState([]);
+  const [asignaciones, setAsignaciones] = useState([]);
   const [selectedSemana, setSelectedSemana] = useState(initialSemana || null);
 
   // Estado de la sesión en vivo
@@ -71,30 +80,44 @@ export default function LiveQuizControlView({
     return `${String(m).padStart(2, "0")}:${String(rem).padStart(2, "0")}`;
   };
 
-  // Cargar semanas, pruebas y estudiantes de la sección
+  // Identificación del usuario y rol de instructor titular
+  const currentUser = currentInstructor || api.auth.getCurrentInstructor();
+  const isTitular = useMemo(() => isInstructorTitular(currentUser, seccion), [currentUser, seccion]);
+
+  const QUIZ_ROLES = useMemo(
+    () => [SECTION_ROLES.CREAR_PRUEBA, SECTION_ROLES.PRUEBAS, SECTION_ROLES.PRUEBAS_LEGACY],
+    []
+  );
+
+  // Semanas visibles según permisos: el titular ve todas; el asignado solo donde tiene Crear/Revisar prueba
+  const visibleSemanasConfig = useMemo(() => {
+    if (isTitular) return semanasConfig;
+    return semanasConfig.filter((s) => {
+      const num = Number(s.numero_semana);
+      return num && isWeekAssignedToUser(asignaciones, QUIZ_ROLES, num, currentUser, seccion);
+    });
+  }, [isTitular, semanasConfig, asignaciones, QUIZ_ROLES, currentUser, seccion]);
+
+  // Cargar semanas, pruebas, asignaciones y estudiantes de la sección
   const loadInitialData = useCallback(async () => {
     if (!seccion?.id) return;
     setLoading(true);
 
     try {
-      const [resSemanas, resQuizzes, resStudents] = await Promise.all([
+      const [resSemanas, resQuizzes, resStudents, resAsig] = await Promise.all([
         api.semanas.getConfig(carrera).catch(() => ({ data: [] })),
         api.pruebas.getBySeccion(seccion.id).catch(() => ({ data: [] })),
-        api.estudiantes.getBySeccion(seccion.id, carrera).catch(() => ({ data: [] }))
+        api.estudiantes.getBySeccion(seccion.id, carrera).catch(() => ({ data: [] })),
+        api.asignaciones.getBySeccion(seccion.id).catch(() => ({ data: [] }))
       ]);
 
       if (resSemanas?.data) setSemanasConfig(resSemanas.data);
       if (resQuizzes?.data) setSectionQuizzes(resQuizzes.data);
       if (resStudents?.data) setStudentsList(resStudents.data);
-
-      // Si no hay semana preseleccionada, buscar la primera semana con prueba publicada
-      if (!selectedSemana) {
-        const firstPub = (resQuizzes?.data || []).find((q) => q.publicada === true || q.estado === "publicada");
-        if (firstPub?.numero_semana) {
-          setSelectedSemana(Number(firstPub.numero_semana));
-        } else if (resSemanas?.data?.length > 0) {
-          setSelectedSemana(Number(resSemanas.data[0].numero_semana));
-        }
+      if (resAsig?.data && Array.isArray(resAsig.data)) {
+        setAsignaciones(resAsig.data);
+      } else if (Array.isArray(resAsig)) {
+        setAsignaciones(resAsig);
       }
     } catch (err) {
       console.error("Error al cargar datos de control en vivo:", err);
@@ -102,11 +125,35 @@ export default function LiveQuizControlView({
     } finally {
       setLoading(false);
     }
-  }, [carrera, seccion?.id, selectedSemana]);
+  }, [carrera, seccion?.id]);
 
   useEffect(() => {
     loadInitialData();
   }, [loadInitialData]);
+
+  // Sincronizar selectedSemana para que apunte a una semana válida dentro de las visibles
+  useEffect(() => {
+    if (visibleSemanasConfig.length > 0) {
+      const exists = visibleSemanasConfig.some((w) => Number(w.numero_semana) === Number(selectedSemana));
+      if (!exists) {
+        const firstPub = visibleSemanasConfig.find((w) => {
+          const q = sectionQuizzes.find((quiz) => Number(quiz.numero_semana) === Number(w.numero_semana));
+          return q?.publicada === true || q?.estado === "publicada";
+        });
+        setSelectedSemana(Number(firstPub ? firstPub.numero_semana : visibleSemanasConfig[0].numero_semana));
+      }
+    } else if (!isTitular) {
+      setSelectedSemana(null);
+    }
+  }, [visibleSemanasConfig, selectedSemana, sectionQuizzes, isTitular]);
+
+  // Registro del docente asignado a la semana seleccionada
+  const assignedRecord = useMemo(() => {
+    if (!selectedSemana) return null;
+    return getAssignedRecordForWeek(asignaciones, QUIZ_ROLES, selectedSemana);
+  }, [asignaciones, QUIZ_ROLES, selectedSemana]);
+
+  const assignedTeacherName = assignedRecord?.instructor_nombre || assignedRecord?.nombre_instructor || "Sin asignar";
 
   // Cargar la prueba específica cuando cambia la semana seleccionada
   useEffect(() => {
@@ -184,6 +231,14 @@ export default function LiveQuizControlView({
   // Ejecutar comando maestro de control
   const handleExecuteControl = async (accion, extra = {}) => {
     if (!seccion?.id || !selectedSemana) return;
+
+    // Validación estricta de permisos: solo asignado a crear/revisar o titular
+    const canControl = isTitular || isWeekAssignedToUser(asignaciones, QUIZ_ROLES, selectedSemana, currentUser, seccion);
+    if (!canControl) {
+      notifyRef.current("Solo el docente asignado a esta prueba semanal o el Instructor Titular pueden controlar la sesión en vivo.", "error");
+      return;
+    }
+
     setActionLoading(true);
 
     try {
@@ -390,67 +445,156 @@ export default function LiveQuizControlView({
         </div>
       </div>
 
-      {/* 2. SELECTOR DE SEMANA */}
-      <div
-        className="glass-panel"
-        style={{
-          background: "#ffffff",
-          borderRadius: "1rem",
-          padding: "1rem 1.5rem",
-          border: "1.5px solid #e2e8f0",
-          display: "flex",
-          flexDirection: "column",
-          gap: "0.75rem"
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "0.5rem" }}>
-          <div style={{ fontSize: "0.82rem", fontWeight: 800, color: "#334155", textTransform: "uppercase" }}>
-            Selecciona la Semana Académica a Controlar:
+      {/* 2. SELECTOR DE SEMANA O RESTRICCIÓN DE PERMISOS */}
+      {!loading && !isTitular && visibleSemanasConfig.length === 0 ? (
+        <div
+          style={{
+            background: "#ffffff",
+            borderRadius: "1.25rem",
+            padding: "3.5rem 2rem",
+            textAlign: "center",
+            border: "1.5px dashed #cbd5e1",
+            boxShadow: "0 4px 15px rgba(0,0,0,0.03)"
+          }}
+        >
+          <div
+            style={{
+              width: "56px",
+              height: "56px",
+              borderRadius: "50%",
+              background: "#fef2f2",
+              border: "1px solid #fecaca",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              margin: "0 auto 1.25rem",
+              color: "#dc2626"
+            }}
+          >
+            <ShieldAlert size={28} />
           </div>
-          <span style={{ fontSize: "0.76rem", color: "#64748b" }}>
-            Los estudiantes solo podrán entrar a la semana que tú habilites en este panel.
-          </span>
+          <h3 style={{ fontSize: "1.2rem", fontWeight: 900, color: "#0f172a", margin: "0 0 0.5rem" }}>
+            No tienes semanas asignadas para control en vivo
+          </h3>
+          <p style={{ margin: "0 auto", maxWidth: "560px", fontSize: "0.86rem", color: "#64748b", lineHeight: 1.5 }}>
+            El control en vivo de las pruebas semanales solo puede ser gestionado por el docente asignado a la
+            creación y revisión de la prueba de cada semana, o por el <strong>Instructor Titular</strong> de la sección.
+          </p>
         </div>
+      ) : (
+        <>
+          {/* 2. SELECTOR DE SEMANA */}
+          <div
+            className="glass-panel"
+            style={{
+              background: "#ffffff",
+              borderRadius: "1rem",
+              padding: "1rem 1.5rem",
+              border: "1.5px solid #e2e8f0",
+              display: "flex",
+              flexDirection: "column",
+              gap: "0.75rem"
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "0.5rem" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", flexWrap: "wrap" }}>
+                <span style={{ fontSize: "0.82rem", fontWeight: 800, color: "#334155", textTransform: "uppercase" }}>
+                  Selecciona la Semana Académica a Controlar:
+                </span>
+                {isTitular && (
+                  <span
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "0.3rem",
+                      padding: "0.15rem 0.55rem",
+                      borderRadius: "9999px",
+                      background: "#fef3c7",
+                      color: "#b45309",
+                      fontSize: "0.7rem",
+                      fontWeight: 800,
+                      border: "1px solid #fde68a"
+                    }}
+                  >
+                    <Crown size={12} />
+                    <span>Instructor Titular (Control total)</span>
+                  </span>
+                )}
+              </div>
+              <span style={{ fontSize: "0.76rem", color: "#64748b" }}>
+                Los estudiantes solo podrán entrar a la semana que tú habilites en este panel.
+              </span>
+            </div>
 
-        <div style={{ display: "flex", gap: "0.6rem", overflowX: "auto", paddingBottom: "0.3rem" }}>
-          {semanasConfig.map((w) => {
-            const semNum = Number(w.numero_semana);
-            const isSelected = selectedSemana === semNum;
-            const quizFound = sectionQuizzes.find((q) => Number(q.numero_semana) === semNum);
-            const isPublished = quizFound?.publicada === true || quizFound?.estado === "publicada";
+            <div style={{ display: "flex", gap: "0.6rem", overflowX: "auto", paddingBottom: "0.3rem" }}>
+              {visibleSemanasConfig.map((w) => {
+                const semNum = Number(w.numero_semana);
+                const isSelected = selectedSemana === semNum;
+                const quizFound = sectionQuizzes.find((q) => Number(q.numero_semana) === semNum);
+                const isPublished = quizFound?.publicada === true || quizFound?.estado === "publicada";
 
-            return (
-              <button
-                key={semNum}
-                type="button"
-                onClick={() => setSelectedSemana(semNum)}
+                return (
+                  <button
+                    key={semNum}
+                    type="button"
+                    onClick={() => setSelectedSemana(semNum)}
+                    style={{
+                      flexShrink: 0,
+                      padding: "0.55rem 0.95rem",
+                      borderRadius: "0.65rem",
+                      border: isSelected ? "2px solid #0284c7" : "1.5px solid #cbd5e1",
+                      background: isSelected ? "#eff6ff" : "#ffffff",
+                      color: isSelected ? "#0284c7" : "#334155",
+                      fontWeight: isSelected ? 900 : 700,
+                      fontSize: "0.82rem",
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "0.45rem",
+                      transition: "all 0.15s ease"
+                    }}
+                  >
+                    <span>Semana {semNum}</span>
+                    {isPublished ? (
+                      <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#16a34a" }} title="Publicada" />
+                    ) : (
+                      <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#cbd5e1" }} title="Sin publicar" />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+
+            {selectedSemana && (
+              <div
                 style={{
-                  flexShrink: 0,
-                  padding: "0.55rem 0.95rem",
-                  borderRadius: "0.65rem",
-                  border: isSelected ? "2px solid #0284c7" : "1.5px solid #cbd5e1",
-                  background: isSelected ? "#eff6ff" : "#ffffff",
-                  color: isSelected ? "#0284c7" : "#334155",
-                  fontWeight: isSelected ? 900 : 700,
-                  fontSize: "0.82rem",
-                  cursor: "pointer",
+                  marginTop: "0.25rem",
+                  paddingTop: "0.6rem",
+                  borderTop: "1px dashed #e2e8f0",
                   display: "flex",
                   alignItems: "center",
-                  gap: "0.45rem",
-                  transition: "all 0.15s ease"
+                  justifyContent: "space-between",
+                  flexWrap: "wrap",
+                  gap: "0.5rem",
+                  fontSize: "0.76rem"
                 }}
               >
-                <span>Semana {semNum}</span>
-                {isPublished ? (
-                  <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#16a34a" }} title="Publicada" />
-                ) : (
-                  <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#cbd5e1" }} title="Sin publicar" />
+                <div style={{ display: "flex", alignItems: "center", gap: "0.45rem", color: "#475569" }}>
+                  <User size={14} color="#0284c7" />
+                  <span>Docente asignado (Crear y Revisar prueba):</span>
+                  <strong style={{ color: assignedTeacherName !== "Sin asignar" ? "#0f172a" : "#dc2626" }}>
+                    {assignedTeacherName}
+                  </strong>
+                </div>
+
+                {isTitular && (
+                  <span style={{ fontSize: "0.7rem", color: "#64748b" }}>
+                    Como titular puedes habilitar y controlar esta prueba en vivo sin restricciones.
+                  </span>
                 )}
-              </button>
-            );
-          })}
-        </div>
-      </div>
+              </div>
+            )}
+          </div>
 
       {/* 3. ESCENARIO MAESTRO DE CONTROL EN VIVO */}
       {!activeQuiz ? (
@@ -1084,6 +1228,8 @@ export default function LiveQuizControlView({
             </div>
           </div>
         </div>
+      )}
+        </>
       )}
     </div>
   );
