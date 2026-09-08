@@ -25,7 +25,11 @@ export default function UserManagementView({ currentInstructor, onClose, notify 
   const [modalMode, setModalMode] = useState("create"); // 'create' | 'edit' | 'delete'
   const [selectedInstructorForModal, setSelectedInstructorForModal] = useState(null);
 
+  const rolNormalized = (currentInstructor?.rol || "").toLowerCase().trim();
+  const isAuthorized = rolNormalized === "creador" || rolNormalized === "administrador" || rolNormalized === "admin";
+
   const loadInstructores = useCallback(async () => {
+    if (!isAuthorized) return;
     setLoadingInstructors(true);
     try {
       const res = await api.auth.getInstructores();
@@ -37,11 +41,44 @@ export default function UserManagementView({ currentInstructor, onClose, notify 
     } finally {
       setLoadingInstructors(false);
     }
-  }, []);
+  }, [isAuthorized]);
 
   useEffect(() => {
-    loadInstructores();
-  }, [loadInstructores]);
+    if (isAuthorized) {
+      loadInstructores();
+    }
+  }, [loadInstructores, isAuthorized]);
+
+  if (!isAuthorized) {
+    return (
+      <div className="animate-fade-in" style={{ padding: "2.5rem 2rem", textAlign: "center", background: "#ffffff", borderRadius: "1rem", border: "1px solid #e2e8f0", maxWidth: "580px", margin: "3rem auto", boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.05)" }}>
+        <div style={{ width: "56px", height: "56px", borderRadius: "50%", background: "#fee2e2", color: "#dc2626", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 1.25rem" }}>
+          <Shield size={28} />
+        </div>
+        <h3 style={{ fontSize: "1.25rem", fontWeight: 800, color: "#1e293b", marginBottom: "0.5rem" }}>Acceso Restringido</h3>
+        <p style={{ fontSize: "0.95rem", color: "#64748b", lineHeight: 1.5, marginBottom: "1.5rem" }}>
+          El módulo de <strong>Gestión de Usuarios</strong> está reservado exclusivamente para instructores con rol de <strong>Creador</strong> o <strong>Administrador</strong>.
+        </p>
+        <button
+          onClick={onClose}
+          style={{
+            padding: "0.65rem 1.5rem",
+            background: "#0284c7",
+            color: "#ffffff",
+            border: "none",
+            borderRadius: "0.75rem",
+            fontWeight: 700,
+            cursor: "pointer",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "0.5rem"
+          }}
+        >
+          <ArrowLeft size={16} /> Volver al Dashboard
+        </button>
+      </div>
+    );
+  }
 
   const handleOpenModal = (mode, targetInst = null) => {
     setModalMode(mode);

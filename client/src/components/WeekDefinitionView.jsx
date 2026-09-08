@@ -32,7 +32,7 @@ const PARCIALES_META = [
   { id: "III Parcial", label: "III Parcial", semanas: [12, 13, 14, 15, 16], color: "#d97706", bg: "#fffbeb", border: "#fde68a" }
 ];
 
-export default function WeekDefinitionView({ onClose = () => {}, notify = () => {} }) {
+export default function WeekDefinitionView({ currentInstructor, onClose = () => {}, notify = () => {} }) {
   const [selectedCarrera, setSelectedCarrera] = useState("Medicina");
   const [semanas, setSemanas] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -45,11 +45,15 @@ export default function WeekDefinitionView({ onClose = () => {}, notify = () => 
   const [copyFromCarrera, setCopyFromCarrera] = useState("Medicina");
   const [copying, setCopying] = useState(false);
 
+  const rolNormalized = (currentInstructor?.rol || "").toLowerCase().trim();
+  const isAuthorized = rolNormalized === "creador" || rolNormalized === "administrador" || rolNormalized === "admin";
+
   const activeCarrera =
     CARRERAS_CONFIG.find((c) => c.id === selectedCarrera) || CARRERAS_CONFIG[0];
 
   // Cargar configuración de semanas de la carrera activa
   const loadSemanas = useCallback(async () => {
+    if (!isAuthorized) return;
     setLoading(true);
     try {
       const res = await api.semanas.getConfig(selectedCarrera);
@@ -64,11 +68,44 @@ export default function WeekDefinitionView({ onClose = () => {}, notify = () => 
     } finally {
       setLoading(false);
     }
-  }, [selectedCarrera]);
+  }, [selectedCarrera, isAuthorized]);
 
   useEffect(() => {
-    loadSemanas();
-  }, [loadSemanas]);
+    if (isAuthorized) {
+      loadSemanas();
+    }
+  }, [loadSemanas, isAuthorized]);
+
+  if (!isAuthorized) {
+    return (
+      <div className="animate-fade-in" style={{ padding: "2.5rem 2rem", textAlign: "center", background: "#ffffff", borderRadius: "1rem", border: "1px solid #e2e8f0", maxWidth: "580px", margin: "3rem auto", boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.05)" }}>
+        <div style={{ width: "56px", height: "56px", borderRadius: "50%", background: "#fee2e2", color: "#dc2626", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 1.25rem" }}>
+          <CalendarDays size={28} />
+        </div>
+        <h3 style={{ fontSize: "1.25rem", fontWeight: 800, color: "#1e293b", marginBottom: "0.5rem" }}>Acceso Restringido</h3>
+        <p style={{ fontSize: "0.95rem", color: "#64748b", lineHeight: 1.5, marginBottom: "1.5rem" }}>
+          El módulo de <strong>Definición de Semanas Académicas</strong> está reservado exclusivamente para instructores con rol de <strong>Creador</strong> o <strong>Administrador</strong>.
+        </p>
+        <button
+          onClick={onClose}
+          style={{
+            padding: "0.65rem 1.5rem",
+            background: "#0284c7",
+            color: "#ffffff",
+            border: "none",
+            borderRadius: "0.75rem",
+            fontWeight: 700,
+            cursor: "pointer",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "0.5rem"
+          }}
+        >
+          <ArrowLeft size={16} /> Volver al Dashboard
+        </button>
+      </div>
+    );
+  }
 
   // Manejar cambio en fecha inicio o fin
   const handleDateChange = (numeroSemana, field, value) => {

@@ -90,6 +90,9 @@ export default function DashboardInstructor({ instructor, notify = () => {} }) {
     ? `${instructor.primer_nombre || ''} ${instructor.segundo_nombre ? instructor.segundo_nombre + ' ' : ''}${instructor.primer_apellido || ''} ${instructor.segundo_apellido || ''}`.trim() || instructor.nombre_completo || "Instructor"
     : "Instructor";
 
+  const rolNormalized = (instructor?.rol || "").toLowerCase().trim();
+  const isCreadorOrAdmin = rolNormalized === "creador" || rolNormalized === "administrador" || rolNormalized === "admin";
+
   let todayFormatted = "";
   try {
     todayFormatted = new Date().toLocaleDateString("es-HN", {
@@ -173,8 +176,12 @@ export default function DashboardInstructor({ instructor, notify = () => {} }) {
     );
   }
 
-  // Si hay un módulo activo abierto
+  // Si hay un módulo activo abierto (Administración General exclusiva para Creador y Administrador)
   if (activeModule === "user-management") {
+    if (!isCreadorOrAdmin) {
+      setActiveModule(null);
+      return null;
+    }
     return (
       <UserManagementView
         currentInstructor={instructor}
@@ -185,6 +192,10 @@ export default function DashboardInstructor({ instructor, notify = () => {} }) {
   }
 
   if (activeModule === "section-management") {
+    if (!isCreadorOrAdmin) {
+      setActiveModule(null);
+      return null;
+    }
     return (
       <SectionManagementView
         currentInstructor={instructor}
@@ -195,6 +206,10 @@ export default function DashboardInstructor({ instructor, notify = () => {} }) {
   }
 
   if (activeModule === "temario-management") {
+    if (!isCreadorOrAdmin) {
+      setActiveModule(null);
+      return null;
+    }
     return (
       <TemarioManagementView
         currentInstructor={instructor}
@@ -205,8 +220,13 @@ export default function DashboardInstructor({ instructor, notify = () => {} }) {
   }
 
   if (activeModule === "week-definition") {
+    if (!isCreadorOrAdmin) {
+      setActiveModule(null);
+      return null;
+    }
     return (
       <WeekDefinitionView
+        currentInstructor={instructor}
         onClose={() => setActiveModule(null)}
         notify={notify}
       />
@@ -307,8 +327,9 @@ export default function DashboardInstructor({ instructor, notify = () => {} }) {
       </div>
 
       {/* ======================================================================= */}
-      {/* 🏛️ SECCIÓN 1: ADMINISTRACIÓN GENERAL */}
+      {/* 🏛️ SECCIÓN 1: ADMINISTRACIÓN GENERAL (Exclusivo Creador y Administrador) */}
       {/* ======================================================================= */}
+      {isCreadorOrAdmin && (
       <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "0.5rem" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "0.65rem" }}>
@@ -825,6 +846,7 @@ export default function DashboardInstructor({ instructor, notify = () => {} }) {
           </div>
         </div>
       </div>
+      )}
 
       {/* ======================================================================= */}
       {/* 🎓 SECCIÓN 2: MIS SECCIONES (CON TARJETAS LLAMATIVAS Y ESTRELLA DORADA) */}
