@@ -3159,35 +3159,24 @@ export default function ReviewQuizSubmissionsView({
                       background: "#f8fafc"
                     }}
                   >
-                    {/* Enunciado General y Micrografía de la pregunta */}
-                    <div
-                      style={{
-                        background: "#ffffff",
-                        padding: "1rem 1.25rem",
-                        borderRadius: "0.75rem",
-                        border: "1.5px solid #e2e8f0",
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: "0.65rem"
-                      }}
-                    >
-                      <span style={{ fontSize: "0.72rem", fontWeight: 800, color: "#64748b", textTransform: "uppercase" }}>
-                        Enunciado de la Pregunta:
-                      </span>
-                      <div style={{ fontSize: "0.98rem", fontWeight: 800, color: "#0f172a", lineHeight: 1.45 }}>
-                        {currentQ.enunciado || "(Pregunta sin enunciado general configurado)"}
+                    {/* Micrografía de la pregunta si existe */}
+                    {currentQ.imagen_url && (
+                      <div
+                        style={{
+                          background: "#0f172a",
+                          padding: "0.55rem",
+                          borderRadius: "0.75rem",
+                          textAlign: "center",
+                          border: "1px solid #1e293b"
+                        }}
+                      >
+                        <img
+                          src={currentQ.imagen_url}
+                          alt="Micrografía Pregunta"
+                          style={{ maxHeight: "220px", maxWidth: "100%", objectFit: "contain", borderRadius: "0.4rem" }}
+                        />
                       </div>
-
-                      {currentQ.imagen_url && (
-                        <div style={{ marginTop: "0.25rem", textAlign: "center", background: "#0f172a", padding: "0.5rem", borderRadius: "0.5rem" }}>
-                          <img
-                            src={currentQ.imagen_url}
-                            alt="Micrografía Pregunta"
-                            style={{ maxHeight: "200px", maxWidth: "100%", objectFit: "contain", borderRadius: "0.35rem" }}
-                          />
-                        </div>
-                      )}
-                    </div>
+                    )}
 
                     {/* CUERPO PRINCIPAL: 2 COLUMNAS (IZQUIERDA: ALUMNO | DERECHA: DOCENTE) */}
                     <div
