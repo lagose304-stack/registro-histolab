@@ -24,6 +24,7 @@ import {
   ArrowLeft,
   Send,
   Check,
+  X,
   Eye,
   Lock,
   Maximize2,
@@ -3659,58 +3660,247 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                               studentRespuestas?.[pregunta.id] ??
                               null;
                             const itemLabel = item.instruccion || item.etiqueta || `Inciso ${itemIdx + 1}`;
+                            const isList = item.tipo !== "texto_corto";
+                            const cantSlots = isList ? (parseInt(item.cantidad, 10) || 3) : 1;
+                            const defaultItemPts = Math.round((Number(pregunta.puntos || 1.0) / (pregunta.items.length || 1)) * 1000) / 1000;
+                            const itemMaxPts = item.puntos !== undefined && !isNaN(Number(item.puntos)) ? Number(item.puntos) : defaultItemPts;
+                            const slotPts = isList ? Math.round((itemMaxPts / cantSlots) * 1000) / 1000 : itemMaxPts;
+
+                            // Evaluación directa de todo el apartado (modo texto corto o retrocompatibilidad)
                             const evalItem = evaluaciones[`${pregunta.id}___${item.id}`];
 
+                            // Sumar puntos obtenidos si se evaluó casilla por casilla
+                            let earnedInSlots = 0;
+                            let hasSlotEvaluations = false;
+                            if (isList) {
+                              for (let s = 0; s < cantSlots; s++) {
+                                const se = evaluaciones[`${pregunta.id}___${item.id}___slot_${s}`];
+                                if (se) {
+                                  hasSlotEvaluations = true;
+                                  earnedInSlots += Number(se.puntos_obtenidos) || 0;
+                                }
+                              }
+                              earnedInSlots = Math.round(earnedInSlots * 1000) / 1000;
+                            }
+
                             return (
-                              <div key={item.id} style={{ background: "#ffffff", padding: "0.85rem 1rem", borderRadius: "0.55rem", border: "1px solid #e2e8f0", display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+                              <div
+                                key={item.id}
+                                style={{
+                                  background: "#ffffff",
+                                  padding: "0.9rem 1.1rem",
+                                  borderRadius: "0.65rem",
+                                  border: "1px solid #e2e8f0",
+                                  display: "flex",
+                                  flexDirection: "column",
+                                  gap: "0.6rem"
+                                }}
+                              >
+                                {/* Cabecera del Apartado */}
                                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "0.4rem" }}>
-                                  <div style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
-                                    <strong style={{ fontSize: "0.82rem", color: "#334155" }}>
+                                  <div style={{ display: "flex", alignItems: "center", gap: "0.45rem", flexWrap: "wrap" }}>
+                                    <strong style={{ fontSize: "0.85rem", color: "#334155" }}>
                                       {String.fromCharCode(97 + itemIdx)}) {itemLabel}:
                                     </strong>
-                                    {item.puntos !== undefined && (
-                                      <span style={{ fontSize: "0.72rem", fontWeight: 800, color: "#0369a1", background: "#f0f9ff", padding: "0.1rem 0.4rem", borderRadius: "0.3rem", border: "1px solid #bae6fd" }}>
-                                        {item.puntos} pt(s)
-                                      </span>
-                                    )}
-                                  </div>
-
-                                  {isGraded && evalItem && (
                                     <span
                                       style={{
-                                        fontSize: "0.74rem",
+                                        fontSize: "0.72rem",
                                         fontWeight: 800,
-                                        padding: "0.15rem 0.5rem",
-                                        borderRadius: "0.35rem",
-                                        background: evalItem.estado === "buena" ? "#dcfce7" : evalItem.estado === "regular" ? "#fef3c7" : "#fee2e2",
-                                        color: evalItem.estado === "buena" ? "#15803d" : evalItem.estado === "regular" ? "#b45309" : "#dc2626",
-                                        border: `1px solid ${evalItem.estado === "buena" ? "#86efac" : evalItem.estado === "regular" ? "#fde68a" : "#fca5a5"}`
+                                        color: "#0369a1",
+                                        background: "#f0f9ff",
+                                        padding: "0.12rem 0.45rem",
+                                        borderRadius: "0.3rem",
+                                        border: "1px solid #bae6fd"
                                       }}
                                     >
-                                      {evalItem.estado === "buena" ? `✓ Correcta (+${Number(evalItem.puntos_obtenidos || 0).toFixed(3)} pts)` : evalItem.estado === "regular" ? `½ Regular (+${Number(evalItem.puntos_obtenidos || 0).toFixed(3)} pts)` : "✗ Incorrecta (0 pts)"}
+                                      {itemMaxPts.toFixed(3)} pt(s) {isList ? `(${cantSlots} casillas • ${slotPts.toFixed(3)} pt c/u)` : ""}
                                     </span>
+                                  </div>
+
+                                  {/* Resumen de Calificación del Apartado */}
+                                  {isGraded && (
+                                    <>
+                                      {isList && hasSlotEvaluations ? (
+                                        <span
+                                          style={{
+                                            fontSize: "0.74rem",
+                                            fontWeight: 800,
+                                            padding: "0.15rem 0.55rem",
+                                            borderRadius: "0.35rem",
+                                            background: earnedInSlots === itemMaxPts ? "#dcfce7" : earnedInSlots > 0 ? "#fef3c7" : "#fee2e2",
+                                            color: earnedInSlots === itemMaxPts ? "#15803d" : earnedInSlots > 0 ? "#b45309" : "#dc2626",
+                                            border: `1px solid ${earnedInSlots === itemMaxPts ? "#86efac" : earnedInSlots > 0 ? "#fde68a" : "#fca5a5"}`
+                                          }}
+                                        >
+                                          Total apartado: +{earnedInSlots.toFixed(3)} / {itemMaxPts.toFixed(3)} pts
+                                        </span>
+                                      ) : evalItem ? (
+                                        <span
+                                          style={{
+                                            fontSize: "0.74rem",
+                                            fontWeight: 800,
+                                            padding: "0.15rem 0.55rem",
+                                            borderRadius: "0.35rem",
+                                            background: evalItem.estado === "buena" ? "#dcfce7" : evalItem.estado === "regular" ? "#fef3c7" : "#fee2e2",
+                                            color: evalItem.estado === "buena" ? "#15803d" : evalItem.estado === "regular" ? "#b45309" : "#dc2626",
+                                            border: `1px solid ${evalItem.estado === "buena" ? "#86efac" : evalItem.estado === "regular" ? "#fde68a" : "#fca5a5"}`
+                                          }}
+                                        >
+                                          {evalItem.estado === "buena"
+                                            ? `✓ Correcta (+${Number(evalItem.puntos_obtenidos || 0).toFixed(3)} pts)`
+                                            : evalItem.estado === "regular"
+                                            ? `½ Regular (+${Number(evalItem.puntos_obtenidos || 0).toFixed(3)} pts)`
+                                            : "✗ Incorrecta (0 pts)"}
+                                        </span>
+                                      ) : null}
+                                    </>
                                   )}
                                 </div>
 
-                                {item.tipo === "texto_corto" ? (
-                                  <div style={{ fontSize: "0.88rem", fontWeight: 700, color: "#0f172a" }}>
-                                    {typeof userAns === "string" && userAns.trim() ? (
-                                      userAns
-                                    ) : (
-                                      <span style={{ color: "#94a3b8", fontStyle: "italic" }}>Sin respuesta</span>
-                                    )}
+                                {/* Contenido de Respuestas */}
+                                {!isList ? (
+                                  /* Apartado Texto Corto */
+                                  <div
+                                    style={{
+                                      padding: "0.6rem 0.8rem",
+                                      borderRadius: "0.5rem",
+                                      background: "#f8fafc",
+                                      border: "1px solid #e2e8f0",
+                                      fontSize: "0.9rem",
+                                      fontWeight: 700,
+                                      color: typeof userAns === "string" && userAns.trim() ? "#0f172a" : "#94a3b8",
+                                      fontStyle: typeof userAns === "string" && userAns.trim() ? "normal" : "italic"
+                                    }}
+                                  >
+                                    {typeof userAns === "string" && userAns.trim() ? userAns : "Sin respuesta enviada"}
                                   </div>
                                 ) : (
-                                  <div style={{ display: "flex", flexDirection: "column", gap: "0.3rem" }}>
-                                    {Array.from({ length: item.cantidad || 3 }).map((_, rIdx) => {
-                                      const rowVal = Array.isArray(userAns) ? userAns[rIdx] : "";
+                                  /* Apartado Listado con Múltiples Casillas - RETROALIMENTACIÓN INDIVIDUAL */
+                                  <div style={{ display: "flex", flexDirection: "column", gap: "0.45rem", marginTop: "0.2rem" }}>
+                                    {Array.from({ length: cantSlots }).map((_, rIdx) => {
+                                      const rowVal = Array.isArray(userAns)
+                                        ? userAns[rIdx]
+                                        : (typeof userAns === "object" && userAns ? userAns[rIdx] : "");
+                                      const slotEval = evaluaciones[`${pregunta.id}___${item.id}___slot_${rIdx}`];
+
                                       return (
-                                        <div key={rIdx} style={{ fontSize: "0.84rem", color: "#0f172a" }}>
-                                          <strong style={{ color: "#64748b" }}>{rIdx + 1}.</strong>{" "}
-                                          {rowVal && String(rowVal).trim() ? (
-                                            rowVal
-                                          ) : (
-                                            <span style={{ color: "#94a3b8", fontStyle: "italic" }}>Sin respuesta</span>
+                                        <div
+                                          key={rIdx}
+                                          style={{
+                                            display: "flex",
+                                            alignItems: "center",
+                                            justifyContent: "space-between",
+                                            flexWrap: "wrap",
+                                            gap: "0.5rem",
+                                            padding: "0.5rem 0.75rem",
+                                            borderRadius: "0.5rem",
+                                            background:
+                                              !isGraded || !slotEval
+                                                ? "#f8fafc"
+                                                : slotEval.estado === "buena"
+                                                ? "#f0fdf4"
+                                                : slotEval.estado === "regular"
+                                                ? "#fffbeb"
+                                                : "#fef2f2",
+                                            border:
+                                              !isGraded || !slotEval
+                                                ? "1px solid #e2e8f0"
+                                                : slotEval.estado === "buena"
+                                                ? "1.5px solid #86efac"
+                                                : slotEval.estado === "regular"
+                                                ? "1.5px solid #fde68a"
+                                                : "1.5px solid #fca5a5",
+                                            transition: "all 0.15s ease"
+                                          }}
+                                        >
+                                          {/* Casilla y Respuesta enviada */}
+                                          <div style={{ display: "flex", alignItems: "center", gap: "0.55rem", flex: 1, minWidth: "200px" }}>
+                                            <span
+                                              style={{
+                                                width: "22px",
+                                                height: "22px",
+                                                borderRadius: "50%",
+                                                background: "#ffffff",
+                                                border: "1px solid #cbd5e1",
+                                                color: "#475569",
+                                                display: "flex",
+                                                alignItems: "center",
+                                                justifyContent: "center",
+                                                fontSize: "0.72rem",
+                                                fontWeight: 800,
+                                                flexShrink: 0
+                                              }}
+                                            >
+                                              {rIdx + 1}
+                                            </span>
+                                            <span
+                                              style={{
+                                                fontSize: "0.88rem",
+                                                fontWeight: 700,
+                                                color: rowVal && String(rowVal).trim() ? "#0f172a" : "#94a3b8",
+                                                fontStyle: rowVal && String(rowVal).trim() ? "normal" : "italic"
+                                              }}
+                                            >
+                                              {rowVal && String(rowVal).trim() ? rowVal : "Sin respuesta enviada"}
+                                            </span>
+                                          </div>
+
+                                          {/* Retroalimentación individual de la casilla */}
+                                          {isGraded && (
+                                            <div>
+                                              {slotEval ? (
+                                                <span
+                                                  style={{
+                                                    display: "inline-flex",
+                                                    alignItems: "center",
+                                                    gap: "0.3rem",
+                                                    fontSize: "0.74rem",
+                                                    fontWeight: 800,
+                                                    padding: "0.2rem 0.55rem",
+                                                    borderRadius: "0.35rem",
+                                                    background:
+                                                      slotEval.estado === "buena"
+                                                        ? "#dcfce7"
+                                                        : slotEval.estado === "regular"
+                                                        ? "#fef3c7"
+                                                        : "#fee2e2",
+                                                    color:
+                                                      slotEval.estado === "buena"
+                                                        ? "#15803d"
+                                                        : slotEval.estado === "regular"
+                                                        ? "#b45309"
+                                                        : "#dc2626",
+                                                    border: `1px solid ${
+                                                      slotEval.estado === "buena"
+                                                        ? "#86efac"
+                                                        : slotEval.estado === "regular"
+                                                        ? "#fde68a"
+                                                        : "#fca5a5"
+                                                    }`
+                                                  }}
+                                                >
+                                                  {slotEval.estado === "buena" ? (
+                                                    <>
+                                                      <Check size={13} strokeWidth={3} />
+                                                      <span>Correcta (+{Number(slotEval.puntos_obtenidos || 0).toFixed(3)} pts)</span>
+                                                    </>
+                                                  ) : slotEval.estado === "regular" ? (
+                                                    <>
+                                                      <span>½ Regular (+{Number(slotEval.puntos_obtenidos || 0).toFixed(3)} pts)</span>
+                                                    </>
+                                                  ) : (
+                                                    <>
+                                                      <X size={13} strokeWidth={3} />
+                                                      <span>Incorrecta (0.000 pts)</span>
+                                                    </>
+                                                  )}
+                                                </span>
+                                              ) : (
+                                                <span style={{ fontSize: "0.72rem", color: "#94a3b8", fontStyle: "italic" }}>
+                                                  Casilla sin calificar
+                                                </span>
+                                              )}
+                                            </div>
                                           )}
                                         </div>
                                       );
