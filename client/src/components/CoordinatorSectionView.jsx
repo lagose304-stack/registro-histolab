@@ -786,7 +786,8 @@ export default function CoordinatorSectionView({
               </div>
 
 
-              {/* 4. Subir Nota de Examen parcial */}
+              {/* 4. Subir Nota de Examen parcial (Solo Instructor Titular) */}
+              {isTitular && (
               <div
                 onClick={() => setActiveModule("subir_examen")}
                 style={{
@@ -848,6 +849,7 @@ export default function CoordinatorSectionView({
                   </div>
                 </div>
               </div>
+              )}
 
               {/* 5. Crear prueba semanal */}
               <div
@@ -1286,7 +1288,7 @@ export default function CoordinatorSectionView({
       )}
 
 
-      {activeModule === "subir_examen" && (
+      {activeModule === "subir_examen" && isTitular && (
         <WeeklyExamGradingView
           seccion={seccion}
           currentInstructor={currentInstructor}

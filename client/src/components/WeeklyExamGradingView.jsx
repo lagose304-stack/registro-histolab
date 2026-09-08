@@ -23,6 +23,7 @@ import {
   calculateStudentAcademicSummary,
   getCanonicalExamGrade
 } from "../utils/academicEngine";
+import { isInstructorTitular } from "../utils/sectionRoleUtils";
 
 export default function WeeklyExamGradingView({
   seccion,
@@ -34,6 +35,8 @@ export default function WeeklyExamGradingView({
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+
+  const isTitular = useMemo(() => isInstructorTitular(currentInstructor, seccion), [currentInstructor, seccion]);
 
   // Referencia estable de notify
   const notifyRef = useRef(notify);
@@ -74,7 +77,7 @@ export default function WeeklyExamGradingView({
 
   // 1. Cargar datos del servidor
   const loadData = useCallback(async (isInitial = false) => {
-    if (!seccion?.id) return;
+    if (!seccion?.id || !isTitular) return;
     if (isInitial) setLoading(true);
 
     try {
@@ -567,6 +570,37 @@ export default function WeeklyExamGradingView({
         (e.numero_cuenta || "").toLowerCase().includes(s)
     );
   }, [estudiantes, searchTerm]);
+
+  if (!isTitular) {
+    return (
+      <div className="animate-fade-in" style={{ padding: "2.5rem 2rem", textAlign: "center", background: "#ffffff", borderRadius: "1rem", border: "1.5px solid #e2e8f0", maxWidth: "580px", margin: "3rem auto", boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.05)" }}>
+        <div style={{ width: "56px", height: "56px", borderRadius: "50%", background: "#fee2e2", color: "#dc2626", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 1.25rem" }}>
+          <GraduationCap size={28} />
+        </div>
+        <h3 style={{ fontSize: "1.25rem", fontWeight: 800, color: "#1e293b", marginBottom: "0.5rem" }}>Acceso Exclusivo del Instructor Titular</h3>
+        <p style={{ fontSize: "0.95rem", color: "#64748b", lineHeight: 1.5, marginBottom: "1.5rem" }}>
+          El módulo de <strong>Subir Nota de Examen Parcial</strong> está reservado únicamente para el <strong>Instructor Titular</strong> de la sección.
+        </p>
+        <button
+          onClick={onClose}
+          style={{
+            padding: "0.65rem 1.5rem",
+            background: "#4f46e5",
+            color: "#ffffff",
+            border: "none",
+            borderRadius: "0.75rem",
+            fontWeight: 700,
+            cursor: "pointer",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "0.5rem"
+          }}
+        >
+          <ArrowLeft size={16} /> Volver a la Sección
+        </button>
+      </div>
+    );
+  }
 
   if (loading) {
     return (
