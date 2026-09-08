@@ -1187,37 +1187,22 @@ export default function ReviewQuizSubmissionsView({
             gap: "1.25rem"
           }}
         >
-          {/* TARJETA DESTACADA: REVISIÓN RÁPIDA POR REACTIVO */}
+          {/* TARJETA DESTACADA: REVISIÓN RÁPIDA POR REACTIVO (DISEÑO MODO CLARO) */}
           <div
             style={{
-              background: "linear-gradient(135deg, #0f172a 0%, #1e293b 100%)",
+              background: "linear-gradient(135deg, #f0f9ff 0%, #ffffff 100%)",
               borderRadius: "1rem",
               border: "2px solid #38bdf8",
-              boxShadow: "0 8px 24px -4px rgba(2, 132, 199, 0.25)",
+              boxShadow: "0 4px 20px -2px rgba(2, 132, 199, 0.12)",
               padding: "1.4rem",
               display: "flex",
               flexDirection: "column",
               justifyContent: "space-between",
               gap: "1.1rem",
-              color: "#ffffff",
               position: "relative",
               overflow: "hidden"
             }}
           >
-            {/* Resplandor decorativo */}
-            <div
-              style={{
-                position: "absolute",
-                right: "-20px",
-                bottom: "-20px",
-                width: "120px",
-                height: "120px",
-                borderRadius: "50%",
-                background: "radial-gradient(circle, rgba(56, 189, 248, 0.18) 0%, transparent 70%)",
-                pointerEvents: "none"
-              }}
-            />
-
             <div>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "0.6rem" }}>
                 <span
@@ -1229,25 +1214,25 @@ export default function ReviewQuizSubmissionsView({
                     fontWeight: 900,
                     padding: "0.2rem 0.6rem",
                     borderRadius: "9999px",
-                    background: "rgba(56, 189, 248, 0.2)",
-                    color: "#38bdf8",
-                    border: "1px solid rgba(56, 189, 248, 0.4)",
+                    background: "#e0f2fe",
+                    color: "#0284c7",
+                    border: "1px solid #bae6fd",
                     letterSpacing: "0.05em",
                     textTransform: "uppercase"
                   }}
                 >
-                  <Zap size={13} />
+                  <Zap size={13} color="#0284c7" />
                   Modo Continuo
                 </span>
-                <span style={{ fontSize: "0.74rem", color: "#94a3b8", fontWeight: 700 }}>
+                <span style={{ fontSize: "0.74rem", color: "#64748b", fontWeight: 700 }}>
                   {entregasSemana.length} {entregasSemana.length === 1 ? "entrega" : "entregas"}
                 </span>
               </div>
 
-              <h3 style={{ margin: "0 0 0.4rem", fontSize: "1.25rem", fontWeight: 900, color: "#ffffff" }}>
+              <h3 style={{ margin: "0 0 0.4rem", fontSize: "1.25rem", fontWeight: 900, color: "#0f172a" }}>
                 ⚡ Revisión Rápida
               </h3>
-              <p style={{ margin: 0, fontSize: "0.84rem", color: "#cbd5e1", lineHeight: 1.45 }}>
+              <p style={{ margin: 0, fontSize: "0.84rem", color: "#475569", lineHeight: 1.45 }}>
                 Califica la misma pregunta para todos los estudiantes de forma ágil y consecutiva: primero la Pregunta 1 a todos, luego la 2, 3, 4, 5 y por último el reactivo Bonus.
               </p>
             </div>
@@ -1267,12 +1252,12 @@ export default function ReviewQuizSubmissionsView({
                 border: "none",
                 background: entregasSemana.length > 0
                   ? "linear-gradient(135deg, #0284c7 0%, #0369a1 100%)"
-                  : "#334155",
+                  : "#cbd5e1",
                 color: "#ffffff",
                 fontSize: "0.88rem",
                 fontWeight: 800,
                 cursor: entregasSemana.length > 0 ? "pointer" : "not-allowed",
-                boxShadow: entregasSemana.length > 0 ? "0 4px 14px rgba(2, 132, 199, 0.35)" : "none",
+                boxShadow: entregasSemana.length > 0 ? "0 4px 14px rgba(2, 132, 199, 0.28)" : "none",
                 transition: "all 0.15s ease"
               }}
             >
