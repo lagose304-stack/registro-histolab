@@ -326,37 +326,6 @@ export default function ReviewQuizSubmissionsView({
     });
   };
 
-  // Marcar todas las casillas de un apartado como Buenas o Malas de un solo clic
-  const handleEvaluateAllSlotsInItem = (preguntaId, itemId, totalSlots, status, slotMaxPoints) => {
-    const numMax = Number(slotMaxPoints) || 0;
-    setEvaluaciones((prev) => {
-      const clean = { ...prev };
-      delete clean[`${preguntaId}___${itemId}`];
-
-      for (let s = 0; s < totalSlots; s++) {
-        let earned = 0;
-        if (status === "buena") earned = numMax;
-        else if (status === "regular") earned = Math.round((numMax / 2) * 1000) / 1000;
-        else earned = 0;
-
-        clean[`${preguntaId}___${itemId}___slot_${s}`] = {
-          estado: status,
-          puntos_obtenidos: earned,
-          puntos_max: numMax,
-          pregunta_id: preguntaId,
-          item_id: itemId,
-          slot_idx: s
-        };
-      }
-
-      const totalRaw = Object.values(clean).reduce((sum, item) => sum + (Number(item.puntos_obtenidos) || 0), 0);
-      const cleanRaw = Math.round(totalRaw * 1000) / 1000;
-      const capped = Math.min(5.0, cleanRaw);
-      setNotaInput(capped.toFixed(3));
-      setNotaRealInput(cleanRaw.toFixed(3));
-      return clean;
-    });
-  };
 
   // Marcar toda la prueba de un solo clic (desglosando casillas en listados)
   const handleMarkAll = (status) => {
@@ -628,103 +597,6 @@ export default function ReviewQuizSubmissionsView({
     });
   };
 
-  // Evaluar todas las casillas de un apartado de listado en Revisión Rápida
-  const handleQuickEvaluateAllSlotsInItem = (entregaId, preguntaId, itemId, totalSlots, status, slotMaxPoints) => {
-    const numMax = Number(slotMaxPoints) || 0;
-    setQuickEvaluations((prev) => {
-      const studentMap = { ...(prev[entregaId] || {}) };
-      delete studentMap[`${preguntaId}___${itemId}`];
-
-      for (let s = 0; s < totalSlots; s++) {
-        let earned = 0;
-        if (status === "buena") earned = numMax;
-        else if (status === "regular") earned = Math.round((numMax / 2) * 1000) / 1000;
-        else earned = 0;
-
-        studentMap[`${preguntaId}___${itemId}___slot_${s}`] = {
-          estado: status,
-          puntos_obtenidos: earned,
-          puntos_max: numMax,
-          pregunta_id: preguntaId,
-          item_id: itemId,
-          slot_idx: s
-        };
-      }
-
-      return {
-        ...prev,
-        [entregaId]: studentMap
-      };
-    });
-  };
-
-  // Evaluar todos los apartados de la pregunta actual para el alumno actual (Todo Bueno / Todo Malo)
-  const handleQuickEvaluateAllInQuestion = (entregaId, pregunta, status) => {
-    if (!pregunta) return;
-    setQuickEvaluations((prev) => {
-      const studentMap = { ...(prev[entregaId] || {}) };
-      if (!pregunta.items || pregunta.items.length === 0) {
-        const maxPts = Number(pregunta.puntos) || 1.0;
-        let earned = 0;
-        if (status === "buena") earned = maxPts;
-        else if (status === "regular") earned = Math.round((maxPts / 2) * 1000) / 1000;
-        else earned = 0;
-
-        studentMap[`${pregunta.id}___direct`] = {
-          estado: status,
-          puntos_obtenidos: earned,
-          puntos_max: maxPts,
-          pregunta_id: pregunta.id,
-          item_id: null
-        };
-      } else {
-        pregunta.items.forEach((item) => {
-          const defaultItemPts = Math.round((Number(pregunta.puntos || 1.0) / pregunta.items.length) * 1000) / 1000;
-          const itemMaxPts = item.puntos !== undefined && !isNaN(Number(item.puntos)) ? Number(item.puntos) : defaultItemPts;
-          const isList = item.tipo !== "texto_corto";
-          const cantSlots = isList ? (parseInt(item.cantidad, 10) || 3) : 1;
-          const slotPts = isList ? Math.round((itemMaxPts / cantSlots) * 1000) / 1000 : itemMaxPts;
-
-          if (isList) {
-            delete studentMap[`${pregunta.id}___${item.id}`];
-            for (let s = 0; s < cantSlots; s++) {
-              let earned = 0;
-              if (status === "buena") earned = slotPts;
-              else if (status === "regular") earned = Math.round((slotPts / 2) * 1000) / 1000;
-              else earned = 0;
-
-              studentMap[`${pregunta.id}___${item.id}___slot_${s}`] = {
-                estado: status,
-                puntos_obtenidos: earned,
-                puntos_max: slotPts,
-                pregunta_id: pregunta.id,
-                item_id: item.id,
-                slot_idx: s
-              };
-            }
-          } else {
-            let earned = 0;
-            if (status === "buena") earned = itemMaxPts;
-            else if (status === "regular") earned = Math.round((itemMaxPts / 2) * 1000) / 1000;
-            else earned = 0;
-
-            studentMap[`${pregunta.id}___${item.id}`] = {
-              estado: status,
-              puntos_obtenidos: earned,
-              puntos_max: itemMaxPts,
-              pregunta_id: pregunta.id,
-              item_id: item.id
-            };
-          }
-        });
-      }
-
-      return {
-        ...prev,
-        [entregaId]: studentMap
-      };
-    });
-  };
 
   // Verificar si la pregunta actual está 100% evaluada para el estudiante
   const getQuestionEvaluationStatus = (pregunta, studentEvaluations) => {
@@ -2345,7 +2217,7 @@ export default function ReviewQuizSubmissionsView({
                                     </span>
                                   </div>
 
-                                  {/* Resumen de puntos del listado y acciones rápidas */}
+                                  {/* Resumen de puntos del listado */}
                                   <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", flexWrap: "wrap" }}>
                                     <span
                                       style={{
@@ -2361,42 +2233,6 @@ export default function ReviewQuizSubmissionsView({
                                       Obtenido: +{earnedInSlots.toFixed(3)} / {itemMaxPts.toFixed(3)} pts
                                       {malasInSlots > 0 && ` (–${lostInSlots.toFixed(3)} pts por ${malasInSlots} fallas)`}
                                     </span>
-
-                                    <button
-                                      type="button"
-                                      onClick={() => handleEvaluateAllSlotsInItem(pregunta.id, item.id, cantSlots, "buena", slotPts)}
-                                      style={{
-                                        padding: "0.22rem 0.5rem",
-                                        borderRadius: "0.35rem",
-                                        border: "1px solid #86efac",
-                                        background: "#f0fdf4",
-                                        color: "#15803d",
-                                        fontSize: "0.72rem",
-                                        fontWeight: 800,
-                                        cursor: "pointer"
-                                      }}
-                                      title="Marcar todas las respuestas de este apartado como buenas"
-                                    >
-                                      ⚡ Todas Buenas
-                                    </button>
-
-                                    <button
-                                      type="button"
-                                      onClick={() => handleEvaluateAllSlotsInItem(pregunta.id, item.id, cantSlots, "mala", slotPts)}
-                                      style={{
-                                        padding: "0.22rem 0.5rem",
-                                        borderRadius: "0.35rem",
-                                        border: "1px solid #fca5a5",
-                                        background: "#fef2f2",
-                                        color: "#dc2626",
-                                        fontSize: "0.72rem",
-                                        fontWeight: 800,
-                                        cursor: "pointer"
-                                      }}
-                                      title="Marcar todas las respuestas de este apartado como malas"
-                                    >
-                                      Todas Malas
-                                    </button>
                                   </div>
                                 </div>
 
@@ -3251,43 +3087,7 @@ export default function ReviewQuizSubmissionsView({
                             </span>
                           </div>
 
-                          {/* Botones de acción rápida en esta pregunta */}
-                          <div style={{ display: "flex", gap: "0.35rem" }}>
-                            <button
-                              type="button"
-                              onClick={() => handleQuickEvaluateAllInQuestion(currentStudent.id, currentQ, "buena")}
-                              style={{
-                                padding: "0.25rem 0.55rem",
-                                borderRadius: "0.35rem",
-                                border: "1px solid #86efac",
-                                background: "#f0fdf4",
-                                color: "#15803d",
-                                fontSize: "0.72rem",
-                                fontWeight: 800,
-                                cursor: "pointer"
-                              }}
-                              title="Marcar todo este reactivo como Bueno para este alumno"
-                            >
-                              ⚡ Todo Bueno
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleQuickEvaluateAllInQuestion(currentStudent.id, currentQ, "mala")}
-                              style={{
-                                padding: "0.25rem 0.55rem",
-                                borderRadius: "0.35rem",
-                                border: "1px solid #fca5a5",
-                                background: "#fef2f2",
-                                color: "#dc2626",
-                                fontSize: "0.72rem",
-                                fontWeight: 800,
-                                cursor: "pointer"
-                              }}
-                              title="Marcar todo este reactivo como Malo para este alumno"
-                            >
-                              Todo Malo
-                            </button>
-                          </div>
+
                         </div>
 
                         {/* Contenido de Respuestas del Estudiante */}
@@ -3486,22 +3286,6 @@ export default function ReviewQuizSubmissionsView({
                                     <strong style={{ fontSize: "0.82rem", color: "#334155" }}>
                                       {String.fromCharCode(97 + itemIdx)}) {itemLabel} ({cantSlots} casillas • {slotPts.toFixed(3)} pt c/u):
                                     </strong>
-                                    <div style={{ display: "flex", gap: "0.3rem" }}>
-                                      <button
-                                        type="button"
-                                        onClick={() => handleQuickEvaluateAllSlotsInItem(currentStudent.id, currentQ.id, item.id, cantSlots, "buena", slotPts)}
-                                        style={{ padding: "0.15rem 0.4rem", fontSize: "0.7rem", fontWeight: 800, background: "#f0fdf4", color: "#15803d", border: "1px solid #86efac", borderRadius: "0.3rem", cursor: "pointer" }}
-                                      >
-                                        Todas Buenas
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => handleQuickEvaluateAllSlotsInItem(currentStudent.id, currentQ.id, item.id, cantSlots, "mala", slotPts)}
-                                        style={{ padding: "0.15rem 0.4rem", fontSize: "0.7rem", fontWeight: 800, background: "#fef2f2", color: "#dc2626", border: "1px solid #fca5a5", borderRadius: "0.3rem", cursor: "pointer" }}
-                                      >
-                                        Todas Malas
-                                      </button>
-                                    </div>
                                   </div>
 
                                   {/* Listado de Casillas */}
