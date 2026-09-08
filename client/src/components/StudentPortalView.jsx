@@ -3625,30 +3625,122 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                             const evalItem = evaluaciones[`${pregunta.id}___direct`];
 
                             return (
-                              <div style={{ background: "#ffffff", padding: "0.85rem 1rem", borderRadius: "0.55rem", border: "1px solid #e2e8f0", display: "flex", flexDirection: "column", gap: "0.5rem" }}>
-                                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "0.4rem" }}>
-                                  <strong style={{ fontSize: "0.82rem", color: "#475569" }}>
-                                    Respuesta:
-                                  </strong>
-                                  {isGraded && evalItem && (
-                                    <span
-                                      style={{
-                                        fontSize: "0.74rem",
-                                        fontWeight: 800,
-                                        padding: "0.15rem 0.5rem",
-                                        borderRadius: "0.35rem",
-                                        background: evalItem.estado === "buena" ? "#dcfce7" : evalItem.estado === "regular" ? "#fef3c7" : "#fee2e2",
-                                        color: evalItem.estado === "buena" ? "#15803d" : evalItem.estado === "regular" ? "#b45309" : "#dc2626",
-                                        border: `1px solid ${evalItem.estado === "buena" ? "#86efac" : evalItem.estado === "regular" ? "#fde68a" : "#fca5a5"}`
-                                      }}
-                                    >
-                                      {evalItem.estado === "buena" ? `✓ Correcta (+${Number(evalItem.puntos_obtenidos || 0).toFixed(3)} pts)` : evalItem.estado === "regular" ? `½ Regular (+${Number(evalItem.puntos_obtenidos || 0).toFixed(3)} pts)` : "✗ Incorrecta (0 pts)"}
-                                    </span>
-                                  )}
+                              <div
+                                style={{
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "space-between",
+                                  flexWrap: "wrap",
+                                  gap: "0.6rem",
+                                  padding: "0.65rem 0.85rem",
+                                  borderRadius: "0.55rem",
+                                  background:
+                                    !isGraded || !evalItem
+                                      ? "#f8fafc"
+                                      : evalItem.estado === "buena"
+                                      ? "#f0fdf4"
+                                      : evalItem.estado === "regular"
+                                      ? "#fffbeb"
+                                      : "#fef2f2",
+                                  border:
+                                    !isGraded || !evalItem
+                                      ? "1px solid #e2e8f0"
+                                      : evalItem.estado === "buena"
+                                      ? "1.5px solid #86efac"
+                                      : evalItem.estado === "regular"
+                                      ? "1.5px solid #fde68a"
+                                      : "1.5px solid #fca5a5",
+                                  transition: "all 0.15s ease"
+                                }}
+                              >
+                                <div style={{ display: "flex", alignItems: "center", gap: "0.55rem", flex: 1, minWidth: "200px" }}>
+                                  <span
+                                    style={{
+                                      width: "22px",
+                                      height: "22px",
+                                      borderRadius: "50%",
+                                      background: "#ffffff",
+                                      border: "1px solid #cbd5e1",
+                                      color: "#0284c7",
+                                      display: "flex",
+                                      alignItems: "center",
+                                      justifyContent: "center",
+                                      fontSize: "0.72rem",
+                                      fontWeight: 800,
+                                      flexShrink: 0
+                                    }}
+                                  >
+                                    ✍️
+                                  </span>
+                                  <span
+                                    style={{
+                                      fontSize: "0.88rem",
+                                      fontWeight: 700,
+                                      color: directAnswer && String(directAnswer).trim() ? "#0f172a" : "#94a3b8",
+                                      fontStyle: directAnswer && String(directAnswer).trim() ? "normal" : "italic"
+                                    }}
+                                  >
+                                    {directAnswer && String(directAnswer).trim() ? directAnswer : "Sin respuesta enviada"}
+                                  </span>
                                 </div>
-                                <div style={{ fontSize: "0.88rem", fontWeight: 700, color: "#0f172a" }}>
-                                  {directAnswer || <span style={{ color: "#94a3b8", fontStyle: "italic" }}>Sin respuesta</span>}
-                                </div>
+
+                                {/* Retroalimentación individual */}
+                                {isGraded && (
+                                  <div>
+                                    {evalItem ? (
+                                      <span
+                                        style={{
+                                          display: "inline-flex",
+                                          alignItems: "center",
+                                          gap: "0.3rem",
+                                          fontSize: "0.74rem",
+                                          fontWeight: 800,
+                                          padding: "0.2rem 0.55rem",
+                                          borderRadius: "0.35rem",
+                                          background:
+                                            evalItem.estado === "buena"
+                                              ? "#dcfce7"
+                                              : evalItem.estado === "regular"
+                                              ? "#fef3c7"
+                                              : "#fee2e2",
+                                          color:
+                                            evalItem.estado === "buena"
+                                              ? "#15803d"
+                                              : evalItem.estado === "regular"
+                                              ? "#b45309"
+                                              : "#dc2626",
+                                          border: `1px solid ${
+                                            evalItem.estado === "buena"
+                                              ? "#86efac"
+                                              : evalItem.estado === "regular"
+                                              ? "#fde68a"
+                                              : "#fca5a5"
+                                          }`
+                                        }}
+                                      >
+                                        {evalItem.estado === "buena" ? (
+                                          <>
+                                            <Check size={13} strokeWidth={3} />
+                                            <span>Correcta (+{Number(evalItem.puntos_obtenidos || 0).toFixed(3)} pts)</span>
+                                          </>
+                                        ) : evalItem.estado === "regular" ? (
+                                          <>
+                                            <span>½ Regular (+{Number(evalItem.puntos_obtenidos || 0).toFixed(3)} pts)</span>
+                                          </>
+                                        ) : (
+                                          <>
+                                            <X size={13} strokeWidth={3} />
+                                            <span>Incorrecta (0.000 pts)</span>
+                                          </>
+                                        )}
+                                      </span>
+                                    ) : (
+                                      <span style={{ fontSize: "0.72rem", color: "#94a3b8", fontStyle: "italic" }}>
+                                        Sin calificar
+                                      </span>
+                                    )}
+                                  </div>
+                                )}
                               </div>
                             );
                           }
@@ -3759,20 +3851,123 @@ export default function StudentPortalView({ student, notify = () => {} }) {
 
                                 {/* Contenido de Respuestas */}
                                 {!isList ? (
-                                  /* Apartado Texto Corto */
+                                  /* Apartado Texto Corto - RETROALIMENTACIÓN INDIVIDUAL */
                                   <div
                                     style={{
-                                      padding: "0.6rem 0.8rem",
+                                      display: "flex",
+                                      alignItems: "center",
+                                      justifyContent: "space-between",
+                                      flexWrap: "wrap",
+                                      gap: "0.5rem",
+                                      padding: "0.55rem 0.75rem",
                                       borderRadius: "0.5rem",
-                                      background: "#f8fafc",
-                                      border: "1px solid #e2e8f0",
-                                      fontSize: "0.9rem",
-                                      fontWeight: 700,
-                                      color: typeof userAns === "string" && userAns.trim() ? "#0f172a" : "#94a3b8",
-                                      fontStyle: typeof userAns === "string" && userAns.trim() ? "normal" : "italic"
+                                      background:
+                                        !isGraded || !evalItem
+                                          ? "#f8fafc"
+                                          : evalItem.estado === "buena"
+                                          ? "#f0fdf4"
+                                          : evalItem.estado === "regular"
+                                          ? "#fffbeb"
+                                          : "#fef2f2",
+                                      border:
+                                        !isGraded || !evalItem
+                                          ? "1px solid #e2e8f0"
+                                          : evalItem.estado === "buena"
+                                          ? "1.5px solid #86efac"
+                                          : evalItem.estado === "regular"
+                                          ? "1.5px solid #fde68a"
+                                          : "1.5px solid #fca5a5",
+                                      transition: "all 0.15s ease"
                                     }}
                                   >
-                                    {typeof userAns === "string" && userAns.trim() ? userAns : "Sin respuesta enviada"}
+                                    <div style={{ display: "flex", alignItems: "center", gap: "0.55rem", flex: 1, minWidth: "200px" }}>
+                                      <span
+                                        style={{
+                                          width: "22px",
+                                          height: "22px",
+                                          borderRadius: "50%",
+                                          background: "#ffffff",
+                                          border: "1px solid #cbd5e1",
+                                          color: "#0284c7",
+                                          display: "flex",
+                                          alignItems: "center",
+                                          justifyContent: "center",
+                                          fontSize: "0.72rem",
+                                          fontWeight: 800,
+                                          flexShrink: 0
+                                        }}
+                                      >
+                                        ✍️
+                                      </span>
+                                      <span
+                                        style={{
+                                          fontSize: "0.88rem",
+                                          fontWeight: 700,
+                                          color: typeof userAns === "string" && userAns.trim() ? "#0f172a" : "#94a3b8",
+                                          fontStyle: typeof userAns === "string" && userAns.trim() ? "normal" : "italic"
+                                        }}
+                                      >
+                                        {typeof userAns === "string" && userAns.trim() ? userAns : "Sin respuesta enviada"}
+                                      </span>
+                                    </div>
+
+                                    {/* Retroalimentación individual de texto corto */}
+                                    {isGraded && (
+                                      <div>
+                                        {evalItem ? (
+                                          <span
+                                            style={{
+                                              display: "inline-flex",
+                                              alignItems: "center",
+                                              gap: "0.3rem",
+                                              fontSize: "0.74rem",
+                                              fontWeight: 800,
+                                              padding: "0.2rem 0.55rem",
+                                              borderRadius: "0.35rem",
+                                              background:
+                                                evalItem.estado === "buena"
+                                                  ? "#dcfce7"
+                                                  : evalItem.estado === "regular"
+                                                  ? "#fef3c7"
+                                                  : "#fee2e2",
+                                              color:
+                                                evalItem.estado === "buena"
+                                                  ? "#15803d"
+                                                  : evalItem.estado === "regular"
+                                                  ? "#b45309"
+                                                  : "#dc2626",
+                                              border: `1px solid ${
+                                                evalItem.estado === "buena"
+                                                  ? "#86efac"
+                                                  : evalItem.estado === "regular"
+                                                  ? "#fde68a"
+                                                  : "#fca5a5"
+                                              }`
+                                            }}
+                                          >
+                                            {evalItem.estado === "buena" ? (
+                                              <>
+                                                <Check size={13} strokeWidth={3} />
+                                                <span>Correcta (+{Number(evalItem.puntos_obtenidos || 0).toFixed(3)} pts)</span>
+                                              </>
+                                            ) : evalItem.estado === "regular" ? (
+                                              <>
+                                                <span>½ Regular (+{Number(evalItem.puntos_obtenidos || 0).toFixed(3)} pts)</span>
+                                              </>
+                                            ) : (
+                                              <>
+                                                <X size={13} strokeWidth={3} />
+                                                <span>Incorrecta (0.000 pts)</span>
+                                              </>
+                                            )}
+                                          </span>
+                                        ) : (
+                                          <span style={{ fontSize: "0.72rem", color: "#94a3b8", fontStyle: "italic" }}>
+                                            Sin calificar
+                                          </span>
+                                        )}
+                                      </div>
+                                    )}
                                   </div>
                                 ) : (
                                   /* Apartado Listado con Múltiples Casillas - RETROALIMENTACIÓN INDIVIDUAL */
