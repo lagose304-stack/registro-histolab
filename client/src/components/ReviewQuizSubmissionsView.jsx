@@ -27,6 +27,7 @@ import {
   Trophy
 } from "lucide-react";
 import { api } from "../services/api";
+import { safeStorage } from "../utils/safeStorage";
 
 export default function ReviewQuizSubmissionsView({
   seccion,
@@ -511,7 +512,7 @@ export default function ReviewQuizSubmissionsView({
   // FUNCIONES DE REVISIÓN RÁPIDA (REACTIVO POR REACTIVO A TODOS LOS ALUMNOS)
   // =========================================================================
 
-  // Iniciar Revisión Rápida
+  // Iniciar o Reanudar Revisión Rápida
   const handleOpenQuickReview = () => {
     if (!entregasSemana || entregasSemana.length === 0) {
       notifyRef.current("No hay entregas recibidas en esta semana para revisar.", "warning");
@@ -528,20 +529,60 @@ export default function ReviewQuizSubmissionsView({
       const existing = e.evaluaciones_incisos || e.auditoria?.evaluaciones_incisos || {};
       initialMap[e.id] = { ...existing };
     });
-
     setQuickEvaluations(initialMap);
-    setQuickQuestionIdx(0);
-    setQuickStudentIdx(0);
-    setQuickQuestionFinishedPrompt(false);
+
+    const totalQuestions = (quizSemanal?.preguntas || []).length || 6;
+    const posKey = `histolab_quick_pos_${seccion?.id || seccion?.codigo || "sec"}_sem_${selectedSemana}`;
+
+    let targetQuestionIdx = quickQuestionIdx;
+    let targetStudentIdx = quickStudentIdx;
+    let targetFinishedPrompt = quickQuestionFinishedPrompt;
+
+    try {
+      const raw = safeStorage.getItem(posKey);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (typeof parsed.questionIdx === "number") targetQuestionIdx = parsed.questionIdx;
+        if (typeof parsed.studentIdx === "number") targetStudentIdx = parsed.studentIdx;
+        if (typeof parsed.finishedPrompt === "boolean") targetFinishedPrompt = parsed.finishedPrompt;
+      }
+    } catch (e) {
+      console.warn("Aviso al recuperar posición previa de revisión rápida:", e);
+    }
+
+    // Validar límites de seguridad
+    if (targetQuestionIdx < 0 || targetQuestionIdx >= totalQuestions) {
+      targetQuestionIdx = 0;
+    }
+    if (targetStudentIdx < 0 || targetStudentIdx >= entregasSemana.length) {
+      targetStudentIdx = 0;
+    }
+
+    setQuickQuestionIdx(targetQuestionIdx);
+    setQuickStudentIdx(targetStudentIdx);
+    setQuickQuestionFinishedPrompt(targetFinishedPrompt);
     setQuickAllCompleted(false);
     setShowQuickReviewModal(true);
+
+    if (targetQuestionIdx > 0 || targetStudentIdx > 0) {
+      const studentName = entregasSemana[targetStudentIdx]?.nombre_completo || `Estudiante ${targetStudentIdx + 1}`;
+      notifyRef.current(`Reanudando revisión en Pregunta ${targetQuestionIdx + 1} (${studentName})`, "info");
+    }
   };
 
   // Cerrar Revisión Rápida
   const handleCloseQuickReview = () => {
+    try {
+      const posKey = `histolab_quick_pos_${seccion?.id || seccion?.codigo || "sec"}_sem_${selectedSemana}`;
+      safeStorage.setItem(posKey, JSON.stringify({
+        questionIdx: quickQuestionIdx,
+        studentIdx: quickStudentIdx,
+        finishedPrompt: quickQuestionFinishedPrompt
+      }));
+    } catch (_) {}
+
     setShowQuickReviewModal(false);
-    setQuickQuestionFinishedPrompt(false);
-    setQuickAllCompleted(false);
+    setQuickStudentLoading(null);
   };
 
   // Evaluar ítem directo o texto corto en Revisión Rápida
@@ -720,12 +761,29 @@ export default function ReviewQuizSubmissionsView({
 
       // Comprobar si aún quedan estudiantes en esta pregunta
       if (hasNextStudent) {
-        setQuickStudentIdx((prev) => prev + 1);
+        const nextStudentIdx = quickStudentIdx + 1;
+        setQuickStudentIdx(nextStudentIdx);
+        try {
+          const posKey = `histolab_quick_pos_${seccion?.id || seccion?.codigo || "sec"}_sem_${selectedSemana}`;
+          safeStorage.setItem(posKey, JSON.stringify({
+            questionIdx: quickQuestionIdx,
+            studentIdx: nextStudentIdx,
+            finishedPrompt: false
+          }));
+        } catch (_) {}
       } else {
         // Se terminaron de calificar todos los estudiantes para esta pregunta
         const totalQuestions = (quizSemanal?.preguntas || []).length || 6;
         if (quickQuestionIdx < totalQuestions - 1) {
           setQuickQuestionFinishedPrompt(true);
+          try {
+            const posKey = `histolab_quick_pos_${seccion?.id || seccion?.codigo || "sec"}_sem_${selectedSemana}`;
+            safeStorage.setItem(posKey, JSON.stringify({
+              questionIdx: quickQuestionIdx,
+              studentIdx: quickStudentIdx,
+              finishedPrompt: true
+            }));
+          } catch (_) {}
         } else {
           // Se completaron todas las preguntas para todos los alumnos
           setQuickAllCompleted(true);
@@ -743,25 +801,35 @@ export default function ReviewQuizSubmissionsView({
   // Pasar a la siguiente pregunta tras completar a todos los estudiantes
   const handleQuickNextQuestion = async () => {
     const firstStudent = entregasSemana[0];
+    const nextQIdx = quickQuestionIdx + 1;
     setQuickQuestionFinishedPrompt(false);
     setQuickStudentLoading({
-      title: `Cargando Pregunta ${quickQuestionIdx + 2}...`,
+      title: `Cargando Pregunta ${nextQIdx + 1}...`,
       subtitle: "Preparando reactivos y respuestas para el primer estudiante:",
       studentName: firstStudent ? firstStudent.nombre_completo : "",
       studentCuenta: firstStudent ? firstStudent.numero_cuenta : "",
-      stepInfo: `Estudiante 1 de ${entregasSemana.length} • Pregunta ${quickQuestionIdx + 2}`,
+      stepInfo: `Estudiante 1 de ${entregasSemana.length} • Pregunta ${nextQIdx + 1}`,
       type: "question"
     });
     await new Promise((r) => setTimeout(r, 550));
-    setQuickQuestionIdx((prev) => prev + 1);
+    setQuickQuestionIdx(nextQIdx);
     setQuickStudentIdx(0);
     setQuickStudentLoading(null);
+    try {
+      const posKey = `histolab_quick_pos_${seccion?.id || seccion?.codigo || "sec"}_sem_${selectedSemana}`;
+      safeStorage.setItem(posKey, JSON.stringify({
+        questionIdx: nextQIdx,
+        studentIdx: 0,
+        finishedPrompt: false
+      }));
+    } catch (_) {}
   };
 
   // Retroceder al estudiante anterior en la misma pregunta
   const handleQuickPrevious = async () => {
     if (quickStudentIdx > 0) {
-      const prevStudent = entregasSemana[quickStudentIdx - 1];
+      const prevStudentIdx = quickStudentIdx - 1;
+      const prevStudent = entregasSemana[prevStudentIdx];
       setQuickStudentLoading({
         title: "Cargando estudiante anterior...",
         subtitle: "Cargando respuestas y calificaciones registradas de:",
@@ -771,8 +839,16 @@ export default function ReviewQuizSubmissionsView({
         type: "prev"
       });
       await new Promise((r) => setTimeout(r, 450));
-      setQuickStudentIdx((prev) => prev - 1);
+      setQuickStudentIdx(prevStudentIdx);
       setQuickStudentLoading(null);
+      try {
+        const posKey = `histolab_quick_pos_${seccion?.id || seccion?.codigo || "sec"}_sem_${selectedSemana}`;
+        safeStorage.setItem(posKey, JSON.stringify({
+          questionIdx: quickQuestionIdx,
+          studentIdx: prevStudentIdx,
+          finishedPrompt: false
+        }));
+      } catch (_) {}
     }
   };
 
@@ -3095,15 +3171,32 @@ export default function ReviewQuizSubmissionsView({
                           Semana {selectedSemana} • Sección {seccion?.codigo || ""}
                         </span>
 
-                        {/* Pills de Preguntas */}
+                        {/* Pills de Preguntas (Navegables) */}
                         <div style={{ display: "flex", alignItems: "center", gap: "0.3rem", marginLeft: "0.5rem" }}>
                           {(quizSemanal?.preguntas || []).map((q, idx) => {
                             const isCur = idx === quickQuestionIdx;
                             const isPast = idx < quickQuestionIdx;
                             const isQBonus = idx === 5;
                             return (
-                              <span
+                              <button
                                 key={q.id || idx}
+                                type="button"
+                                onClick={() => {
+                                  if (quickSaving) return;
+                                  setQuickQuestionFinishedPrompt(false);
+                                  setQuickAllCompleted(false);
+                                  setQuickQuestionIdx(idx);
+                                  setQuickStudentIdx(0);
+                                  try {
+                                    const posKey = `histolab_quick_pos_${seccion?.id || seccion?.codigo || "sec"}_sem_${selectedSemana}`;
+                                    safeStorage.setItem(posKey, JSON.stringify({
+                                      questionIdx: idx,
+                                      studentIdx: 0,
+                                      finishedPrompt: false
+                                    }));
+                                  } catch (_) {}
+                                }}
+                                title={`Ir a Pregunta ${idx + 1}`}
                                 style={{
                                   fontSize: "0.72rem",
                                   fontWeight: 800,
@@ -3111,11 +3204,13 @@ export default function ReviewQuizSubmissionsView({
                                   borderRadius: "0.35rem",
                                   background: isCur ? (isQBonus ? "#f59e0b" : "#0284c7") : isPast ? "#dcfce7" : "#e2e8f0",
                                   color: isCur ? "#ffffff" : isPast ? "#15803d" : "#64748b",
-                                  border: isCur ? (isQBonus ? "1.5px solid #d97706" : "1.5px solid #0369a1") : "1px solid #cbd5e1"
+                                  border: isCur ? (isQBonus ? "1.5px solid #d97706" : "1.5px solid #0369a1") : "1px solid #cbd5e1",
+                                  cursor: "pointer",
+                                  transition: "all 0.15s ease"
                                 }}
                               >
                                 {isPast ? "✓ " : ""}{isQBonus ? "⭐ Bonus" : `P${idx + 1}`}
-                              </span>
+                              </button>
                             );
                           })}
                         </div>
