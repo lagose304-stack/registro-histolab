@@ -8,7 +8,6 @@ import {
   GraduationCap,
   Sparkles,
   ShieldCheck,
-  Award,
   CalendarCheck,
   Users,
   Search,
@@ -34,7 +33,6 @@ import SectionGradebookView from "./SectionGradebookView";
 import SectionAssignmentsView from "./SectionAssignmentsView";
 import WeeklyAttendanceTakingView from "./WeeklyAttendanceTakingView";
 import WeeklyManualsGradingView from "./WeeklyManualsGradingView";
-import WeeklyQuizGradingView from "./WeeklyQuizGradingView";
 import WeeklyExamGradingView from "./WeeklyExamGradingView";
 import SectionDataMigrationView from "./SectionDataMigrationView";
 import WeeklyQuizCreationView from "./WeeklyQuizCreationView";
@@ -771,68 +769,6 @@ export default function CoordinatorSectionView({
                 </div>
               </div>
 
-              {/* 3. Subir nota de Prueba semanal */}
-              <div
-                onClick={() => setActiveModule("subir_prueba")}
-                style={{
-                  background: "#ffffff",
-                  borderRadius: "1rem",
-                  border: "1.5px solid #bbf7d0",
-                  boxShadow: "0 6px 18px -4px rgba(22, 163, 74, 0.08)",
-                  padding: "1.5rem",
-                  display: "flex",
-                  flexDirection: "column",
-                  justifyContent: "space-between",
-                  gap: "1rem",
-                  cursor: "pointer",
-                  transition: "all 0.15s ease"
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.transform = "translateY(-3px)";
-                  e.currentTarget.style.borderColor = "#16a34a";
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.transform = "translateY(0)";
-                  e.currentTarget.style.borderColor = "#bbf7d0";
-                }}
-              >
-                <div style={{ display: "flex", alignItems: "center", gap: "0.85rem" }}>
-                  <div
-                    style={{
-                      width: "48px",
-                      height: "48px",
-                      borderRadius: "0.75rem",
-                      background: "linear-gradient(135deg, #16a34a 0%, #15803d 100%)",
-                      color: "#ffffff",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      flexShrink: 0
-                    }}
-                  >
-                    <Award size={24} />
-                  </div>
-
-                  <div>
-                    <h3 style={{ fontSize: "1.1rem", fontWeight: 800, color: "#0f172a", margin: 0 }}>
-                      Subir nota de Prueba semanal
-                    </h3>
-                    <span style={{ fontSize: "0.8rem", color: "#64748b" }}>
-                      Calificación de prueba corta (Máx. 5.000 pts c/u)
-                    </span>
-                  </div>
-                </div>
-
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: "0.75rem", color: "#15803d", fontWeight: 800 }}>
-                  <span style={{ background: "#f0fdf4", padding: "0.15rem 0.5rem", borderRadius: "9999px" }}>
-                    Subir Nota
-                  </span>
-                  <div style={{ display: "flex", alignItems: "center", gap: "0.2rem" }}>
-                    <span>Abrir</span>
-                    <ArrowRight size={14} />
-                  </div>
-                </div>
-              </div>
 
               {/* 4. Subir Nota de Examen parcial */}
               <div
@@ -1331,15 +1267,6 @@ export default function CoordinatorSectionView({
         />
       )}
 
-      {activeModule === "subir_prueba" && (
-        <WeeklyQuizGradingView
-          seccion={seccion}
-          currentInstructor={currentInstructor}
-          hideBackButton={false}
-          onClose={() => setActiveModule(null)}
-          notify={notify}
-        />
-      )}
 
       {activeModule === "subir_examen" && (
         <WeeklyExamGradingView
