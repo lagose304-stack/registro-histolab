@@ -9,7 +9,7 @@ const RAW_BASE = (import.meta.env.VITE_API_URL || "").trim().replace(/\/+$/, "")
 const API_BASE = RAW_BASE ? `${RAW_BASE}/api` : "/api";
 
 function getAuthHeaders() {
-  const token = safeStorage.getItem("histolab_instructor_token");
+  const token = safeStorage.getItem("histolab_instructor_token") || safeStorage.getItem("histolab_student_token");
   const headers = { "Content-Type": "application/json" };
   if (token) {
     headers["Authorization"] = `Bearer ${token}`;
@@ -28,7 +28,7 @@ async function handleResponse(response) {
           new CustomEvent("histolab:session_expired", {
             detail: {
               reason: "CONCURRENT_SESSION_DETECTED",
-              message: "Se ha detectado un inicio de sesión en otro dispositivo o pestaña. Tu sesión actual ha sido cerrada por seguridad."
+              message: data.message || "Se ha detectado un inicio de sesión en otro dispositivo o pestaña. Tu sesión actual ha sido cerrada por seguridad."
             }
           })
         );
@@ -152,8 +152,35 @@ export const api = {
       if (result.token && result.estudiante) {
         safeStorage.setItem("histolab_student_token", result.token);
         safeStorage.setItem("histolab_student_user", JSON.stringify(result.estudiante));
+        if (result.sessionId) {
+          safeStorage.setItem("histolab_student_session_id", result.sessionId);
+        }
       }
       return result;
+    },
+
+    async checkStudentHeartbeat() {
+      const token = safeStorage.getItem("histolab_student_token");
+      const headers = { "Content-Type": "application/json" };
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+      const res = await fetch(`${API_BASE}/auth/student-heartbeat`, {
+        headers
+      });
+      return await handleResponse(res);
+    },
+
+    async changeStudentPassword({ carrera, numero_cuenta, contrasena_actual, nueva_contrasena }) {
+      const token = safeStorage.getItem("histolab_student_token");
+      const headers = { "Content-Type": "application/json" };
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+      const res = await fetch(`${API_BASE}/auth/student-change-password`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ carrera, numero_cuenta, contrasena_actual, nueva_contrasena })
+      });
+      return await handleResponse(res);
     },
 
     getCurrentStudent() {
@@ -166,9 +193,23 @@ export const api = {
       }
     },
 
-    logoutStudent() {
-      safeStorage.removeItem("histolab_student_token");
-      safeStorage.removeItem("histolab_student_user");
+    async logoutStudent() {
+      try {
+        const token = safeStorage.getItem("histolab_student_token");
+        if (token) {
+          await fetch(`${API_BASE}/auth/student-logout`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`
+            }
+          }).catch(() => {});
+        }
+      } finally {
+        safeStorage.removeItem("histolab_student_token");
+        safeStorage.removeItem("histolab_student_user");
+        safeStorage.removeItem("histolab_student_session_id");
+      }
     },
 
     getCurrentInstructor() {

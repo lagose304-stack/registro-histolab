@@ -96,6 +96,42 @@ export default function App() {
     };
   }, [currentInstructor, handleLogout]);
 
+  // 🛡️ Detector de sesiones concurrentes para Estudiantes
+  useEffect(() => {
+    if (!currentStudent) return;
+
+    const studentHeartbeatTimer = setInterval(async () => {
+      try {
+        await api.auth.checkStudentHeartbeat();
+      } catch (err) {
+        if (err.reason === "CONCURRENT_SESSION_DETECTED") {
+          setSessionAlert({
+            title: "Sesión Desconectada",
+            message: "Tu cuenta de estudiante fue abierta en otro dispositivo o pestaña. Tu sesión en esta pantalla ha sido cerrada por seguridad."
+          });
+          handleStudentLogout();
+        } else if (err.status === 401) {
+          handleStudentLogout();
+        }
+      }
+    }, HEARTBEAT_INTERVAL_MS);
+
+    const handleStudentSessionExpired = (e) => {
+      setSessionAlert({
+        title: "Sesión Concurrente Detectada",
+        message: e.detail?.message || "Tu sesión ha sido cerrada porque se inició sesión desde otro dispositivo o pestaña."
+      });
+      handleStudentLogout();
+    };
+
+    window.addEventListener("histolab:session_expired", handleStudentSessionExpired);
+
+    return () => {
+      clearInterval(studentHeartbeatTimer);
+      window.removeEventListener("histolab:session_expired", handleStudentSessionExpired);
+    };
+  }, [currentStudent, handleStudentLogout]);
+
   // ⏱️ Auto-logout por inactividad (20 min)
   useEffect(() => {
     if (!currentInstructor) return;

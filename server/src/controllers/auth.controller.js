@@ -666,7 +666,27 @@ export const loginStudent = async (req, res) => {
       seccionData = sec;
     }
 
-    // Generar token JWT para estudiante
+    // Generar nuevo identificador único de sesión concurrente
+    const sessionId = crypto.randomUUID();
+
+    // Actualizar current_session_token en Supabase y en memoria para validar sesión única
+    setStudentSession(carrera, cleanCuenta, sessionId);
+
+    if (isSupabaseConfigured && supabase) {
+      try {
+        await supabase
+          .from(tableName)
+          .update({
+            current_session_token: sessionId,
+            updated_at: new Date().toISOString()
+          })
+          .eq("id", student.id);
+      } catch (sessErr) {
+        console.warn("Aviso: No se pudo guardar current_session_token:", sessErr.message);
+      }
+    }
+
+    // Generar token JWT para estudiante con session_id
     const token = jwt.sign(
       {
         id: student.id,
@@ -674,6 +694,7 @@ export const loginStudent = async (req, res) => {
         nombre_completo: student.nombre_completo,
         carrera: carrera,
         seccion_id: student.seccion_id,
+        session_id: sessionId,
         rol: "ESTUDIANTE"
       },
       JWT_SECRET,
@@ -691,9 +712,9 @@ export const loginStudent = async (req, res) => {
       notas: student.notas || {},
       asistencias: student.asistencias || {},
       total: student.total ?? 0,
-      primer_examen: student.primer_examen ?? 0,
-      segundo_examen: student.segundo_examen ?? 0,
-      tercer_examen: student.tercer_examen ?? 0,
+      primer_examen: student.primer_examen !== undefined && student.primer_examen !== null && Number(student.primer_examen) > 0 ? Number(student.primer_examen) : (student.notas?.primer_examen !== undefined ? Number(student.notas.primer_examen) : null),
+      segundo_examen: student.segundo_examen !== undefined && student.segundo_examen !== null && Number(student.segundo_examen) > 0 ? Number(student.segundo_examen) : (student.notas?.segundo_examen !== undefined ? Number(student.notas.segundo_examen) : null),
+      tercer_examen: student.tercer_examen !== undefined && student.tercer_examen !== null && Number(student.tercer_examen) > 0 ? Number(student.tercer_examen) : (student.notas?.tercer_examen !== undefined ? Number(student.notas.tercer_examen) : null),
       rol: "ESTUDIANTE"
     };
 
@@ -701,6 +722,7 @@ export const loginStudent = async (req, res) => {
       success: true,
       message: `¡Bienvenido(a), ${student.nombre_completo}!`,
       token,
+      sessionId,
       estudiante: studentProfile
     });
   } catch (error) {
@@ -712,3 +734,179 @@ export const loginStudent = async (req, res) => {
     });
   }
 };
+
+// Mapa en memoria para sesiones activas de estudiantes (soporte instantáneo y fallback)
+const studentSessionMap = new Map();
+
+export const getStudentSession = (carrera, numero_cuenta) => {
+  const key = `${String(carrera).toLowerCase().trim()}:${String(numero_cuenta).trim()}`;
+  return studentSessionMap.get(key) || null;
+};
+
+export const setStudentSession = (carrera, numero_cuenta, sessionId) => {
+  const key = `${String(carrera).toLowerCase().trim()}:${String(numero_cuenta).trim()}`;
+  if (sessionId) {
+    studentSessionMap.set(key, sessionId);
+  } else {
+    studentSessionMap.delete(key);
+  }
+};
+
+export const getStudentByCuentaAndCarrera = async (numero_cuenta, carrera) => {
+  const tableName = getStudentTableName(carrera);
+  const cleanCuenta = String(numero_cuenta).trim();
+
+  if (isSupabaseConfigured && supabase) {
+    const { data, error } = await supabase
+      .from(tableName)
+      .select("*")
+      .eq("numero_cuenta", cleanCuenta)
+      .eq("activo", true)
+      .maybeSingle();
+
+    if (!error && data) return data;
+  }
+  return null;
+};
+
+export const checkStudentHeartbeat = async (req, res) => {
+  try {
+    return res.json({
+      success: true,
+      authenticated: true,
+      studentId: req.student?.id,
+      numero_cuenta: req.student?.numero_cuenta,
+      sessionId: req.student?.session_id
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+export const logoutStudent = async (req, res) => {
+  try {
+    const student = req.student;
+    if (student) {
+      if (student.carrera && student.numero_cuenta) {
+        setStudentSession(student.carrera, student.numero_cuenta, null);
+      }
+      if (student.carrera && student.id && isSupabaseConfigured && supabase) {
+        const tableName = getStudentTableName(student.carrera);
+        await supabase
+          .from(tableName)
+          .update({
+            current_session_token: null,
+            updated_at: new Date().toISOString()
+          })
+          .eq("id", student.id)
+          .catch(() => {});
+      }
+    }
+    return res.json({
+      success: true,
+      message: "Sesión de estudiante cerrada correctamente."
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+export const changeStudentPassword = async (req, res) => {
+  try {
+    const { carrera, numero_cuenta, contrasena_actual, nueva_contrasena } = req.body;
+
+    if (!carrera || !numero_cuenta || !contrasena_actual || !nueva_contrasena) {
+      return res.status(400).json({
+        success: false,
+        message: "Por favor completa todos los campos requeridos."
+      });
+    }
+
+    const cleanCuenta = String(numero_cuenta).trim();
+    const cleanActual = String(contrasena_actual).trim();
+    const cleanNueva = String(nueva_contrasena).trim();
+
+    if (cleanNueva.length < 6) {
+      return res.status(400).json({
+        success: false,
+        message: "La nueva contraseña debe tener como mínimo 6 caracteres."
+      });
+    }
+
+    if (cleanNueva === cleanActual) {
+      return res.status(400).json({
+        success: false,
+        message: "La nueva contraseña no puede ser igual a tu contraseña actual."
+      });
+    }
+
+    const tableName = getStudentTableName(carrera);
+    let student = null;
+
+    if (isSupabaseConfigured && supabase) {
+      const { data, error } = await supabase
+        .from(tableName)
+        .select("*")
+        .eq("numero_cuenta", cleanCuenta)
+        .eq("activo", true)
+        .maybeSingle();
+
+      if (error) {
+        console.error("Error al buscar estudiante en Supabase:", error.message);
+      }
+      student = data;
+    }
+
+    if (!student) {
+      return res.status(404).json({
+        success: false,
+        message: `No se encontró ningún estudiante con el número de cuenta "${cleanCuenta}" en la carrera seleccionada.`
+      });
+    }
+
+    // Verificar contraseña actual (propia o por defecto 'histolab123')
+    const validPassword =
+      student.contrasena === cleanActual ||
+      cleanActual === "histolab123" ||
+      (!student.contrasena && cleanActual === "histolab123");
+
+    if (!validPassword) {
+      return res.status(401).json({
+        success: false,
+        message: "La contraseña actual es incorrecta. Si nunca la has cambiado, recuerda que la contraseña inicial es 'histolab123'."
+      });
+    }
+
+    // Actualizar en Supabase
+    if (isSupabaseConfigured && supabase) {
+      const { error: updateError } = await supabase
+        .from(tableName)
+        .update({
+          contrasena: cleanNueva,
+          updated_at: new Date().toISOString()
+        })
+        .eq("numero_cuenta", cleanCuenta);
+
+      if (updateError) {
+        console.error("Error al actualizar contraseña en Supabase:", updateError.message);
+        return res.status(500).json({
+          success: false,
+          message: "Error al guardar la nueva contraseña en la base de datos: " + updateError.message
+        });
+      }
+    }
+
+    return res.json({
+      success: true,
+      message: "¡Contraseña actualizada exitosamente! Utiliza tu nueva clave en tus próximos inicios de sesión."
+    });
+  } catch (error) {
+    console.error("Error en changeStudentPassword:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Error interno del servidor al actualizar la contraseña.",
+      error: error.message
+    });
+  }
+};
+

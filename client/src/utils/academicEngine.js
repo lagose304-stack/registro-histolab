@@ -201,20 +201,13 @@ export function getCanonicalExamGrade(student = {}, examIndex = 0, examWeek = nu
     altExamKey = "examen_II";
   }
 
-  // 1. Columnas canónicas en tabla estudiante
-  if (student?.[columnKey] !== undefined && student[columnKey] !== null && student[columnKey] !== "") {
-    return Number(student[columnKey]);
-  }
-
-  // 2. Claves en notas JSON
+  // 1. Claves explícitas en el objeto notas JSON (donde el docente califica directamente)
   if (notas[columnKey] !== undefined && notas[columnKey] !== null && notas[columnKey] !== "") {
     return Number(notas[columnKey]);
   }
   if (notas[altExamKey] !== undefined && notas[altExamKey] !== null && notas[altExamKey] !== "") {
     return Number(notas[altExamKey]);
   }
-
-  // 3. Claves por semana de examen
   if (semNum) {
     if (notas[`examen_${semNum}`] !== undefined && notas[`examen_${semNum}`] !== null && notas[`examen_${semNum}`] !== "") {
       return Number(notas[`examen_${semNum}`]);
@@ -222,8 +215,21 @@ export function getCanonicalExamGrade(student = {}, examIndex = 0, examWeek = nu
     if (notas[`examen_semana_${semNum}`] !== undefined && notas[`examen_semana_${semNum}`] !== null && notas[`examen_semana_${semNum}`] !== "") {
       return Number(notas[`examen_semana_${semNum}`]);
     }
-    if (student?.[`Examen semana ${semNum}`] !== undefined && student[`Examen semana ${semNum}`] !== null && student[`Examen semana ${semNum}`] !== "") {
-      return Number(student[`Examen semana ${semNum}`]);
+  }
+
+  // 2. Columnas en tabla estudiante: solo si tiene calificación positiva explícita
+  // (evita que el valor 0 por defecto de la base de datos marque un examen no calificado como calificado)
+  if (student?.[columnKey] !== undefined && student[columnKey] !== null && student[columnKey] !== "") {
+    const num = Number(student[columnKey]);
+    if (!isNaN(num) && num > 0) {
+      return num;
+    }
+  }
+
+  if (semNum && student?.[`Examen semana ${semNum}`] !== undefined && student[`Examen semana ${semNum}`] !== null && student[`Examen semana ${semNum}`] !== "") {
+    const num = Number(student[`Examen semana ${semNum}`]);
+    if (!isNaN(num) && num > 0) {
+      return num;
     }
   }
 

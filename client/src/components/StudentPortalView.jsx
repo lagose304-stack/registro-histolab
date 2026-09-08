@@ -26,12 +26,19 @@ import {
   Check,
   X,
   Eye,
+  EyeOff,
+  KeyRound,
   Lock,
+  AlertCircle,
   Maximize2,
   Shield,
   Radio,
   Play,
-  PlayCircle
+  PlayCircle,
+  ChevronRight,
+  BarChart3,
+  Layers,
+  Layers3
 } from "lucide-react";
 import { api } from "../services/api";
 import { safeStorage } from "../utils/safeStorage";
@@ -105,16 +112,20 @@ export default function StudentPortalView({ student, notify = () => {} }) {
   const [currentStudentData, setCurrentStudentData] = useState(() => {
     if (student && student.notas && Object.keys(student.notas).length > 0) return student;
     try {
-      const cached = safeStorage.getItem("histolab_student_user");
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        if (parsed && (parsed.numero_cuenta === student?.numero_cuenta || !student)) {
-          return { ...(parsed || {}), ...(student || {}) };
+      const cKey = student?.numero_cuenta;
+      if (cKey) {
+        const cached = safeStorage.getItem(`histolab_student_user_${cKey}`);
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (parsed && parsed.numero_cuenta === cKey) {
+            return parsed;
+          }
         }
       }
     } catch (_) {}
     return student;
   });
+  const [selectedParcialFilter, setSelectedParcialFilter] = useState("todos"); // "todos" | "I" | "II" | "III"
   const [semanasConfig, setSemanasConfig] = useState([]);
   const [temario, setTemario] = useState([]);
   const [configPuntajes, setConfigPuntajes] = useState(null);
@@ -245,21 +256,21 @@ export default function StudentPortalView({ student, notify = () => {} }) {
     }, autoDismissMs);
   }, [deactivateDrmBlackout]);
 
-  // Sincronizar si cambia el prop student desde el padre
+  // Sincronizar si cambia el prop student desde el padre (aislamiento estricto por cuenta)
   useEffect(() => {
     if (student) {
-      setCurrentStudentData((prev) => ({
-        ...(prev || {}),
-        ...student,
-        notas: {
-          ...((prev && prev.notas) || {}),
-          ...((student && student.notas) || {})
-        },
-        asistencias: {
-          ...((prev && prev.asistencias) || {}),
-          ...((student && student.asistencias) || {})
+      setCurrentStudentData((prev) => {
+        // Si el estudiante cambió (número de cuenta distinto), descartar completamente el estado anterior
+        if (!prev || prev.numero_cuenta !== student.numero_cuenta) {
+          return student;
         }
-      }));
+        return {
+          ...prev,
+          ...student,
+          notas: student.notas || prev.notas || {},
+          asistencias: student.asistencias || prev.asistencias || {}
+        };
+      });
     }
   }, [student]);
 
@@ -270,6 +281,101 @@ export default function StudentPortalView({ student, notify = () => {} }) {
   const notas = effectiveStudent?.notas || {};
   const asistencias = effectiveStudent?.asistencias || {};
   const seccion = effectiveStudent?.seccion || {};
+
+  // Estados para apartado de actualización de contraseña
+  const [currentPasswordInput, setCurrentPasswordInput] = useState("");
+  const [newPasswordInput, setNewPasswordInput] = useState("");
+  const [confirmPasswordInput, setConfirmPasswordInput] = useState("");
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [changingPassword, setChangingPassword] = useState(false);
+  const [passwordFeedback, setPasswordFeedback] = useState(null);
+
+  const handleUpdatePassword = async (e) => {
+    if (e) e.preventDefault();
+    setPasswordFeedback(null);
+
+    const cleanCurrent = currentPasswordInput.trim();
+    const cleanNew = newPasswordInput.trim();
+    const cleanConfirm = confirmPasswordInput.trim();
+
+    if (!cleanCurrent) {
+      setPasswordFeedback({
+        type: "error",
+        message: "Por favor ingresa tu contraseña actual (o histolab123 si nunca la has cambiado)."
+      });
+      return;
+    }
+
+    if (!cleanNew) {
+      setPasswordFeedback({
+        type: "error",
+        message: "Por favor ingresa tu nueva contraseña."
+      });
+      return;
+    }
+
+    if (cleanNew.length < 6) {
+      setPasswordFeedback({
+        type: "error",
+        message: "La nueva contraseña debe tener un mínimo de 6 caracteres."
+      });
+      return;
+    }
+
+    if (cleanNew === cleanCurrent) {
+      setPasswordFeedback({
+        type: "error",
+        message: "La nueva contraseña no puede ser igual a tu contraseña actual."
+      });
+      return;
+    }
+
+    if (cleanNew !== cleanConfirm) {
+      setPasswordFeedback({
+        type: "error",
+        message: "La confirmación de la nueva contraseña no coincide."
+      });
+      return;
+    }
+
+    try {
+      setChangingPassword(true);
+      const res = await api.auth.changeStudentPassword({
+        carrera: carreraKey,
+        numero_cuenta: cuentaKey,
+        contrasena_actual: cleanCurrent,
+        nueva_contrasena: cleanNew
+      });
+
+      if (res?.success) {
+        setPasswordFeedback({
+          type: "success",
+          message: res.message || "¡Tu contraseña ha sido actualizada con éxito!"
+        });
+        setCurrentPasswordInput("");
+        setNewPasswordInput("");
+        setConfirmPasswordInput("");
+        notify("✓ Contraseña actualizada correctamente", "success");
+      } else {
+        setPasswordFeedback({
+          type: "error",
+          message: res?.message || "No se pudo actualizar la contraseña."
+        });
+        notify(res?.message || "Error al actualizar contraseña", "error");
+      }
+    } catch (err) {
+      console.error("Error al cambiar contraseña:", err);
+      setPasswordFeedback({
+        type: "error",
+        message: err?.message || "Ocurrió un error al intentar cambiar la contraseña."
+      });
+      notify(err?.message || "Error al actualizar contraseña", "error");
+    } finally {
+      setChangingPassword(false);
+    }
+  };
 
   // Cargar configuración de semanas, temario, puntajes y perfil actualizado del estudiante
   useEffect(() => {
@@ -295,22 +401,12 @@ export default function StudentPortalView({ student, notify = () => {} }) {
           if (resPuntajes?.data) {
             setConfigPuntajes(resPuntajes.data);
           }
-          if (resStudent?.data) {
-            setCurrentStudentData((prev) => ({
-              ...(prev || {}),
-              ...resStudent.data,
-              notas: {
-                ...((prev && prev.notas) || {}),
-                ...((resStudent.data && resStudent.data.notas) || {})
-              },
-              asistencias: {
-                ...((prev && prev.asistencias) || {}),
-                ...((resStudent.data && resStudent.data.asistencias) || {})
-              },
-              seccion: resStudent.data.seccion || (prev && prev.seccion) || null
-            }));
+          if (resStudent?.data && (!cuentaKey || resStudent.data.numero_cuenta === cuentaKey)) {
+            setCurrentStudentData(resStudent.data);
             try {
-              safeStorage.setItem("histolab_student_user", JSON.stringify(resStudent.data));
+              if (cuentaKey) {
+                safeStorage.setItem(`histolab_student_user_${cuentaKey}`, JSON.stringify(resStudent.data));
+              }
             } catch (e) {
               console.warn("Aviso al actualizar sesión en safeStorage:", e);
             }
@@ -2036,6 +2132,159 @@ export default function StudentPortalView({ student, notify = () => {} }) {
     };
   }, [examenesList, semanasConfig, asistencias, effectiveStudent, activeCareerWeeks, loadingAcademic]);
 
+  // =========================================================================
+  // AGRUPACIÓN INTEGRAL Y AUTORITATIVA POR PARCIALES (I, II, III PARCIAL)
+  // Garantiza cero mezclas ni translocaciones entre periodos académicos
+  // =========================================================================
+  const parcialesData = useMemo(() => {
+    const pDefs = [
+      { key: "I", label: "I Parcial", roman: "I", accent: "#3b82f6", bgLight: "#eff6ff", borderLight: "#bfdbfe" },
+      { key: "II", label: "II Parcial", roman: "II", accent: "#8b5cf6", bgLight: "#f5f3ff", borderLight: "#ddd6fe" },
+      { key: "III", label: "III Parcial", roman: "III", accent: "#ec4899", bgLight: "#fdf2f8", borderLight: "#fbcfe8" }
+    ];
+
+    // Mapeo canónico de semana a Parcial
+    const weekToParcialMap = new Map();
+    (activeCareerWeeks || []).forEach((w) => {
+      const semNum = Number(w.numero_semana);
+      const rawP = String(w.parcial || "").trim().toLowerCase();
+      let key = "I";
+      if (rawP.includes("iii") || rawP.includes("tercer") || rawP === "3") {
+        key = "III";
+      } else if (rawP.includes("ii") || rawP.includes("segundo") || rawP === "2") {
+        key = "II";
+      } else if (rawP.includes("i") || rawP.includes("primer") || rawP === "1") {
+        key = "I";
+      } else {
+        // Fallback proporcional por rango de semanas
+        key = semNum <= 5 ? "I" : semNum <= 10 ? "II" : "III";
+      }
+      weekToParcialMap.set(semNum, key);
+    });
+
+    // Mapeo de tema a Parcial por medio del temario oficial
+    const topicToParcialMap = new Map();
+    (temario || []).forEach((t) => {
+      const semNum = Number(t.semana) || 0;
+      const key = weekToParcialMap.get(semNum) || (semNum <= 5 ? "I" : semNum <= 10 ? "II" : "III");
+      if (t.id) topicToParcialMap.set(String(t.id), key);
+      if (t.titulo) topicToParcialMap.set(String(t.titulo).trim().toLowerCase(), key);
+    });
+
+    return pDefs.map((pDef) => {
+      const pKey = pDef.key;
+
+      // Semanas de este parcial
+      const weeks = (activeCareerWeeks || []).filter((w) => {
+        return weekToParcialMap.get(Number(w.numero_semana)) === pKey;
+      });
+      const weekNums = weeks.map((w) => Number(w.numero_semana));
+
+      // Examen oficial de este parcial
+      const examen = (examenesList || []).find((ex) => {
+        return ex.parcialKey === pKey || weekNums.includes(Number(ex.semana));
+      }) || null;
+
+      // Manuales pertenecientes a este parcial
+      const manuales = (manualesList || []).filter((m) => {
+        if (m.semana && weekNums.includes(Number(m.semana))) return true;
+        if (m.temaId && topicToParcialMap.get(String(m.temaId)) === pKey) return true;
+        if (m.titulo && topicToParcialMap.get(String(m.titulo).trim().toLowerCase()) === pKey) return true;
+        return false;
+      });
+
+      // Pruebas cortas de este parcial
+      const pruebas = (pruebasList || []).filter((pr) => {
+        return weekNums.includes(Number(pr.semana));
+      });
+
+      // Historial y desglose de asistencias del parcial
+      let asistenciasCount = 0;
+      let faltasJustificadas = 0;
+      let faltasInjustificadas = 0;
+      let semanasRegistradas = 0;
+
+      const semanasAsistencia = weeks.map((w) => {
+        const sem = Number(w.numero_semana);
+        const val =
+          asistencias[`asistencia_${sem}`] ??
+          asistencias[`semana_${sem}`] ??
+          effectiveStudent?.[`Asistencia de la semana ${sem}`] ??
+          effectiveStudent?.[`asistencia_${sem}`] ??
+          null;
+
+        if (val) {
+          semanasRegistradas++;
+          if (val === "Asistio") asistenciasCount++;
+          else if (val === "Falta justificada") faltasJustificadas++;
+          else if (val === "Falta injustificada") faltasInjustificadas++;
+        }
+
+        return {
+          semana: sem,
+          nombre: getWeekDisplayName(w),
+          estado: val || "Sin registrar",
+          esExamen: Boolean(w.es_examen)
+        };
+      });
+
+      // Pérdida de derecho a examen en este parcial por 2+ faltas injustificadas
+      const perdioDerecho = faltasInjustificadas >= 2;
+
+      // Subtotales de notas del parcial
+      let subtotalManuales = 0;
+      let manualesCalificadosCount = 0;
+      manuales.forEach((m) => {
+        if (m.nota !== null && m.nota !== undefined && m.nota !== "" && !isNaN(Number(m.nota))) {
+          subtotalManuales += Number(m.nota);
+          manualesCalificadosCount++;
+        }
+      });
+      subtotalManuales = Math.round(subtotalManuales * 1000) / 1000;
+
+      let subtotalPruebas = 0;
+      let pruebasCalificadasCount = 0;
+      pruebas.forEach((pr) => {
+        if (pr.nota !== null && pr.nota !== undefined && pr.nota !== "" && !isNaN(Number(pr.nota))) {
+          subtotalPruebas += Number(pr.nota);
+          pruebasCalificadasCount++;
+        }
+      });
+      subtotalPruebas = Math.round(subtotalPruebas * 1000) / 1000;
+
+      const notaExamenNum = (examen && examen.nota !== null && examen.nota !== undefined && examen.nota !== "" && !isNaN(Number(examen.nota)))
+        ? Number(examen.nota)
+        : null;
+
+      const totalPuntosParcial = Math.round((subtotalManuales + subtotalPruebas + (notaExamenNum || 0)) * 1000) / 1000;
+      const minSem = weekNums.length > 0 ? Math.min(...weekNums) : null;
+      const maxSem = weekNums.length > 0 ? Math.max(...weekNums) : null;
+      const rangoSemanasText = minSem !== null ? (minSem === maxSem ? `Semana ${minSem}` : `Semanas ${minSem} a ${maxSem}`) : "Por calendarizar";
+
+      return {
+        ...pDef,
+        weeks,
+        weekNums,
+        rangoSemanasText,
+        examen,
+        manuales,
+        pruebas,
+        semanasAsistencia,
+        asistenciasCount,
+        faltasJustificadas,
+        faltasInjustificadas,
+        semanasRegistradas,
+        perdioDerecho,
+        subtotalManuales,
+        manualesCalificadosCount,
+        subtotalPruebas,
+        pruebasCalificadasCount,
+        notaExamen: notaExamenNum,
+        totalPuntosParcial
+      };
+    });
+  }, [activeCareerWeeks, temario, examenesList, manualesList, pruebasList, asistencias, effectiveStudent]);
+
   return (
     <div
       style={{
@@ -2209,6 +2458,19 @@ export default function StudentPortalView({ student, notify = () => {} }) {
           letter-spacing: 0.5px;
           animation: pulseLiveBadge 1.5s infinite;
           flex-shrink: 0;
+        }
+        .sp-hero-progress-card {
+          transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        .sp-hero-progress-card:hover {
+          box-shadow: 0 8px 26px -4px rgba(0, 0, 0, 0.07) !important;
+        }
+        .sp-parcial-selector::-webkit-scrollbar {
+          display: none;
+        }
+        .sp-parcial-selector {
+          -ms-overflow-style: none;
+          scrollbar-width: none;
         }
 
         /* Auto-altura para respuestas multilínea en móvil y escritorio */
@@ -2435,21 +2697,22 @@ export default function StudentPortalView({ student, notify = () => {} }) {
             max-width: 100% !important;
             box-sizing: border-box !important;
             gap: 0.2rem !important;
-            overflow: hidden !important;
+            overflow-x: auto !important;
+            -webkit-overflow-scrolling: touch;
           }
           .sp-tab-btn {
             flex: 1 1 0 !important;
             min-width: 0 !important;
-            max-width: 33.333% !important;
+            max-width: 25% !important;
             box-sizing: border-box !important;
             justify-content: center !important;
             align-items: center !important;
-            padding: 0.42rem 0.15rem !important;
-            font-size: 0.72rem !important;
+            padding: 0.42rem 0.12rem !important;
+            font-size: 0.69rem !important;
             border-radius: 0.5rem !important;
             border-bottom: none !important;
             white-space: nowrap !important;
-            gap: 0.2rem !important;
+            gap: 0.18rem !important;
             overflow: hidden !important;
             text-overflow: ellipsis !important;
           }
@@ -2487,6 +2750,15 @@ export default function StudentPortalView({ student, notify = () => {} }) {
           .sp-card-panel {
             padding: 0.75rem 0.65rem !important;
             border-radius: 0.75rem !important;
+          }
+          .sp-hero-progress-card {
+            padding: 1rem 0.85rem !important;
+            border-radius: 0.85rem !important;
+          }
+          .sp-parcial-selector {
+            width: 100% !important;
+            justify-content: flex-start !important;
+            -webkit-overflow-scrolling: touch !important;
           }
 
           /* Exámenes Parciales en 3 columnas proporcionales */
@@ -2742,151 +3014,36 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                         👨‍🏫 Coord: {seccion.coordinador}
                       </span>
                     )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveTab("seguridad");
+                        setActiveQuizToTake(null);
+                        setReviewingSubmission(null);
+                      }}
+                      className="sp-tag-pill"
+                      style={{
+                        background: activeTab === "seguridad" ? theme.primary : "#ffffff",
+                        borderColor: activeTab === "seguridad" ? theme.primary : "#cbd5e1",
+                        color: activeTab === "seguridad" ? "#ffffff" : "#334155",
+                        cursor: "pointer",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "0.35rem",
+                        fontWeight: 800,
+                        transition: "all 0.15s ease"
+                      }}
+                      title="Actualizar tu contraseña de acceso"
+                    >
+                      <Lock size={12} color={activeTab === "seguridad" ? "#ffffff" : theme.primary} />
+                      <span>Cambiar Contraseña</span>
+                    </button>
                   </div>
                 </div>
               </div>
             </div>
 
-            {/* Tarjetas de Métricas Principales */}
-            <div className="sp-metrics-grid">
-              {/* Métrica 1: Nota Total Acumulada */}
-              <div className="sp-metric-card">
-                <div
-                  className="sp-metric-icon"
-                  style={{
-                    background: "linear-gradient(135deg, #10b981 0%, #059669 100%)",
-                    boxShadow: "0 4px 12px rgba(16, 185, 129, 0.25)"
-                  }}
-                >
-                  <Award size={24} />
-                </div>
-                <div style={{ minWidth: 0, flex: 1 }}>
-                  <span style={{ fontSize: "0.74rem", fontWeight: 800, color: "#64748b", textTransform: "uppercase" }}>
-                    Total Acumulado
-                  </span>
-                  {loadingAcademic ? (
-                    <div style={{ padding: "0.2rem 0" }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
-                        <div style={{ width: "70px", height: "24px", background: "#e2e8f0", borderRadius: "6px", animation: "pulseSkeleton 1.5s infinite" }} />
-                        <span style={{ fontSize: "0.85rem", color: "#94a3b8", fontWeight: 700 }}>pts</span>
-                      </div>
-                      <div style={{ fontSize: "0.72rem", color: "#94a3b8", marginTop: "0.25rem" }}>
-                        Cargando calificaciones...
-                      </div>
-                    </div>
-                  ) : (
-                    <>
-                      <div className="sp-metric-val">
-                        {totalDinamico}{" "}
-                        <span style={{ fontSize: "0.85rem", color: "#64748b", fontWeight: 700 }}>
-                          / {maxPuntajeCarrera > 0 ? maxPuntajeCarrera : "—"} pts
-                        </span>
-                      </div>
-                      <div className="sp-metric-breakdown" style={{ fontSize: "0.72rem", color: "#64748b", fontWeight: 600, marginTop: "0.25rem" }}>
-                        Manuales: <strong style={{ color: "#0284c7" }}>{notaOroManuales}</strong> • Pruebas: <strong style={{ color: "#16a34a" }}>{notaOroPruebas}</strong> • Exám: <strong style={{ color: "#7c3aed" }}>{sumaExamenes}</strong>
-                      </div>
-                    </>
-                  )}
-                </div>
-              </div>
 
-              {/* Métrica 2: Estatus Derecho a Examen */}
-              <div className="sp-metric-card">
-                <div
-                  className="sp-metric-icon"
-                  style={{
-                    background: derechoExamenesStatus.perdioAlguno
-                      ? "linear-gradient(135deg, #ef4444 0%, #dc2626 100%)"
-                      : "linear-gradient(135deg, #0284c7 0%, #0369a1 100%)",
-                    boxShadow: derechoExamenesStatus.perdioAlguno
-                      ? "0 4px 12px rgba(239, 68, 68, 0.25)"
-                      : "0 4px 12px rgba(2, 132, 199, 0.25)"
-                  }}
-                >
-                  {derechoExamenesStatus.perdioAlguno ? <ShieldAlert size={24} /> : <ShieldCheck size={24} />}
-                </div>
-                <div style={{ minWidth: 0, flex: 1 }}>
-                  <span style={{ fontSize: "0.74rem", fontWeight: 800, color: "#64748b", textTransform: "uppercase" }}>
-                    Derecho a Examen
-                  </span>
-                  {loadingAcademic ? (
-                    <div style={{ padding: "0.2rem 0" }}>
-                      <div style={{ width: "120px", height: "20px", background: "#e2e8f0", borderRadius: "6px", animation: "pulseSkeleton 1.5s infinite" }} />
-                      <div style={{ fontSize: "0.72rem", color: "#94a3b8", marginTop: "0.25rem" }}>
-                        Verificando asistencia...
-                      </div>
-                    </div>
-                  ) : (
-                    <>
-                      <div
-                        className="sp-metric-val sp-derecho-title"
-                        style={{
-                          fontSize: "1.05rem",
-                          fontWeight: 900,
-                          color: derechoExamenesStatus.perdioAlguno ? "#dc2626" : "#0284c7",
-                          lineHeight: 1.25
-                        }}
-                      >
-                        {derechoExamenesStatus.titulo}
-                      </div>
-                      {/* Desglose por examen */}
-                      <div className="sp-derecho-badges" style={{ display: "flex", flexWrap: "wrap", gap: "0.3rem", marginTop: "0.35rem" }}>
-                        {derechoExamenesStatus.exams.map((dex) => (
-                          <span
-                            key={dex.id}
-                            className="sp-derecho-pill"
-                            style={{
-                              fontSize: "0.68rem",
-                              fontWeight: 800,
-                              padding: "0.12rem 0.45rem",
-                              borderRadius: "0.35rem",
-                              background: dex.perdio ? "#fee2e2" : "#f0fdf4",
-                              color: dex.perdio ? "#b91c1c" : "#15803d",
-                              border: dex.perdio ? "1px solid #fca5a5" : "1px solid #bbf7d0"
-                            }}
-                          >
-                            {dex.label}: {dex.perdio ? `🚨 SDE (${dex.faltasInjustificadas} faltas)` : "✓ Habilitado"}
-                          </span>
-                        ))}
-                      </div>
-                    </>
-                  )}
-                </div>
-              </div>
-
-              {/* Métrica 3: Asistencias */}
-              <div className="sp-metric-card">
-                <div
-                  className="sp-metric-icon"
-                  style={{
-                    background: "linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%)",
-                    boxShadow: "0 4px 12px rgba(139, 92, 246, 0.25)"
-                  }}
-                >
-                  <CalendarCheck size={24} />
-                </div>
-                <div style={{ minWidth: 0, flex: 1 }}>
-                  <span style={{ fontSize: "0.74rem", fontWeight: 800, color: "#64748b", textTransform: "uppercase" }}>
-                    Asistencia
-                  </span>
-                  {loadingAcademic ? (
-                    <div style={{ padding: "0.2rem 0" }}>
-                      <div style={{ width: "90px", height: "22px", background: "#e2e8f0", borderRadius: "6px", animation: "pulseSkeleton 1.5s infinite" }} />
-                      <div style={{ fontSize: "0.72rem", color: "#94a3b8", marginTop: "0.25rem" }}>
-                        Calculando semanas...
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="sp-metric-val">
-                      {attendanceStats.asistenciasCount}{" "}
-                      <span style={{ fontSize: "0.85rem", color: "#64748b", fontWeight: 700 }}>
-                        de {attendanceStats.totalSemanas} sem ({attendanceStats.pct}%)
-                      </span>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
 
             {/* AVISO DESTACADO DE PRUEBA EN VIVO TIPO KAHOOT */}
             {activeLiveBannerSession && !existingSubmissions[activeLiveBannerSession.numero_semana] && !activeQuizToTake && (
@@ -3048,223 +3205,677 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                   </span>
                 )}
               </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveTab("seguridad");
+                  setActiveQuizToTake(null);
+                  setReviewingSubmission(null);
+                }}
+                className={`sp-tab-btn ${activeTab === "seguridad" ? "active" : ""}`}
+                style={{
+                  color: activeTab === "seguridad" ? theme.primary : "#64748b",
+                  borderBottom: activeTab === "seguridad" ? `3px solid ${theme.primary}` : "3px solid transparent"
+                }}
+              >
+                <KeyRound size={16} />
+                <span className="sp-tab-label-desktop">Actualizar Contraseña</span>
+                <span className="sp-tab-label-mobile">Contraseña</span>
+              </button>
             </div>
 
         {/* =================================================================== */}
-        {/* PESTAÑA A: CALIFICACIONES DETALLADAS                                */}
+        {/* PESTAÑA A: MIS CALIFICACIONES - ORGANIZADO POR PARCIALES            */}
         {/* =================================================================== */}
         {activeTab === "calificaciones" && (
-          <div className="sp-tab-content-container" style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
-            {/* 1. Exámenes Parciales */}
+          <div className="sp-tab-content-container" style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
+            
+            {/* HERO ACADÉMICO: PROGRESO GLOBAL Y RESUMEN OFICIAL */}
             <div
-              className="sp-card-panel"
+              className="sp-hero-progress-card"
               style={{
-                background: "#ffffff",
-                borderRadius: "1rem",
-                border: "1px solid #e2e8f0",
+                background: "linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)",
+                borderRadius: "1.1rem",
+                border: "1.5px solid #e2e8f0",
                 padding: "1.5rem",
-                boxShadow: "0 2px 8px rgba(0, 0, 0, 0.02)"
+                boxShadow: "0 4px 20px -2px rgba(0, 0, 0, 0.04)",
+                position: "relative",
+                overflow: "hidden"
               }}
             >
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "0.5rem", marginBottom: "1rem" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                  <GraduationCap size={20} color="#7c3aed" />
-                  <h3 style={{ fontSize: "1.05rem", fontWeight: 800, color: "#0f172a", margin: 0 }}>
-                    Exámenes Parciales
-                  </h3>
-                </div>
-                <span style={{ fontSize: "0.78rem", fontWeight: 800, background: "#f3e8ff", color: "#7e22ce", padding: "0.25rem 0.65rem", borderRadius: "9999px", border: "1px solid #e9d5ff" }}>
-                  Suma Exámenes: {loadingAcademic ? "..." : `${sumaExamenes} / ${maxExamenesPuntaje > 0 ? maxExamenesPuntaje : "—"} pts`}
-                </span>
-              </div>
+              {/* Decoración sutil de fondo */}
+              <div
+                style={{
+                  position: "absolute",
+                  top: "-40px",
+                  right: "-40px",
+                  width: "180px",
+                  height: "180px",
+                  borderRadius: "50%",
+                  background: `${theme.primary}10`,
+                  pointerEvents: "none",
+                  filter: "blur(20px)"
+                }}
+              />
 
-              {loadingAcademic ? (
-                <div style={{ display: "flex", flexWrap: "wrap", gap: "1rem" }}>
-                  {[1, 2, 3].map((idx) => (
-                    <div
-                      key={idx}
+              <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: "1rem", position: "relative", zIndex: 1 }}>
+                <div>
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                    <span
                       style={{
-                        width: "220px",
-                        height: "90px",
-                        background: "#faf5ff",
-                        border: "1.5px solid #e9d5ff",
-                        borderRadius: "0.75rem",
-                        padding: "1rem",
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: "0.5rem",
-                        animation: "pulseSkeleton 1.5s infinite"
+                        background: theme.bg,
+                        color: theme.primary,
+                        border: `1px solid ${theme.border}`,
+                        fontSize: "0.74rem",
+                        fontWeight: 900,
+                        padding: "0.2rem 0.6rem",
+                        borderRadius: "9999px",
+                        letterSpacing: "0.5px"
                       }}
                     >
-                      <div style={{ width: "65%", height: "14px", background: "#e9d5ff", borderRadius: "4px" }} />
-                      <div style={{ width: "45%", height: "24px", background: "#d8b4fe", borderRadius: "4px" }} />
+                      HISTOLAB • {carreraKey.toUpperCase()}
+                    </span>
+                    <span style={{ fontSize: "0.76rem", color: "#64748b", fontWeight: 700 }}>
+                      Libro de Calificaciones Oficial
+                    </span>
+                  </div>
+
+                  <div style={{ marginTop: "0.5rem", display: "flex", alignItems: "baseline", gap: "0.6rem", flexWrap: "wrap" }}>
+                    <div style={{ fontSize: "2.4rem", fontWeight: 900, color: "#0f172a", letterSpacing: "-0.03em", lineHeight: 1.1 }}>
+                      {loadingAcademic ? "..." : totalDinamico}
                     </div>
-                  ))}
+                    <span style={{ fontSize: "1.1rem", fontWeight: 800, color: "#64748b" }}>
+                      / {maxPuntajeCarrera > 0 ? maxPuntajeCarrera : 100} pts
+                    </span>
+                  </div>
                 </div>
-              ) : examenesList.length === 0 ? (
-                <div style={{ padding: "1.5rem", textAlign: "center", color: "#94a3b8", fontSize: "0.82rem" }}>
-                  No hay semanas de examen programadas en el calendario de esta carrera.
+              </div>
+
+
+
+              {/* 4 Píldoras de desglose rápido */}
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
+                  gap: "0.65rem",
+                  marginTop: "1.15rem",
+                  paddingTop: "1rem",
+                  borderTop: "1px solid #f1f5f9"
+                }}
+              >
+                <div style={{ background: "#f0f9ff", border: "1px solid #bae6fd", borderRadius: "0.6rem", padding: "0.55rem 0.75rem" }}>
+                  <div style={{ fontSize: "0.68rem", fontWeight: 800, color: "#0369a1", textTransform: "uppercase" }}>Manuales (Oro)</div>
+                  <div style={{ fontSize: "1.05rem", fontWeight: 900, color: "#0c4a6e", marginTop: "0.15rem" }}>
+                    {loadingAcademic ? "..." : `${notaOroManuales}`} <span style={{ fontSize: "0.72rem", color: "#0284c7" }}>/ {maxNotaManuales} pts</span>
+                  </div>
                 </div>
-              ) : (
-                <div className="sp-exams-grid">
-                  {examenesList.map((ex) => (
-                    <div
-                      key={ex.id}
-                      className="sp-exam-card"
+
+                <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: "0.6rem", padding: "0.55rem 0.75rem" }}>
+                  <div style={{ fontSize: "0.68rem", fontWeight: 800, color: "#15803d", textTransform: "uppercase" }}>Pruebas (Oro)</div>
+                  <div style={{ fontSize: "1.05rem", fontWeight: 900, color: "#14532d", marginTop: "0.15rem" }}>
+                    {loadingAcademic ? "..." : `${notaOroPruebas}`} <span style={{ fontSize: "0.72rem", color: "#16a34a" }}>/ {maxNotaPruebas} pts</span>
+                  </div>
+                </div>
+
+                <div style={{ background: "#faf5ff", border: "1px solid #e9d5ff", borderRadius: "0.6rem", padding: "0.55rem 0.75rem" }}>
+                  <div style={{ fontSize: "0.68rem", fontWeight: 800, color: "#7e22ce", textTransform: "uppercase" }}>Exámenes Parciales</div>
+                  <div style={{ fontSize: "1.05rem", fontWeight: 900, color: "#581c87", marginTop: "0.15rem" }}>
+                    {loadingAcademic ? "..." : `${sumaExamenes}`} <span style={{ fontSize: "0.72rem", color: "#9333ea" }}>/ {maxExamenesPuntaje} pts</span>
+                  </div>
+                </div>
+
+                <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "0.6rem", padding: "0.55rem 0.75rem" }}>
+                  <div style={{ fontSize: "0.68rem", fontWeight: 800, color: "#475569", textTransform: "uppercase" }}>Asistencia Global</div>
+                  <div style={{ fontSize: "1.05rem", fontWeight: 900, color: "#1e293b", marginTop: "0.15rem" }}>
+                    {loadingAcademic ? "..." : `${attendanceStats.asistenciasCount}`} <span style={{ fontSize: "0.72rem", color: "#64748b" }}>de {attendanceStats.totalSemanas} sem ({attendanceStats.pct}%)</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* BARRA SEGMENTADA DE FILTRADO POR PARCIAL */}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                flexWrap: "wrap",
+                gap: "0.75rem",
+                padding: "0.4rem 0"
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: "0.45rem" }}>
+                <Layers size={18} color={theme.primary} />
+                <h3 style={{ fontSize: "1.05rem", fontWeight: 900, color: "#0f172a", margin: 0 }}>
+                  Evaluaciones Organizadas por Parcial
+                </h3>
+              </div>
+
+              {/* Selector de Parcial con Pills Modernos */}
+              <div
+                className="sp-parcial-selector"
+                style={{
+                  display: "inline-flex",
+                  background: "#f1f5f9",
+                  padding: "0.25rem",
+                  borderRadius: "0.75rem",
+                  gap: "0.25rem",
+                  border: "1px solid #e2e8f0",
+                  overflowX: "auto",
+                  maxWidth: "100%"
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() => setSelectedParcialFilter("todos")}
+                  style={{
+                    padding: "0.45rem 0.85rem",
+                    borderRadius: "0.55rem",
+                    border: "none",
+                    background: selectedParcialFilter === "todos" ? "#ffffff" : "transparent",
+                    color: selectedParcialFilter === "todos" ? "#0f172a" : "#64748b",
+                    fontWeight: 800,
+                    fontSize: "0.78rem",
+                    cursor: "pointer",
+                    boxShadow: selectedParcialFilter === "todos" ? "0 2px 6px rgba(0, 0, 0, 0.08)" : "none",
+                    transition: "all 0.15s ease",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "0.35rem",
+                    whiteSpace: "nowrap"
+                  }}
+                >
+                  <span>Todos los Parciales</span>
+                </button>
+
+                {parcialesData.map((p) => {
+                  const isSelected = selectedParcialFilter === p.key;
+                  return (
+                    <button
+                      key={p.key}
+                      type="button"
+                      onClick={() => setSelectedParcialFilter(p.key)}
+                      style={{
+                        padding: "0.45rem 0.85rem",
+                        borderRadius: "0.55rem",
+                        border: "none",
+                        background: isSelected ? theme.primary : "transparent",
+                        color: isSelected ? "#ffffff" : "#64748b",
+                        fontWeight: 800,
+                        fontSize: "0.78rem",
+                        cursor: "pointer",
+                        boxShadow: isSelected ? `0 2px 8px ${theme.primary}40` : "none",
+                        transition: "all 0.15s ease",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "0.35rem",
+                        whiteSpace: "nowrap"
+                      }}
                     >
-                      <span style={{ fontSize: "0.78rem", fontWeight: 900, color: "#7e22ce", textTransform: "uppercase", display: "block" }}>
-                        {ex.label}
+                      <span>{p.label}</span>
+                      <span
+                        style={{
+                          fontSize: "0.68rem",
+                          fontWeight: 900,
+                          padding: "0.08rem 0.35rem",
+                          borderRadius: "9999px",
+                          background: isSelected ? "rgba(255, 255, 255, 0.25)" : "#e2e8f0",
+                          color: isSelected ? "#ffffff" : "#475569"
+                        }}
+                      >
+                        {p.totalPuntosParcial} pts
                       </span>
-                      <div style={{ fontSize: "1.5rem", fontWeight: 900, color: "#581c87", marginTop: "0.25rem" }}>
-                        {formatGrade(ex.nota)}{" "}
-                        {ex.ptsMax > 0 && (
-                          <span style={{ fontSize: "0.82rem", color: "#9333ea", fontWeight: 700 }}>
-                            / {ex.ptsMax} pts
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* CONTENEDORES DE CADA PARCIAL (FILTRADOS SEGÚN LA SELECCIÓN) */}
+            {parcialesData
+              .filter((p) => selectedParcialFilter === "todos" || selectedParcialFilter === p.key)
+              .map((p) => {
+                return (
+                  <div
+                    key={`parcial_card_${p.key}`}
+                    className="sp-card-panel animate-fade-in"
+                    style={{
+                      background: "#ffffff",
+                      borderRadius: "1rem",
+                      border: "1.5px solid #e2e8f0",
+                      padding: "1.4rem",
+                      boxShadow: "0 2px 10px rgba(0, 0, 0, 0.02)",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "1.15rem"
+                    }}
+                  >
+                    {/* ENCABEZADO DEL PARCIAL */}
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        flexWrap: "wrap",
+                        gap: "0.75rem",
+                        paddingBottom: "0.85rem",
+                        borderBottom: "1.5px solid #f1f5f9"
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", gap: "0.65rem" }}>
+                        <div
+                          style={{
+                            width: "36px",
+                            height: "36px",
+                            borderRadius: "0.6rem",
+                            background: p.bgLight,
+                            border: `1.5px solid ${p.borderLight}`,
+                            color: p.accent,
+                            fontWeight: 900,
+                            fontSize: "0.95rem",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center"
+                          }}
+                        >
+                          {p.roman}
+                        </div>
+                        <div>
+                          <div style={{ display: "flex", alignItems: "center", gap: "0.45rem" }}>
+                            <h3 style={{ fontSize: "1.1rem", fontWeight: 900, color: "#0f172a", margin: 0 }}>
+                              {p.label}
+                            </h3>
+                            <span
+                              style={{
+                                fontSize: "0.72rem",
+                                fontWeight: 700,
+                                background: "#f1f5f9",
+                                color: "#475569",
+                                padding: "0.15rem 0.5rem",
+                                borderRadius: "0.4rem",
+                                border: "1px solid #e2e8f0"
+                              }}
+                            >
+                              {p.rangoSemanasText}
+                            </span>
+                          </div>
+                          <span style={{ fontSize: "0.76rem", color: "#64748b", fontWeight: 600 }}>
+                            Evaluación continua • {p.weeks.length} semanas calendarizadas
                           </span>
+                        </div>
+                      </div>
+
+                      <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
+                        {/* Subtotal del parcial */}
+                        <span
+                          style={{
+                            fontSize: "0.8rem",
+                            fontWeight: 900,
+                            background: p.bgLight,
+                            color: p.accent,
+                            padding: "0.3rem 0.75rem",
+                            borderRadius: "9999px",
+                            border: `1px solid ${p.borderLight}`
+                          }}
+                        >
+                          Subtotal Parcial: {p.totalPuntosParcial} pts
+                        </span>
+
+                        {/* Píldora de Derecho a Examen del Parcial */}
+                        <span
+                          style={{
+                            fontSize: "0.76rem",
+                            fontWeight: 800,
+                            padding: "0.3rem 0.7rem",
+                            borderRadius: "9999px",
+                            background: p.perdioDerecho ? "#fee2e2" : "#f0fdf4",
+                            color: p.perdioDerecho ? "#b91c1c" : "#15803d",
+                            border: p.perdioDerecho ? "1px solid #fca5a5" : "1px solid #bbf7d0",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "0.35rem"
+                          }}
+                        >
+                          {p.perdioDerecho ? (
+                            <>
+                              <ShieldAlert size={14} color="#dc2626" />
+                              <span>Sin Derecho ({p.faltasInjustificadas} faltas injustificadas)</span>
+                            </>
+                          ) : (
+                            <>
+                              <ShieldCheck size={14} color="#16a34a" />
+                              <span>Derecho a Examen Habilitado ✓</span>
+                            </>
+                          )}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* CUADRÍCULA CON ELEMENTOS DEL PARCIAL */}
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+                        gap: "1rem"
+                      }}
+                    >
+                      {/* CARD 1: EXAMEN PARCIAL */}
+                      <div
+                        style={{
+                          background: "#faf5ff",
+                          border: "1.5px solid #e9d5ff",
+                          borderRadius: "0.85rem",
+                          padding: "1.15rem",
+                          display: "flex",
+                          flexDirection: "column",
+                          justifyContent: "space-between",
+                          gap: "0.85rem"
+                        }}
+                      >
+                        <div>
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "0.5rem" }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: "0.45rem" }}>
+                              <GraduationCap size={18} color="#7c3aed" />
+                              <strong style={{ fontSize: "0.88rem", color: "#581c87" }}>
+                                {p.examen?.label || `Examen ${p.label}`}
+                              </strong>
+                            </div>
+                            {(() => {
+                              const isExamGraded = p.examen?.nota !== null && p.examen?.nota !== undefined && p.examen?.nota !== "";
+                              return (
+                                <span
+                                  style={{
+                                    fontSize: "0.68rem",
+                                    fontWeight: 800,
+                                    padding: "0.15rem 0.5rem",
+                                    borderRadius: "0.35rem",
+                                    background: isExamGraded ? "#dcfce7" : "#f1f5f9",
+                                    color: isExamGraded ? "#15803d" : "#64748b",
+                                    border: isExamGraded ? "1px solid #86efac" : "1px solid #e2e8f0"
+                                  }}
+                                >
+                                  {isExamGraded ? "✓ Calificado" : "⏳ Pendiente"}
+                                </span>
+                              );
+                            })()}
+                          </div>
+
+                          <div style={{ fontSize: "1.75rem", fontWeight: 900, color: "#581c87", lineHeight: 1.1 }}>
+                            {formatGrade(p.examen?.nota)}{" "}
+                            <span style={{ fontSize: "0.85rem", fontWeight: 700, color: "#9333ea" }}>
+                              / {p.examen?.ptsMax || 10} pts
+                            </span>
+                          </div>
+
+                          <div style={{ fontSize: "0.74rem", color: "#6b21a8", marginTop: "0.35rem", fontWeight: 600 }}>
+                            {p.examen?.subLabel || `Evaluación oficial de ${p.label}`}
+                          </div>
+                        </div>
+
+                        {p.perdioDerecho && (
+                          <div
+                            style={{
+                              background: "#fee2e2",
+                              border: "1px solid #fca5a5",
+                              borderRadius: "0.5rem",
+                              padding: "0.45rem 0.65rem",
+                              fontSize: "0.72rem",
+                              color: "#991b1b",
+                              fontWeight: 700,
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "0.35rem"
+                            }}
+                          >
+                            <AlertTriangle size={14} color="#dc2626" />
+                            <span>Inhabilitado por 2+ faltas injustificadas en este parcial.</span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* CARD 2: MANUALES DE LABORATORIO */}
+                      <div
+                        style={{
+                          background: "#ffffff",
+                          border: "1.5px solid #e2e8f0",
+                          borderRadius: "0.85rem",
+                          padding: "1.15rem",
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: "0.65rem"
+                        }}
+                      >
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", paddingBottom: "0.4rem", borderBottom: "1px solid #f1f5f9" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: "0.45rem" }}>
+                            <BookOpen size={18} color="#0284c7" />
+                            <strong style={{ fontSize: "0.88rem", color: "#0c4a6e" }}>
+                              Manuales del {p.label}
+                            </strong>
+                          </div>
+                          <span style={{ fontSize: "0.74rem", fontWeight: 800, color: "#0369a1", background: "#e0f2fe", padding: "0.15rem 0.5rem", borderRadius: "9999px" }}>
+                            {p.subtotalManuales} pts ({p.manualesCalificadosCount}/{p.manuales.length})
+                          </span>
+                        </div>
+
+                        {p.manuales.length === 0 ? (
+                          <div style={{ padding: "1rem", textAlign: "center", color: "#94a3b8", fontSize: "0.78rem" }}>
+                            No hay manuales asignados en este parcial.
+                          </div>
+                        ) : (
+                          <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem", maxHeight: "190px", overflowY: "auto" }}>
+                            {p.manuales.map((m) => {
+                              const hasGrade = m.nota !== null && m.nota !== undefined && m.nota !== "";
+                              return (
+                                <div
+                                  key={m.key}
+                                  style={{
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "space-between",
+                                    padding: "0.45rem 0.65rem",
+                                    borderRadius: "0.45rem",
+                                    background: "#f0f9ff",
+                                    border: "1px solid #bae6fd",
+                                    fontSize: "0.78rem"
+                                  }}
+                                >
+                                  <div style={{ minWidth: 0, flex: 1, paddingRight: "0.5rem" }}>
+                                    <div style={{ fontWeight: 700, color: "#0369a1", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                                      {m.label}
+                                    </div>
+                                    {m.semana > 0 && (
+                                      <span style={{ fontSize: "0.68rem", color: "#0284c7", fontWeight: 600 }}>
+                                        Semana {m.semana}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <strong style={{ fontSize: "0.88rem", color: hasGrade ? "#0c4a6e" : "#94a3b8", whiteSpace: "nowrap" }}>
+                                    {formatGrade(m.nota)} <span style={{ fontSize: "0.68rem", color: "#0284c7" }}>/ 1.0 pt</span>
+                                  </strong>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* CARD 3: PRUEBAS SEMANALES */}
+                      <div
+                        style={{
+                          background: "#ffffff",
+                          border: "1.5px solid #e2e8f0",
+                          borderRadius: "0.85rem",
+                          padding: "1.15rem",
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: "0.65rem"
+                        }}
+                      >
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", paddingBottom: "0.4rem", borderBottom: "1px solid #f1f5f9" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: "0.45rem" }}>
+                            <FileEdit size={18} color="#16a34a" />
+                            <strong style={{ fontSize: "0.88rem", color: "#14532d" }}>
+                              Pruebas del {p.label}
+                            </strong>
+                          </div>
+                          <span style={{ fontSize: "0.74rem", fontWeight: 800, color: "#15803d", background: "#dcfce7", padding: "0.15rem 0.5rem", borderRadius: "9999px" }}>
+                            {p.subtotalPruebas} pts ({p.pruebasCalificadasCount}/{p.pruebas.length})
+                          </span>
+                        </div>
+
+                        {p.pruebas.length === 0 ? (
+                          <div style={{ padding: "1rem", textAlign: "center", color: "#94a3b8", fontSize: "0.78rem" }}>
+                            No hay pruebas cortas programadas en este parcial.
+                          </div>
+                        ) : (
+                          <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem", maxHeight: "190px", overflowY: "auto" }}>
+                            {p.pruebas.map((pr) => {
+                              const hasGrade = pr.nota !== null && pr.nota !== undefined && pr.nota !== "";
+                              const sub = existingSubmissions[pr.semana];
+                              return (
+                                <div
+                                  key={pr.key}
+                                  style={{
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "space-between",
+                                    padding: "0.45rem 0.65rem",
+                                    borderRadius: "0.45rem",
+                                    background: "#f0fdf4",
+                                    border: "1px solid #bbf7d0",
+                                    fontSize: "0.78rem"
+                                  }}
+                                >
+                                  <div style={{ minWidth: 0, flex: 1, paddingRight: "0.5rem" }}>
+                                    <div style={{ fontWeight: 700, color: "#15803d", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                                      {pr.label}
+                                    </div>
+                                    <span style={{ fontSize: "0.68rem", color: "#16a34a", fontWeight: 600 }}>
+                                      Semana {pr.semana}
+                                    </span>
+                                  </div>
+
+                                  <div style={{ display: "flex", alignItems: "center", gap: "0.45rem" }}>
+                                    <strong style={{ fontSize: "0.88rem", color: hasGrade ? "#14532d" : "#94a3b8", whiteSpace: "nowrap" }}>
+                                      {formatGrade(pr.nota)} <span style={{ fontSize: "0.68rem", color: "#16a34a" }}>/ 5.0 pts</span>
+                                    </strong>
+                                    {sub && (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          const qObj = (onlineQuizzes || []).find((q) => Number(q.numero_semana) === Number(pr.semana)) || {
+                                            numero_semana: pr.semana,
+                                            titulo: pr.label
+                                          };
+                                          handleOpenReview(qObj, sub);
+                                        }}
+                                        style={{
+                                          padding: "0.2rem 0.45rem",
+                                          fontSize: "0.68rem",
+                                          fontWeight: 800,
+                                          borderRadius: "0.35rem",
+                                          border: "1px solid #86efac",
+                                          background: "#ffffff",
+                                          color: "#15803d",
+                                          cursor: "pointer"
+                                        }}
+                                        title="Ver comprobante de prueba"
+                                      >
+                                        Revisar
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
                         )}
                       </div>
                     </div>
-                  ))}
-                </div>
-              )}
-            </div>
 
-            {/* 2. Manuales y Pruebas Semanales en 2 Columnas */}
-            <div className="sp-subscores-grid">
-              {/* Manuales de Laboratorio */}
-              <div
-                className="sp-card-panel sp-subscores-card"
-                style={{
-                  background: "#ffffff",
-                  borderRadius: "1rem",
-                  border: "1px solid #e2e8f0",
-                  padding: "1.25rem",
-                  boxShadow: "0 2px 8px rgba(0, 0, 0, 0.02)"
-                }}
-              >
-                <div className="sp-subscores-header" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "0.5rem", marginBottom: "0.85rem" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                    <BookOpen size={18} color="#0284c7" />
-                    <h3 style={{ fontSize: "0.95rem", fontWeight: 800, color: "#0f172a", margin: 0 }}>
-                      Notas de Manuales
-                    </h3>
-                  </div>
-                  <span style={{ fontSize: "0.76rem", fontWeight: 800, background: "#e0f2fe", color: "#0369a1", padding: "0.2rem 0.55rem", borderRadius: "9999px", border: "1px solid #bae6fd" }}>
-                    Nota Oro: {loadingAcademic ? "..." : `${notaOroManuales} / ${maxNotaManuales > 0 ? maxNotaManuales : "—"} pts`}
-                  </span>
-                </div>
-
-                {loadingAcademic ? (
-                  <div style={{ display: "flex", flexDirection: "column", gap: "0.45rem" }}>
-                    {[1, 2, 3, 4].map((idx) => (
-                      <div
-                        key={idx}
-                        style={{
-                          height: "38px",
-                          borderRadius: "0.5rem",
-                          background: "#f0f9ff",
-                          border: "1px solid #bae6fd",
-                          animation: "pulseSkeleton 1.5s infinite"
-                        }}
-                      />
-                    ))}
-                  </div>
-                ) : manualesList.length === 0 ? (
-                  <div style={{ padding: "1.5rem", textAlign: "center", color: "#94a3b8", fontSize: "0.82rem" }}>
-                    No hay calificaciones de manuales registradas aún.
-                  </div>
-                ) : (
-                  <div style={{ display: "flex", flexDirection: "column", gap: "0.45rem" }}>
-                    {manualesList.map((m) => (
-                      <div
-                        key={m.key}
-                        className="sp-subscore-item"
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "space-between",
-                          padding: "0.5rem 0.75rem",
-                          borderRadius: "0.5rem",
-                          background: "#f0f9ff",
-                          border: "1px solid #bae6fd",
-                          fontSize: "0.82rem"
-                        }}
-                      >
-                        <span style={{ fontWeight: 700, color: "#0369a1" }}>{m.label}</span>
-                        <strong style={{ fontSize: "0.95rem", color: "#0c4a6e" }}>{formatGrade(m.nota)}</strong>
+                    {/* SECCIÓN INFERIOR: HISTORIAL DE ASISTENCIAS DEL PARCIAL */}
+                    <div
+                      style={{
+                        background: "#f8fafc",
+                        border: "1px solid #e2e8f0",
+                        borderRadius: "0.75rem",
+                        padding: "0.75rem 1rem",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        flexWrap: "wrap",
+                        gap: "0.65rem"
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                        <CalendarCheck size={16} color="#0891b2" />
+                        <span style={{ fontSize: "0.78rem", fontWeight: 800, color: "#334155" }}>
+                          Asistencia en {p.label}:
+                        </span>
+                        <span style={{ fontSize: "0.78rem", fontWeight: 700, color: "#16a34a" }}>
+                          ✓ {p.asistenciasCount} Asistió
+                        </span>
+                        {p.faltasJustificadas > 0 && (
+                          <span style={{ fontSize: "0.78rem", fontWeight: 700, color: "#d97706" }}>
+                            • {p.faltasJustificadas} FJ
+                          </span>
+                        )}
+                        {p.faltasInjustificadas > 0 && (
+                          <span style={{ fontSize: "0.78rem", fontWeight: 700, color: "#dc2626" }}>
+                            • {p.faltasInjustificadas} FI
+                          </span>
+                        )}
                       </div>
-                    ))}
-                  </div>
-                )}
-              </div>
 
-              {/* Pruebas Semanales Cortas */}
-              <div
-                className="sp-card-panel sp-subscores-card"
-                style={{
-                  background: "#ffffff",
-                  borderRadius: "1rem",
-                  border: "1px solid #e2e8f0",
-                  padding: "1.25rem",
-                  boxShadow: "0 2px 8px rgba(0, 0, 0, 0.02)"
-                }}
-              >
-                <div className="sp-subscores-header" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "0.5rem", marginBottom: "0.85rem" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                    <FileEdit size={18} color="#16a34a" />
-                    <h3 style={{ fontSize: "0.95rem", fontWeight: 800, color: "#0f172a", margin: 0 }}>
-                      Pruebas Semanales
-                    </h3>
-                  </div>
-                  <span style={{ fontSize: "0.76rem", fontWeight: 800, background: "#dcfce7", color: "#15803d", padding: "0.2rem 0.55rem", borderRadius: "9999px", border: "1px solid #bbf7d0" }}>
-                    Nota Oro: {loadingAcademic ? "..." : `${notaOroPruebas} / ${maxNotaPruebas > 0 ? maxNotaPruebas : "—"} pts`}
-                  </span>
-                </div>
+                      {/* Chips de semanas del parcial */}
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: "0.3rem" }}>
+                        {p.semanasAsistencia.map((semItem) => {
+                          const isAsist = semItem.estado === "Asistio";
+                          const isFJ = semItem.estado === "Falta justificada";
+                          const isFI = semItem.estado === "Falta injustificada";
 
-                {loadingAcademic ? (
-                  <div style={{ display: "flex", flexDirection: "column", gap: "0.45rem" }}>
-                    {[1, 2, 3, 4].map((idx) => (
-                      <div
-                        key={idx}
-                        style={{
-                          height: "38px",
-                          borderRadius: "0.5rem",
-                          background: "#f0fdf4",
-                          border: "1px solid #bbf7d0",
-                          animation: "pulseSkeleton 1.5s infinite"
-                        }}
-                      />
-                    ))}
-                  </div>
-                ) : pruebasList.length === 0 ? (
-                  <div style={{ padding: "1.5rem", textAlign: "center", color: "#94a3b8", fontSize: "0.82rem" }}>
-                    No hay calificaciones de pruebas registradas aún.
-                  </div>
-                ) : (
-                  <div style={{ display: "flex", flexDirection: "column", gap: "0.45rem" }}>
-                    {pruebasList.map((p) => (
-                      <div
-                        key={p.key}
-                        className="sp-subscore-item"
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "space-between",
-                          padding: "0.5rem 0.75rem",
-                          borderRadius: "0.5rem",
-                          background: "#f0fdf4",
-                          border: "1px solid #bbf7d0",
-                          fontSize: "0.82rem"
-                        }}
-                      >
-                        <span style={{ fontWeight: 700, color: "#15803d" }}>{p.label}</span>
-                        <strong style={{ fontSize: "0.95rem", color: "#14532d" }}>{formatGrade(p.nota)}</strong>
+                          let bgSem = "#f1f5f9";
+                          let colorSem = "#64748b";
+                          let labelSem = `S${semItem.semana}: —`;
+
+                          if (isAsist) {
+                            bgSem = "#dcfce7";
+                            colorSem = "#15803d";
+                            labelSem = `S${semItem.semana}: ✓`;
+                          } else if (isFJ) {
+                            bgSem = "#fef3c7";
+                            colorSem = "#b45309";
+                            labelSem = `S${semItem.semana}: FJ`;
+                          } else if (isFI) {
+                            bgSem = "#fee2e2";
+                            colorSem = "#b91c1c";
+                            labelSem = `S${semItem.semana}: FI`;
+                          }
+
+                          return (
+                            <span
+                              key={`sem_pill_${p.key}_${semItem.semana}`}
+                              style={{
+                                fontSize: "0.68rem",
+                                fontWeight: 800,
+                                padding: "0.15rem 0.45rem",
+                                borderRadius: "0.35rem",
+                                background: bgSem,
+                                color: colorSem
+                              }}
+                              title={`${semItem.nombre}: ${semItem.estado}`}
+                            >
+                              {labelSem}
+                            </span>
+                          );
+                        })}
                       </div>
-                    ))}
+                    </div>
                   </div>
-                )}
-              </div>
-            </div>
+                );
+              })}
           </div>
         )}
 
@@ -3355,61 +3966,122 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                 No hay semanas académicas configuradas para esta carrera.
               </div>
             ) : (
-              <div className="sp-asistencia-grid">
-                {activeCareerWeeks.map((w) => {
-                  const sem = Number(w.numero_semana);
-                  const val =
-                    asistencias[`asistencia_${sem}`] ??
-                    asistencias[`semana_${sem}`] ??
-                    student?.[`Asistencia de la semana ${sem}`] ??
-                    student?.[`asistencia_${sem}`] ??
-                    null;
-
-                  let bg = "#f8fafc";
-                  let border = "#e2e8f0";
-                  let textColor = "#64748b";
-                  let badgeText = "Sin registro";
-
-                  if (val === "Asistio") {
-                    bg = "#f0fdf4";
-                    border = "#86efac";
-                    textColor = "#15803d";
-                    badgeText = "Asistió ✓";
-                  } else if (val === "Falta justificada") {
-                    bg = "#fffbeb";
-                    border = "#fde68a";
-                    textColor = "#b45309";
-                    badgeText = "Falta Justificada";
-                  } else if (val === "Falta injustificada") {
-                    bg = "#fef2f2";
-                    border = "#fecdd3";
-                    textColor = "#dc2626";
-                    badgeText = "Falta Injustificada ✗";
-                  }
-
-                  const displayName = getWeekDisplayName(w);
-
+              <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
+                {parcialesData.map((p) => {
+                  if (p.weeks.length === 0) return null;
                   return (
                     <div
-                      key={`asist_sem_${sem}`}
-                      className="sp-asistencia-item"
+                      key={`asist_parcial_block_${p.key}`}
                       style={{
-                        background: bg,
-                        border: `1.5px solid ${border}`,
-                        borderRadius: "0.75rem",
-                        padding: "0.85rem",
-                        textAlign: "center",
+                        background: "#f8fafc",
+                        border: "1px solid #e2e8f0",
+                        borderRadius: "0.85rem",
+                        padding: "1rem 1.15rem",
                         display: "flex",
                         flexDirection: "column",
-                        gap: "0.35rem"
+                        gap: "0.85rem"
                       }}
                     >
-                      <span className="sp-asistencia-name" style={{ fontSize: "0.78rem", fontWeight: 800, color: "#1e293b", lineHeight: 1.25 }}>
-                        {displayName}
-                      </span>
-                      <strong className="sp-asistencia-badge" style={{ fontSize: "0.82rem", color: textColor, fontWeight: 800 }}>
-                        {badgeText}
-                      </strong>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "0.5rem" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                          <span
+                            style={{
+                              fontSize: "0.88rem",
+                              fontWeight: 900,
+                              color: p.accent,
+                              background: p.bgLight,
+                              padding: "0.2rem 0.6rem",
+                              borderRadius: "0.4rem",
+                              border: `1px solid ${p.borderLight}`
+                            }}
+                          >
+                            {p.label}
+                          </span>
+                          <span style={{ fontSize: "0.75rem", color: "#64748b", fontWeight: 700 }}>
+                            ({p.rangoSemanasText})
+                          </span>
+                        </div>
+
+                        <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap" }}>
+                          <span style={{ fontSize: "0.74rem", fontWeight: 800, color: "#16a34a", background: "#dcfce7", padding: "0.15rem 0.5rem", borderRadius: "9999px" }}>
+                            ✓ {p.asistenciasCount} Asistió
+                          </span>
+                          {p.faltasJustificadas > 0 && (
+                            <span style={{ fontSize: "0.74rem", fontWeight: 800, color: "#d97706", background: "#fef3c7", padding: "0.15rem 0.5rem", borderRadius: "9999px" }}>
+                              • {p.faltasJustificadas} FJ
+                            </span>
+                          )}
+                          {p.faltasInjustificadas > 0 && (
+                            <span style={{ fontSize: "0.74rem", fontWeight: 800, color: "#dc2626", background: "#fee2e2", padding: "0.15rem 0.5rem", borderRadius: "9999px" }}>
+                              • {p.faltasInjustificadas} FI
+                            </span>
+                          )}
+                          <span
+                            style={{
+                              fontSize: "0.72rem",
+                              fontWeight: 800,
+                              padding: "0.15rem 0.5rem",
+                              borderRadius: "9999px",
+                              background: p.perdioDerecho ? "#fee2e2" : "#f0fdf4",
+                              color: p.perdioDerecho ? "#b91c1c" : "#15803d",
+                              border: p.perdioDerecho ? "1px solid #fca5a5" : "1px solid #bbf7d0"
+                            }}
+                          >
+                            {p.perdioDerecho ? "🚨 Sin Derecho" : "✓ Con Derecho"}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="sp-asistencia-grid">
+                        {p.semanasAsistencia.map((wItem) => {
+                          const val = wItem.estado;
+                          let bg = "#ffffff";
+                          let border = "#e2e8f0";
+                          let textColor = "#64748b";
+                          let badgeText = "Sin registro";
+
+                          if (val === "Asistio") {
+                            bg = "#f0fdf4";
+                            border = "#86efac";
+                            textColor = "#15803d";
+                            badgeText = "Asistió ✓";
+                          } else if (val === "Falta justificada") {
+                            bg = "#fffbeb";
+                            border = "#fde68a";
+                            textColor = "#b45309";
+                            badgeText = "Falta Justificada";
+                          } else if (val === "Falta injustificada") {
+                            bg = "#fef2f2";
+                            border = "#fecdd3";
+                            textColor = "#dc2626";
+                            badgeText = "Falta Injustificada ✗";
+                          }
+
+                          return (
+                            <div
+                              key={`asist_sem_${wItem.semana}`}
+                              className="sp-asistencia-item"
+                              style={{
+                                background: bg,
+                                border: `1.5px solid ${border}`,
+                                borderRadius: "0.75rem",
+                                padding: "0.75rem 0.65rem",
+                                textAlign: "center",
+                                display: "flex",
+                                flexDirection: "column",
+                                gap: "0.3rem"
+                              }}
+                            >
+                              <span className="sp-asistencia-name" style={{ fontSize: "0.76rem", fontWeight: 800, color: "#1e293b", lineHeight: 1.25 }}>
+                                {wItem.nombre}
+                              </span>
+                              <strong className="sp-asistencia-badge" style={{ fontSize: "0.8rem", color: textColor, fontWeight: 800 }}>
+                                {badgeText}
+                              </strong>
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
                   );
                 })}
@@ -5421,6 +6093,419 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                   <span>Cerrando y enviando prueba automáticamente al servidor...</span>
                 </div>
               )}
+            </div>
+          </div>
+        )}
+
+        {/* =================================================================== */}
+        {/* PESTAÑA D: SEGURIDAD Y ACTUALIZAR CONTRASEÑA                        */}
+        {/* =================================================================== */}
+        {activeTab === "seguridad" && (
+          <div className="sp-tab-content-container animate-fade-in" style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
+            {/* Banner Informativo Superior */}
+            <div
+              style={{
+                background: "linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)",
+                border: "1.5px solid #e2e8f0",
+                borderRadius: "1rem",
+                padding: "1.35rem 1.5rem",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                flexWrap: "wrap",
+                gap: "1rem"
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: "0.85rem" }}>
+                <div
+                  style={{
+                    width: "46px",
+                    height: "46px",
+                    borderRadius: "0.75rem",
+                    background: theme.gradient || "linear-gradient(135deg, #0284c7 0%, #0369a1 100%)",
+                    color: "#ffffff",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    boxShadow: `0 4px 12px ${theme.primary}40`,
+                    flexShrink: 0
+                  }}
+                >
+                  <KeyRound size={24} />
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: "1.1rem", fontWeight: 900, color: "#0f172a" }}>
+                    Seguridad y Actualización de Contraseña
+                  </h3>
+                  <p style={{ margin: "0.2rem 0 0", fontSize: "0.84rem", color: "#64748b" }}>
+                    Gestiona tu clave de acceso para proteger tus registros de laboratorio, notas y evaluaciones.
+                  </p>
+                </div>
+              </div>
+
+              <div
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "0.45rem",
+                  background: "#ffffff",
+                  padding: "0.45rem 0.85rem",
+                  borderRadius: "0.6rem",
+                  border: "1px solid #cbd5e1",
+                  fontSize: "0.8rem",
+                  fontWeight: 800,
+                  color: "#475569"
+                }}
+              >
+                <span>Usuario:</span>
+                <span style={{ fontFamily: "monospace", color: theme.primary, fontWeight: 900 }}>
+                  {cuentaKey}
+                </span>
+              </div>
+            </div>
+
+            {/* Tarjeta con el Formulario y Consejos */}
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
+                gap: "1.5rem"
+              }}
+            >
+              {/* Formulario */}
+              <div
+                className="sp-card-panel"
+                style={{
+                  background: "#ffffff",
+                  borderRadius: "1rem",
+                  border: "1px solid #e2e8f0",
+                  padding: "1.75rem",
+                  boxShadow: "0 4px 14px rgba(0, 0, 0, 0.03)"
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "1.25rem" }}>
+                  <Lock size={19} color={theme.primary} />
+                  <h4 style={{ margin: 0, fontSize: "1rem", fontWeight: 900, color: "#0f172a" }}>
+                    Cambiar mi Contraseña
+                  </h4>
+                </div>
+
+                {/* Nota sobre contraseña inicial */}
+                <div
+                  style={{
+                    background: "#eff6ff",
+                    border: "1px solid #bfdbfe",
+                    borderRadius: "0.65rem",
+                    padding: "0.75rem 0.9rem",
+                    fontSize: "0.82rem",
+                    color: "#1e40af",
+                    marginBottom: "1.25rem",
+                    display: "flex",
+                    alignItems: "flex-start",
+                    gap: "0.5rem"
+                  }}
+                >
+                  <AlertCircle size={17} style={{ flexShrink: 0, marginTop: "0.1rem" }} />
+                  <div style={{ lineHeight: 1.45 }}>
+                    Si es la primera vez que actualizas tu acceso o no recuerdas haberla modificado antes, tu contraseña actual es la inicial: <strong style={{ fontFamily: "monospace" }}>histolab123</strong>.
+                  </div>
+                </div>
+
+                <form onSubmit={handleUpdatePassword} style={{ display: "flex", flexDirection: "column", gap: "1.1rem" }}>
+                  {/* Campo 1: Contraseña Actual */}
+                  <div>
+                    <label style={{ display: "block", fontSize: "0.82rem", fontWeight: 800, color: "#334155", marginBottom: "0.4rem" }}>
+                      Contraseña Actual <span style={{ color: "#ef4444" }}>*</span>
+                    </label>
+                    <div style={{ position: "relative" }}>
+                      <input
+                        type={showCurrentPassword ? "text" : "password"}
+                        value={currentPasswordInput}
+                        onChange={(e) => setCurrentPasswordInput(e.target.value)}
+                        placeholder="Ingresa tu contraseña actual"
+                        required
+                        style={{
+                          width: "100%",
+                          padding: "0.65rem 2.5rem 0.65rem 0.85rem",
+                          borderRadius: "0.6rem",
+                          border: "1.5px solid #cbd5e1",
+                          fontSize: "0.9rem",
+                          outline: "none",
+                          boxSizing: "border-box",
+                          transition: "border-color 0.15s ease"
+                        }}
+                        onFocus={(e) => (e.target.style.borderColor = theme.primary)}
+                        onBlur={(e) => (e.target.style.borderColor = "#cbd5e1")}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowCurrentPassword((prev) => !prev)}
+                        style={{
+                          position: "absolute",
+                          right: "0.65rem",
+                          top: "50%",
+                          transform: "translateY(-50%)",
+                          background: "none",
+                          border: "none",
+                          color: "#64748b",
+                          cursor: "pointer",
+                          padding: "0.2rem",
+                          display: "flex",
+                          alignItems: "center"
+                        }}
+                        title={showCurrentPassword ? "Ocultar" : "Mostrar"}
+                      >
+                        {showCurrentPassword ? <EyeOff size={17} /> : <Eye size={17} />}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Campo 2: Nueva Contraseña */}
+                  <div>
+                    <label style={{ display: "block", fontSize: "0.82rem", fontWeight: 800, color: "#334155", marginBottom: "0.4rem" }}>
+                      Nueva Contraseña <span style={{ color: "#ef4444" }}>*</span>
+                    </label>
+                    <div style={{ position: "relative" }}>
+                      <input
+                        type={showNewPassword ? "text" : "password"}
+                        value={newPasswordInput}
+                        onChange={(e) => setNewPasswordInput(e.target.value)}
+                        placeholder="Mínimo 6 caracteres"
+                        required
+                        style={{
+                          width: "100%",
+                          padding: "0.65rem 2.5rem 0.65rem 0.85rem",
+                          borderRadius: "0.6rem",
+                          border: "1.5px solid #cbd5e1",
+                          fontSize: "0.9rem",
+                          outline: "none",
+                          boxSizing: "border-box",
+                          transition: "border-color 0.15s ease"
+                        }}
+                        onFocus={(e) => (e.target.style.borderColor = theme.primary)}
+                        onBlur={(e) => (e.target.style.borderColor = "#cbd5e1")}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowNewPassword((prev) => !prev)}
+                        style={{
+                          position: "absolute",
+                          right: "0.65rem",
+                          top: "50%",
+                          transform: "translateY(-50%)",
+                          background: "none",
+                          border: "none",
+                          color: "#64748b",
+                          cursor: "pointer",
+                          padding: "0.2rem",
+                          display: "flex",
+                          alignItems: "center"
+                        }}
+                        title={showNewPassword ? "Ocultar" : "Mostrar"}
+                      >
+                        {showNewPassword ? <EyeOff size={17} /> : <Eye size={17} />}
+                      </button>
+                    </div>
+                    {/* Checklist en tiempo real de requerimientos */}
+                    <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem", marginTop: "0.45rem" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "0.35rem", fontSize: "0.75rem", color: newPasswordInput.length >= 6 ? "#16a34a" : "#64748b", fontWeight: 700 }}>
+                        {newPasswordInput.length >= 6 ? <Check size={13} strokeWidth={3} /> : <span style={{ width: "13px", textAlign: "center" }}>•</span>}
+                        <span>Mínimo 6 caracteres {newPasswordInput.length > 0 && `(${newPasswordInput.length}/6)`}</span>
+                      </div>
+                      {newPasswordInput && currentPasswordInput && (
+                        <div style={{ display: "flex", alignItems: "center", gap: "0.35rem", fontSize: "0.75rem", color: newPasswordInput !== currentPasswordInput ? "#16a34a" : "#dc2626", fontWeight: 700 }}>
+                          {newPasswordInput !== currentPasswordInput ? <Check size={13} strokeWidth={3} /> : <X size={13} strokeWidth={3} />}
+                          <span>{newPasswordInput !== currentPasswordInput ? "Diferente a la actual" : "Debe ser diferente a la contraseña actual"}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Campo 3: Confirmar Nueva Contraseña */}
+                  <div>
+                    <label style={{ display: "block", fontSize: "0.82rem", fontWeight: 800, color: "#334155", marginBottom: "0.4rem" }}>
+                      Confirmar Nueva Contraseña <span style={{ color: "#ef4444" }}>*</span>
+                    </label>
+                    <div style={{ position: "relative" }}>
+                      <input
+                        type={showConfirmPassword ? "text" : "password"}
+                        value={confirmPasswordInput}
+                        onChange={(e) => setConfirmPasswordInput(e.target.value)}
+                        placeholder="Repite la nueva contraseña"
+                        required
+                        style={{
+                          width: "100%",
+                          padding: "0.65rem 2.5rem 0.65rem 0.85rem",
+                          borderRadius: "0.6rem",
+                          border: `1.5px solid ${confirmPasswordInput ? (confirmPasswordInput === newPasswordInput ? "#86efac" : "#fca5a5") : "#cbd5e1"}`,
+                          fontSize: "0.9rem",
+                          outline: "none",
+                          boxSizing: "border-box",
+                          transition: "border-color 0.15s ease"
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowConfirmPassword((prev) => !prev)}
+                        style={{
+                          position: "absolute",
+                          right: "0.65rem",
+                          top: "50%",
+                          transform: "translateY(-50%)",
+                          background: "none",
+                          border: "none",
+                          color: "#64748b",
+                          cursor: "pointer",
+                          padding: "0.2rem",
+                          display: "flex",
+                          alignItems: "center"
+                        }}
+                        title={showConfirmPassword ? "Ocultar" : "Mostrar"}
+                      >
+                        {showConfirmPassword ? <EyeOff size={17} /> : <Eye size={17} />}
+                      </button>
+                    </div>
+                    {confirmPasswordInput && (
+                      <div style={{ fontSize: "0.75rem", fontWeight: 700, marginTop: "0.35rem", color: confirmPasswordInput === newPasswordInput ? "#16a34a" : "#dc2626" }}>
+                        {confirmPasswordInput === newPasswordInput ? "✓ Las contraseñas coinciden" : "✗ Las contraseñas no coinciden"}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Alerta de Feedback */}
+                  {passwordFeedback && (
+                    <div
+                      className="animate-fade-in"
+                      style={{
+                        padding: "0.75rem 1rem",
+                        borderRadius: "0.65rem",
+                        fontSize: "0.85rem",
+                        fontWeight: 700,
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "0.6rem",
+                        background: passwordFeedback.type === "success" ? "#f0fdf4" : "#fef2f2",
+                        color: passwordFeedback.type === "success" ? "#166534" : "#991b1b",
+                        border: `1.5px solid ${passwordFeedback.type === "success" ? "#86efac" : "#fca5a5"}`
+                      }}
+                    >
+                      {passwordFeedback.type === "success" ? <CheckCircle2 size={18} color="#16a34a" /> : <AlertTriangle size={18} color="#dc2626" />}
+                      <span>{passwordFeedback.message}</span>
+                    </div>
+                  )}
+
+                  {/* Botón de Enviar */}
+                  <button
+                    type="submit"
+                    disabled={
+                      changingPassword ||
+                      !currentPasswordInput.trim() ||
+                      !newPasswordInput.trim() ||
+                      newPasswordInput.trim().length < 6 ||
+                      newPasswordInput.trim() !== confirmPasswordInput.trim()
+                    }
+                    style={{
+                      marginTop: "0.5rem",
+                      padding: "0.85rem 1.5rem",
+                      borderRadius: "0.75rem",
+                      border: "none",
+                      background:
+                        changingPassword ||
+                        !currentPasswordInput.trim() ||
+                        !newPasswordInput.trim() ||
+                        newPasswordInput.trim().length < 6 ||
+                        newPasswordInput.trim() !== confirmPasswordInput.trim()
+                          ? "#cbd5e1"
+                          : theme.gradient || "linear-gradient(135deg, #0284c7 0%, #0369a1 100%)",
+                      color: "#ffffff",
+                      fontSize: "0.92rem",
+                      fontWeight: 900,
+                      cursor:
+                        changingPassword ||
+                        !currentPasswordInput.trim() ||
+                        !newPasswordInput.trim() ||
+                        newPasswordInput.trim().length < 6 ||
+                        newPasswordInput.trim() !== confirmPasswordInput.trim()
+                          ? "not-allowed"
+                          : "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: "0.5rem",
+                      boxShadow:
+                        changingPassword ||
+                        !currentPasswordInput.trim() ||
+                        !newPasswordInput.trim() ||
+                        newPasswordInput.trim().length < 6 ||
+                        newPasswordInput.trim() !== confirmPasswordInput.trim()
+                          ? "none"
+                          : `0 4px 14px ${theme.primary}40`,
+                      transition: "all 0.15s ease"
+                    }}
+                  >
+                    {changingPassword ? <RefreshCw size={17} className="animate-spin" /> : <ShieldCheck size={18} />}
+                    <span>{changingPassword ? "Actualizando contraseña..." : "Actualizar mi Contraseña"}</span>
+                  </button>
+                </form>
+              </div>
+
+              {/* Panel Lateral: Consejos y Políticas de Seguridad */}
+              <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
+                <div
+                  className="sp-card-panel"
+                  style={{
+                    background: "#ffffff",
+                    borderRadius: "1rem",
+                    border: "1px solid #e2e8f0",
+                    padding: "1.5rem",
+                    boxShadow: "0 4px 14px rgba(0, 0, 0, 0.03)"
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "1rem" }}>
+                    <Shield size={19} color="#16a34a" />
+                    <h4 style={{ margin: 0, fontSize: "0.95rem", fontWeight: 900, color: "#0f172a" }}>
+                      Recomendaciones de Seguridad
+                    </h4>
+                  </div>
+
+                  <ul style={{ margin: 0, paddingLeft: "1.2rem", fontSize: "0.84rem", color: "#475569", lineHeight: 1.6, display: "flex", flexDirection: "column", gap: "0.6rem" }}>
+                    <li>
+                      <strong>Uso personal e intransferible:</strong> Tu número de cuenta y contraseña son tu firma digital en las pruebas y registros de laboratorio.
+                    </li>
+                    <li>
+                      <strong>Protección anti-suplantación:</strong> Al rendir evaluaciones se valida la sesión única y marca de agua con tu número de cuenta.
+                    </li>
+                    <li>
+                      <strong>Contraseña robusta:</strong> Te recomendamos combinar letras y números, y evitar fechas obvias o tu mismo número de cuenta.
+                    </li>
+                    <li>
+                      <strong>Recuerda tu nueva clave:</strong> Apenas se guarde, se aplicará de inmediato para cualquier nuevo inicio de sesión en cualquier dispositivo.
+                    </li>
+                  </ul>
+                </div>
+
+                <div
+                  style={{
+                    background: "linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%)",
+                    border: "1.5px solid #86efac",
+                    borderRadius: "1rem",
+                    padding: "1.25rem 1.4rem",
+                    display: "flex",
+                    alignItems: "flex-start",
+                    gap: "0.75rem"
+                  }}
+                >
+                  <CheckCircle2 size={22} color="#15803d" style={{ flexShrink: 0, marginTop: "0.1rem" }} />
+                  <div>
+                    <h5 style={{ margin: 0, fontSize: "0.9rem", fontWeight: 900, color: "#166534" }}>
+                      Sincronización Inmediata
+                    </h5>
+                    <p style={{ margin: "0.25rem 0 0", fontSize: "0.8rem", color: "#15803d", lineHeight: 1.45 }}>
+                      Tu nueva contraseña se guarda en los servidores seguros de Histolab al instante, sin necesidad de reiniciar tu navegador.
+                    </p>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         )}
