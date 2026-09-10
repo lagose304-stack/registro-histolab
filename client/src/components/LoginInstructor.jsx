@@ -15,7 +15,8 @@ import {
   Activity,
   Smile,
   Microscope,
-  Apple
+  Apple,
+  Sparkles
 } from "lucide-react";
 import { api } from "../services/api";
 import { safeStorage } from "../utils/safeStorage";
@@ -450,12 +451,55 @@ export default function LoginInstructor({
         {activePortal === "ESTUDIANTE" && (
           <form onSubmit={handleStudentLoginSubmit} style={{ padding: "1rem 1.5rem 1.75rem" }}>
             <div style={{ marginBottom: "1rem" }}>
-              <h2 style={{ fontSize: "1.05rem", fontWeight: 800, color: "#0f172a", margin: "0 0 0.2rem 0" }}>
-                Portal del Estudiante
-              </h2>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.5rem", flexWrap: "wrap", marginBottom: "0.25rem" }}>
+                <h2 style={{ fontSize: "1.05rem", fontWeight: 800, color: "#0f172a", margin: 0 }}>
+                  Portal del Estudiante
+                </h2>
+                <span
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "0.3rem",
+                    background: "rgba(2, 132, 199, 0.08)",
+                    color: "#0284c7",
+                    border: "1px solid rgba(2, 132, 199, 0.22)",
+                    borderRadius: "9999px",
+                    padding: "0.2rem 0.55rem",
+                    fontSize: "0.72rem",
+                    fontWeight: 700
+                  }}
+                >
+                  <Sparkles size={12} />
+                  Próximamente en 2027
+                </span>
+              </div>
               <span style={{ fontSize: "0.76rem", color: "#64748b" }}>
                 Selecciona tu carrera y consulta tus calificaciones y asistencias.
               </span>
+
+              {/* Mensaje Informativo: Próximamente en 2027 */}
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "0.55rem",
+                  background: "linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%)",
+                  border: "1px solid #bae6fd",
+                  borderRadius: "0.65rem",
+                  padding: "0.55rem 0.85rem",
+                  marginTop: "0.75rem",
+                  fontSize: "0.79rem",
+                  color: "#0369a1"
+                }}
+              >
+                <Sparkles size={16} style={{ color: "#0284c7", flexShrink: 0 }} />
+                <span>
+                  <strong style={{ color: "#075985" }}>Próximamente en 2027</strong>
+                  <span style={{ color: "#475569", marginLeft: "0.35rem" }}>
+                    — Los formularios continúan activos para su uso normal.
+                  </span>
+                </span>
+              </div>
             </div>
 
             {/* PASO 1: ACORDEÓN DE SELECCIÓN DE CARRERA */}
@@ -817,12 +861,55 @@ export default function LoginInstructor({
         {activePortal === "INSTRUCTOR" && (
           <form onSubmit={handleInstructorLoginSubmit} style={{ padding: "1rem 1.5rem 1.75rem" }}>
             <div style={{ marginBottom: "1rem" }}>
-              <h2 style={{ fontSize: "1.05rem", fontWeight: 800, color: "#0f172a", margin: "0 0 0.2rem 0" }}>
-                Acceso de los Instructores
-              </h2>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.5rem", flexWrap: "wrap", marginBottom: "0.25rem" }}>
+                <h2 style={{ fontSize: "1.05rem", fontWeight: 800, color: "#0f172a", margin: 0 }}>
+                  Acceso de los Instructores
+                </h2>
+                <span
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "0.3rem",
+                    background: "rgba(2, 132, 199, 0.08)",
+                    color: "#0284c7",
+                    border: "1px solid rgba(2, 132, 199, 0.22)",
+                    borderRadius: "9999px",
+                    padding: "0.2rem 0.55rem",
+                    fontSize: "0.72rem",
+                    fontWeight: 700
+                  }}
+                >
+                  <Sparkles size={12} />
+                  Próximamente en 2027
+                </span>
+              </div>
               <span style={{ fontSize: "0.76rem", color: "#64748b" }}>
                 Ingresa con tu correo institucional y contraseña docente.
               </span>
+
+              {/* Mensaje Informativo: Próximamente en 2027 */}
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "0.55rem",
+                  background: "linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%)",
+                  border: "1px solid #bae6fd",
+                  borderRadius: "0.65rem",
+                  padding: "0.55rem 0.85rem",
+                  marginTop: "0.75rem",
+                  fontSize: "0.79rem",
+                  color: "#0369a1"
+                }}
+              >
+                <Sparkles size={16} style={{ color: "#0284c7", flexShrink: 0 }} />
+                <span>
+                  <strong style={{ color: "#075985" }}>Próximamente en 2027</strong>
+                  <span style={{ color: "#475569", marginLeft: "0.35rem" }}>
+                    — Los formularios continúan activos para su uso normal.
+                  </span>
+                </span>
+              </div>
             </div>
 
             {/* Correo */}
