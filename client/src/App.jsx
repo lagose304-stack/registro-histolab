@@ -1,13 +1,14 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { lazy, Suspense, useState, useEffect, useCallback, useRef } from "react";
 import Navbar from "./components/Navbar";
 import LoginInstructor from "./components/LoginInstructor";
-import DashboardInstructor from "./components/DashboardInstructor";
-import StudentPortalView from "./components/StudentPortalView";
 import Notification from "./components/Notification";
 import { api } from "./services/api";
 import { AlertTriangle } from "lucide-react";
 
 import { clearNavState } from "./utils/navigationState";
+
+const DashboardInstructor = lazy(() => import("./components/DashboardInstructor"));
+const StudentPortalView = lazy(() => import("./components/StudentPortalView"));
 
 // Tiempo de inactividad máximo: 20 minutos
 const INACTIVITY_TIMEOUT_MS = 20 * 60 * 1000;
@@ -19,6 +20,7 @@ export default function App() {
   const [currentInstructor, setCurrentInstructor] = useState(() => api.auth.getCurrentInstructor());
   const [currentStudent, setCurrentStudent] = useState(() => api.auth.getCurrentStudent());
   const [sessionAlert, setSessionAlert] = useState(null);
+  const [adminMenuSlot, setAdminMenuSlot] = useState(null);
   const [notification, setNotification] = useState({ message: "", type: "success", title: "" });
 
   const notify = useCallback((message, type = "success", title = "") => {
@@ -179,10 +181,9 @@ export default function App() {
         />
 
         <main className="main-content" style={{ paddingTop: "1rem" }}>
-          <StudentPortalView
-            student={currentStudent}
-            notify={notify}
-          />
+          <Suspense fallback={<p role="status">Cargando portal…</p>}>
+            <StudentPortalView student={currentStudent} notify={notify} />
+          </Suspense>
         </main>
 
         <Notification
@@ -274,12 +275,15 @@ export default function App() {
       {/* Barra Superior */}
       <Navbar
         currentInstructor={currentInstructor}
+        adminMenuSlotRef={setAdminMenuSlot}
         onLogout={() => handleLogout("Sesión cerrada por el usuario.")}
       />
 
       {/* Panel Principal Dashboard */}
       <main className="main-content">
-        <DashboardInstructor instructor={currentInstructor} notify={notify} />
+        <Suspense fallback={<p role="status">Cargando portal…</p>}>
+          <DashboardInstructor instructor={currentInstructor} notify={notify} adminMenuSlot={adminMenuSlot} />
+        </Suspense>
       </main>
 
       {/* Toast Notification */}

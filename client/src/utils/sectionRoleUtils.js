@@ -9,12 +9,11 @@ export const SECTION_ROLES = {
 };
 
 /**
- * Determina si el usuario autenticado es el Instructor Titular (Coordinador de la sección) o Administrador.
+ * Determina si el usuario autenticado es el Instructor Titular (Coordinador de la sección).
  * El instructor titular tiene acceso total y sin restricciones a todos los módulos y semanas de su sección.
  */
 export function isInstructorTitular(user, seccion) {
   if (!user) return false;
-  if (user.rol === "Admin") return true;
   if (!seccion || !seccion.coordinador) return false;
 
   const coordStr = (seccion.coordinador || "").toLowerCase().trim();
@@ -29,8 +28,8 @@ export function isInstructorTitular(user, seccion) {
     coordStr === full ||
     coordStr === combined ||
     (pNom && pApe && coordStr.includes(pNom) && coordStr.includes(pApe)) ||
-    full.includes(coordStr) ||
-    coordStr.includes(full)
+    (full && full.includes(coordStr)) ||
+    Boolean(full && coordStr.includes(full))
   );
 }
 

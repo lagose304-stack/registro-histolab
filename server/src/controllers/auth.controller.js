@@ -1,11 +1,13 @@
+import { ASSIGNABLE_INSTRUCTOR_ROLES, normalizeInstructorRole } from "../../../shared/instructorRoles.mjs";
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
 import dotenv from "dotenv";
-import { supabase, isSupabaseConfigured } from "../db/supabase.js";
+import { supabase, isSupabaseConfigured, createSupabaseLoginClient } from "../db/supabase.js";
 
 dotenv.config();
 
 const JWT_SECRET = process.env.JWT_SECRET || "histolab_default_secret_key_2026";
+const INSTRUCTOR_SESSION_SECONDS = 7 * 24 * 60 * 60;
 const MAX_FAILED_ATTEMPTS = 5;
 const LOCKOUT_MINUTES = 5;
 
@@ -23,13 +25,14 @@ function generateToken(instructor, sessionId) {
       primer_apellido: instructor.primer_apellido,
       segundo_apellido: instructor.segundo_apellido || "",
       comite: instructor.comite || "",
-      rol: instructor.rol || "Instructor",
+      rol: normalizeInstructorRole(instructor.rol) || "Instructor",
       seccion: instructor.seccion || "",
       coordinacion: instructor.coordinacion || "",
-      session_id: sessionId
+      session_id: sessionId,
+      creator_session: normalizeInstructorRole(instructor.rol) === "Creador"
     },
     JWT_SECRET,
-    { expiresIn: "7d" }
+    { expiresIn: INSTRUCTOR_SESSION_SECONDS }
   );
 }
 
@@ -60,6 +63,7 @@ export const getInstructorByIdOrEmail = async (id, email) => {
       if (!error && data) {
         const fullProfile = {
           ...data,
+          rol: normalizeInstructorRole(data.rol) || "Instructor",
           nombre_completo: `${data.primer_nombre} ${data.segundo_nombre ? data.segundo_nombre + ' ' : ''}${data.primer_apellido} ${data.segundo_apellido || ''}`.trim()
         };
         instructorCache.set(cacheKey, {
@@ -125,7 +129,7 @@ export const loginInstructor = async (req, res) => {
     }
 
     // 3. Autenticación contra Supabase Auth (auth.users)
-    const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+    const { data: authData, error: authError } = await createSupabaseLoginClient().auth.signInWithPassword({
       email: targetEmail,
       password: password
     });
@@ -177,22 +181,33 @@ export const loginInstructor = async (req, res) => {
       });
     }
 
-    // 5. 🔒 Generar token de sesión única y actualizar en la tabla public.instructores
+    // 5. Registrar el acceso y guardar la sesión según el rol.
     const sessionId = crypto.randomBytes(24).toString("hex");
     const now = new Date().toISOString();
+    const isCreator = normalizeInstructorRole(instructorProfile.rol) === "Creador";
 
-    await supabase
+    const { error: accessError } = await supabase
       .from("instructores")
       .update({
-        current_session_token: sessionId,
+        ...(isCreator ? {} : { current_session_token: sessionId }),
         session_created_at: now,
         session_ip: String(clientIp),
         session_user_agent: String(userAgent).substring(0, 250),
         ultimo_acceso: now
       })
       .eq("id", userId);
+    if (accessError) throw accessError;
 
-    instructorProfile.current_session_token = sessionId;
+    if (isCreator) {
+      const { error: sessionError } = await supabase.from("creator_sessions").insert({
+        instructor_id: userId,
+        session_id: sessionId,
+        expires_at: new Date(Date.now() + INSTRUCTOR_SESSION_SECONDS * 1000).toISOString()
+      });
+      if (sessionError) throw sessionError;
+    }
+
+    clearInstructorAuthCache();
     const token = generateToken(instructorProfile, sessionId);
 
     const nombreCompleto = `${instructorProfile.primer_nombre} ${instructorProfile.segundo_nombre ? instructorProfile.segundo_nombre + ' ' : ''}${instructorProfile.primer_apellido} ${instructorProfile.segundo_apellido || ''}`.trim();
@@ -211,7 +226,7 @@ export const loginInstructor = async (req, res) => {
         segundo_apellido: instructorProfile.segundo_apellido,
         correo: instructorProfile.correo,
         comite: instructorProfile.comite,
-        rol: instructorProfile.rol,
+        rol: normalizeInstructorRole(instructorProfile.rol) || "Instructor",
         seccion: instructorProfile.seccion,
         coordinacion: instructorProfile.coordinacion,
         nombre_completo: nombreCompleto
@@ -276,8 +291,8 @@ export const registerInstructor = async (req, res) => {
     }
 
     // Validar rol permitido en creación (Creador no se puede asignar)
-    const validRoles = ["Instructor", "Administrador", "Coordinador"];
-    const assignedRole = validRoles.includes(rol) ? rol : "Instructor";
+    const requestedRole = normalizeInstructorRole(rol);
+    const assignedRole = ASSIGNABLE_INSTRUCTOR_ROLES.includes(requestedRole) ? requestedRole : "Instructor";
 
     // 2. Insertar perfil en la tabla public.instructores
     const newInstructorProfile = {
@@ -328,17 +343,24 @@ export const logoutInstructor = async (req, res) => {
   try {
     const instructorId = req.instructor?.id;
 
-    if (instructorId && isSupabaseConfigured && supabase) {
-      await supabase
+    if (instructorId && normalizeInstructorRole(req.instructor.rol) === "Creador") {
+      const { error } = await supabase.from("creator_sessions")
+        .delete()
+        .eq("instructor_id", instructorId)
+        .eq("session_id", req.instructor.session_id);
+      if (error) throw error;
+    } else if (instructorId && isSupabaseConfigured && supabase) {
+      const { error } = await supabase
         .from("instructores")
         .update({
           current_session_token: null,
           session_created_at: null
         })
-        .eq("id", instructorId);
-
-      await supabase.auth.signOut().catch(() => {});
+        .eq("id", instructorId)
+        .eq("current_session_token", req.instructor.session_id);
+      if (error) throw error;
     }
+    clearInstructorAuthCache();
 
     res.json({
       success: true,
@@ -405,7 +427,13 @@ export const getInstructores = async (req, res) => {
         .order("created_at", { ascending: false });
 
       if (error) throw error;
-      return res.json({ success: true, data: data || [] });
+      return res.json({
+        success: true,
+        data: (data || []).map((profile) => ({
+          ...profile,
+          rol: normalizeInstructorRole(profile.rol) || "Instructor"
+        }))
+      });
     }
 
     res.json({ success: true, data: [] });
@@ -452,7 +480,7 @@ export const updateInstructor = async (req, res) => {
       .eq("id", id)
       .maybeSingle();
 
-    if (targetProfile?.rol === "Creador") {
+    if (normalizeInstructorRole(targetProfile?.rol) === "Creador") {
       return res.status(403).json({
         success: false,
         message: "La cuenta de Creador está blindada por el sistema y no se puede modificar desde el panel."
@@ -468,7 +496,13 @@ export const updateInstructor = async (req, res) => {
     const userEmail = (correo || email || "").trim().toLowerCase();
     if (userEmail) updates.correo = userEmail;
     if (comite !== undefined) updates.comite = (comite || "").trim();
-    if (rol !== undefined) updates.rol = (rol || "Instructor").trim();
+    if (rol !== undefined) {
+      const requestedRole = normalizeInstructorRole(rol);
+      if (!ASSIGNABLE_INSTRUCTOR_ROLES.includes(requestedRole)) {
+        return res.status(400).json({ success: false, message: "Rol de instructor no válido." });
+      }
+      updates.rol = requestedRole;
+    }
     if (seccion !== undefined) updates.seccion = (seccion || "").trim();
     if (coordinacion !== undefined) updates.coordinacion = (coordinacion || "").trim();
     if (activo !== undefined) updates.activo = Boolean(activo);
@@ -546,7 +580,7 @@ export const deleteInstructor = async (req, res) => {
       .eq("id", id)
       .maybeSingle();
 
-    if (targetProfile?.rol === "Creador") {
+    if (normalizeInstructorRole(targetProfile?.rol) === "Creador") {
       return res.status(403).json({
         success: false,
         message: "La cuenta de Creador está blindada por el sistema y no puede ser eliminada."

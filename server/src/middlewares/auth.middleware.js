@@ -1,4 +1,5 @@
 import jwt from "jsonwebtoken";
+import { hasAdministrationAccess, normalizeInstructorRole } from "../../../shared/instructorRoles.mjs";
 import dotenv from "dotenv";
 import { supabase, isSupabaseConfigured } from "../db/supabase.js";
 import { getInstructorByIdOrEmail, getStudentByCuentaAndCarrera, getStudentSession } from "../controllers/auth.controller.js";
@@ -49,10 +50,27 @@ export const authenticateInstructor = async (req, res, next) => {
       });
     }
 
-    // 🔒 VALIDACIÓN DE SESIÓN CONCURRENTE / ÚNICA:
-    // Si el session_id del token no coincide con current_session_token, significa que
-    // alguien inició sesión en otro navegador, pestaña o dispositivo.
-    if (decoded.session_id && instructor.current_session_token && instructor.current_session_token !== decoded.session_id) {
+    const isCreator = normalizeInstructorRole(instructor.rol) === "Creador";
+    if (isCreator || decoded.creator_session) {
+      let session = null;
+      if (isCreator && decoded.session_id) {
+        const { data, error } = await supabase.from("creator_sessions")
+          .select("session_id")
+          .eq("instructor_id", instructor.id)
+          .eq("session_id", decoded.session_id)
+          .gt("expires_at", new Date().toISOString())
+          .maybeSingle();
+        if (error) throw error;
+        session = data;
+      }
+      if (!session) {
+        return res.status(401).json({
+          success: false,
+          reason: "INVALID_TOKEN",
+          message: "Tu sesión ya no está activa. Por favor ingresa nuevamente."
+        });
+      }
+    } else if (decoded.session_id && instructor.current_session_token && instructor.current_session_token !== decoded.session_id) {
       return res.status(401).json({
         success: false,
         reason: "CONCURRENT_SESSION_DETECTED",
@@ -76,6 +94,16 @@ export const authenticateInstructor = async (req, res, next) => {
     });
   }
 };
+
+export function requireAdministration(req, res, next) {
+  if (!hasAdministrationAccess(req.instructor?.rol)) {
+    return res.status(403).json({
+      success: false,
+      message: "Se requiere acceso a Administración General."
+    });
+  }
+  next();
+}
 
 export const authenticateStudent = async (req, res, next) => {
   try {

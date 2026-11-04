@@ -1,0 +1,301 @@
+.histolab-login {
+  --login-ink: #10283d;
+  --login-muted: #486175;
+  --login-accent: #086763;
+  min-height: 100vh;
+  min-height: 100svh;
+  display: grid;
+  align-items: center;
+  padding: clamp(0.75rem, 4vw, 2.5rem);
+  background: var(--bg-app);
+  color: var(--login-ink);
+}
+
+.histolab-login__layout {
+  display: grid;
+  gap: 0.75rem;
+  width: min(100%, 30rem);
+  margin-inline: auto;
+}
+
+.histolab-login__brand,
+.histolab-login__card {
+  padding: clamp(1rem, 4vw, 1.75rem);
+  border-radius: 1.25rem;
+  min-width: 0;
+}
+
+.histolab-login__brand {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  background: linear-gradient(145deg, #102b42 10%, #153751 57%, #12534f);
+  border: 1px solid #315d66;
+  color: #f6fffd;
+}
+
+.histolab-login__specimen {
+  position: absolute;
+  z-index: -1;
+  inset: auto -4.5rem -5.5rem auto;
+  width: clamp(12rem, 30vw, 21rem);
+  aspect-ratio: 1;
+  border: 1px solid #82e7cb50;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 35% 33%, #88e1ca38, transparent 47%),
+    repeating-radial-gradient(circle at center, transparent 0 18px, #a7f3db22 19px 20px);
+  box-shadow: 0 0 0 0.5rem #a7f3db12, 0 0 0 1rem #a7f3db0b;
+}
+
+.histolab-login__specimen span {
+  position: absolute;
+  width: 30%;
+  aspect-ratio: 1.25;
+  border: 1px solid #a1ead461;
+  border-radius: 55% 45% 62% 38%;
+  background: radial-gradient(ellipse, #b8e7b655 0 16%, #7cddbc25 19% 47%, transparent 70%);
+}
+
+.histolab-login__specimen span:nth-child(1) { top: 20%; left: 18%; rotate: -35deg; }
+.histolab-login__specimen span:nth-child(2) { top: 40%; left: 52%; rotate: 32deg; }
+.histolab-login__specimen span:nth-child(3) { top: 62%; left: 23%; rotate: 12deg; }
+
+.histolab-login__identity {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.histolab-login__identity img {
+  flex: none;
+  width: 2.5rem;
+  height: 2.5rem;
+  object-fit: contain;
+  background: #fff;
+  border: 1px solid #d6e8e3;
+  border-radius: 0.85rem;
+  padding: 0.3rem;
+}
+
+.histolab-login__eyebrow {
+  color: #d0e9e6;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.035em;
+  margin: 0;
+}
+
+.histolab-login h1,
+.histolab-login h2 {
+  margin: 0;
+  line-height: 1.15;
+}
+
+.histolab-login h1 {
+  color: inherit;
+  margin-top: 0.7rem;
+  font-size: clamp(1.8rem, 6.8vw, 4rem);
+  letter-spacing: -0.055em;
+}
+
+.histolab-login h1 span {
+  color: #b4e6d6;
+  font-weight: 500;
+}
+
+.histolab-login__brand h1::after {
+  content: "";
+  display: block;
+  width: 2.25rem;
+  height: 2px;
+  margin-top: 0.65rem;
+  border-radius: 1rem;
+  background: linear-gradient(90deg, #8ce0c6, #8ce0c64d);
+}
+
+.histolab-login h2 { font-size: 1.45rem; }
+
+.histolab-login__badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0.75rem 0 0;
+  padding: 0.3rem 0.65rem;
+  border-radius: 1rem;
+  border: 1px solid #91e7cf78;
+  background: #173c4a;
+  color: #dbf9ef;
+  font-size: 0.75rem;
+  font-weight: 750;
+}
+
+.histolab-login__badge::before {
+  content: "";
+  width: 0.35rem;
+  height: 0.35rem;
+  border-radius: 50%;
+  background: #a0ebd3;
+}
+
+.histolab-login__card {
+  background: #fff;
+  border: 1px solid #d8e5e7;
+  box-shadow: 0 6px 20px #10283d0d;
+}
+
+.histolab-login__hint {
+  margin: 0.3rem 0 0.85rem;
+  color: var(--login-muted);
+  font-size: 0.9rem;
+}
+
+.histolab-login__profiles {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.25rem;
+  padding: 0.25rem;
+  border-radius: 0.85rem;
+  background: #edf3f5;
+  margin-bottom: 0.9rem;
+}
+
+.histolab-login button {
+  cursor: pointer;
+  font: inherit;
+  min-height: 44px;
+}
+
+.histolab-login button:disabled { cursor: wait; opacity: 0.7; }
+
+.histolab-login__profiles button,
+.histolab-login__password button,
+.histolab-login__submit {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  border: 0;
+  border-radius: 0.65rem;
+}
+
+.histolab-login__profiles button {
+  color: var(--login-muted);
+  background: transparent;
+  padding: 0.25rem;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.histolab-login__profiles button[aria-pressed="true"] {
+  background: #fff;
+  color: var(--login-accent);
+  box-shadow: 0 1px 3px #10283d24;
+}
+
+.histolab-login form { display: grid; gap: 0.75rem; }
+
+.histolab-login__field {
+  display: grid;
+  gap: 0.3rem;
+  min-width: 0;
+  font-size: 0.875rem;
+  font-weight: 650;
+}
+
+.histolab-login__field input,
+.histolab-login__field select {
+  width: 100%;
+  min-width: 0;
+  min-height: 46px;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid #8da7b5;
+  border-radius: 0.65rem;
+  background: #fff;
+  color: var(--login-ink);
+  font: inherit;
+  font-size: 1rem;
+  font-weight: 450;
+}
+
+.histolab-login__password { position: relative; }
+.histolab-login__password input { padding-inline-end: 3rem; }
+
+.histolab-login__password button {
+  position: absolute;
+  inset: 1px 1px 1px auto;
+  width: 44px;
+  background: transparent;
+  color: var(--login-muted);
+}
+
+.histolab-login__remember {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  gap: 0.55rem;
+  color: var(--login-muted);
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+.histolab-login__remember input {
+  width: 1.1rem;
+  height: 1.1rem;
+  margin: 0;
+  accent-color: var(--login-accent);
+}
+
+.histolab-login .histolab-login__submit {
+  min-height: 48px;
+  padding: 0.5rem 1rem;
+  background: var(--login-accent);
+  color: #fff;
+  font-weight: 750;
+}
+
+.histolab-login :focus-visible {
+  outline: 2px solid #007c78;
+  outline-offset: 2px;
+}
+
+.histolab-login__error {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0.65rem;
+  border-radius: 0.6rem;
+  background: #fff1f2;
+  color: #9f1239;
+  font-size: 0.875rem;
+  overflow-wrap: anywhere;
+}
+
+.histolab-login svg { flex-shrink: 0; }
+
+.histolab-login__footer {
+  color: var(--login-muted);
+  text-align: center;
+  font-size: 0.75rem;
+}
+
+@media (min-width: 720px) {
+  .histolab-login__layout {
+    width: min(100%, 58rem);
+    grid-template-columns: minmax(0, 0.85fr) minmax(0, 1fr);
+    gap: 1rem;
+  }
+
+  .histolab-login__brand {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: center;
+  }
+
+  .histolab-login h1 { margin-top: 1.5rem; }
+  .histolab-login h1 span { display: block; font-size: 0.58em; letter-spacing: -0.025em; }
+  .histolab-login__specimen { bottom: -7rem; }
+  .histolab-login__footer { grid-column: 1 / -1; }
+}

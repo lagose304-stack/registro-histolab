@@ -6,7 +6,7 @@ import {
   updateSeccion,
   deleteSeccion
 } from "../controllers/secciones.controller.js";
-import { authenticateInstructor } from "../middlewares/auth.middleware.js";
+import { authenticateInstructor, requireAdministration } from "../middlewares/auth.middleware.js";
 
 const router = Router();
 
@@ -15,8 +15,8 @@ router.use(authenticateInstructor);
 
 router.get("/", getSecciones);
 router.get("/:id", getSeccionById);
-router.post("/", createSeccion);
-router.put("/:id", updateSeccion);
-router.delete("/:id", deleteSeccion);
+router.post("/", requireAdministration, createSeccion);
+router.put("/:id", requireAdministration, updateSeccion);
+router.delete("/:id", requireAdministration, deleteSeccion);
 
 export default router;

@@ -1,3 +1,4 @@
+import { hasAdministrationAccess } from "../../../shared/instructorRoles.mjs";
 import React, { useState, useEffect, useCallback } from "react";
 import {
   Users,
@@ -25,8 +26,7 @@ export default function UserManagementView({ currentInstructor, onClose, notify 
   const [modalMode, setModalMode] = useState("create"); // 'create' | 'edit' | 'delete'
   const [selectedInstructorForModal, setSelectedInstructorForModal] = useState(null);
 
-  const rolNormalized = (currentInstructor?.rol || "").toLowerCase().trim();
-  const isAuthorized = rolNormalized === "creador" || rolNormalized === "administrador" || rolNormalized === "admin";
+  const isAuthorized = hasAdministrationAccess(currentInstructor?.rol);
 
   const loadInstructores = useCallback(async () => {
     if (!isAuthorized) return;
