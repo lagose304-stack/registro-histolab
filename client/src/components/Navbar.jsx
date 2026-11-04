@@ -5,6 +5,7 @@ import laboratorioLogo from "../assets/logos/laboratorio.png";
 export default function Navbar({
   currentInstructor,
   currentStudent,
+  adminMenuSlotRef,
   onLogout
 }) {
   const isStudent = Boolean(currentStudent);
@@ -51,6 +52,7 @@ export default function Navbar({
       >
         {/* Logo y Marca Oficial */}
         <div className="navbar-brand-group" style={{ display: "flex", alignItems: "center", gap: "0.65rem", flexShrink: 0 }}>
+          {adminMenuSlotRef && <div ref={adminMenuSlotRef} className="navbar-admin-slot" />}
           <div
             className="navbar-logo-box"
             style={{

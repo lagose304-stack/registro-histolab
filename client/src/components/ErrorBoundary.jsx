@@ -44,7 +44,7 @@ export default class ErrorBoundary extends React.Component {
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            background: "#f8fafc",
+            background: "var(--bg-app)",
             padding: "1.5rem",
             fontFamily: "system-ui, -apple-system, sans-serif"
           }}

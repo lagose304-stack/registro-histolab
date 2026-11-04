@@ -1,3 +1,4 @@
+import { hasAdministrationAccess } from "../../../shared/instructorRoles.mjs";
 import React, { useState, useEffect, useCallback } from "react";
 import {
   BookOpen,
@@ -172,8 +173,7 @@ export default function TemarioManagementView({ currentInstructor, onClose, noti
   const activeCarreraConfig =
     CARRERAS_CONFIG.find((c) => c.id === selectedCarrera) || CARRERAS_CONFIG[0];
 
-  const rolNormalized = (currentInstructor?.rol || "").toLowerCase().trim();
-  const isAuthorized = rolNormalized === "creador" || rolNormalized === "administrador" || rolNormalized === "admin";
+  const isAuthorized = hasAdministrationAccess(currentInstructor?.rol);
 
   const loadData = useCallback(async () => {
     if (!isAuthorized) return;

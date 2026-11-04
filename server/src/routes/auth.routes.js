@@ -13,7 +13,7 @@ import {
   updateInstructor,
   deleteInstructor
 } from "../controllers/auth.controller.js";
-import { authenticateInstructor, authenticateStudent } from "../middlewares/auth.middleware.js";
+import { authenticateInstructor, authenticateStudent, requireAdministration } from "../middlewares/auth.middleware.js";
 
 const router = Router();
 
@@ -21,18 +21,19 @@ const router = Router();
 router.post("/login", loginInstructor);
 router.post("/student-login", loginStudent);
 router.post("/student-change-password", changeStudentPassword);
-router.post("/register", registerInstructor);
+
 
 // Rutas protegidas de estudiantes
 router.get("/student-heartbeat", authenticateStudent, checkStudentHeartbeat);
 router.post("/student-logout", authenticateStudent, logoutStudent);
 
 // Rutas protegidas de instructores
+router.post("/register", authenticateInstructor, requireAdministration, registerInstructor);
 router.post("/logout", authenticateInstructor, logoutInstructor);
 router.get("/heartbeat", authenticateInstructor, checkHeartbeat);
 router.get("/me", authenticateInstructor, getMe);
 router.get("/instructores", authenticateInstructor, getInstructores);
-router.put("/instructores/:id", authenticateInstructor, updateInstructor);
-router.delete("/instructores/:id", authenticateInstructor, deleteInstructor);
+router.put("/instructores/:id", authenticateInstructor, requireAdministration, updateInstructor);
+router.delete("/instructores/:id", authenticateInstructor, requireAdministration, deleteInstructor);
 
 export default router;

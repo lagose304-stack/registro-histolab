@@ -1,3 +1,4 @@
+import { authenticateInstructor, requireAdministration } from "../middlewares/auth.middleware.js";
 import { Router } from "express";
 import {
   getAllTemas,
@@ -15,16 +16,16 @@ const router = Router();
 
 // Rutas de Puntajes por Carrera (deben ir antes de /:id)
 router.get("/puntajes/:carrera", getPuntajesByCarrera);
-router.post("/puntajes/:carrera", savePuntajesByCarrera);
+router.post("/puntajes/:carrera", authenticateInstructor, requireAdministration, savePuntajesByCarrera);
 
 // Rutas del Temario
 router.get("/", getAllTemas);
 router.get("/:id", getTemaById);
-router.post("/", createTema);
-router.post("/copy", copyTemario);
-router.put("/reorder", reorderTemas);
-router.put("/:id", updateTema);
-router.delete("/:id", deleteTema);
+router.post("/", authenticateInstructor, requireAdministration, createTema);
+router.post("/copy", authenticateInstructor, requireAdministration, copyTemario);
+router.put("/reorder", authenticateInstructor, requireAdministration, reorderTemas);
+router.put("/:id", authenticateInstructor, requireAdministration, updateTema);
+router.delete("/:id", authenticateInstructor, requireAdministration, deleteTema);
 
 export default router;
 

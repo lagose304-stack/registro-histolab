@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS public.instructores (
     nombre_completo TEXT NOT NULL,
     correo TEXT UNIQUE NOT NULL,
     contrasena TEXT NOT NULL,
-    rol TEXT DEFAULT 'INSTRUCTOR' CHECK (rol IN ('COORDINADOR', 'INSTRUCTOR')),
+    rol TEXT DEFAULT 'Instructor' CHECK (rol IN ('Instructor', 'Coordinador', 'Administrador', 'Creador')),
     activo BOOLEAN DEFAULT true,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()

@@ -1,3 +1,4 @@
+import { hasAdministrationAccess } from "../../../shared/instructorRoles.mjs";
 import React, { useState, useEffect, useCallback } from "react";
 import {
   Calendar,
@@ -45,8 +46,7 @@ export default function WeekDefinitionView({ currentInstructor, onClose = () => 
   const [copyFromCarrera, setCopyFromCarrera] = useState("Medicina");
   const [copying, setCopying] = useState(false);
 
-  const rolNormalized = (currentInstructor?.rol || "").toLowerCase().trim();
-  const isAuthorized = rolNormalized === "creador" || rolNormalized === "administrador" || rolNormalized === "admin";
+  const isAuthorized = hasAdministrationAccess(currentInstructor?.rol);
 
   const activeCarrera =
     CARRERAS_CONFIG.find((c) => c.id === selectedCarrera) || CARRERAS_CONFIG[0];
