@@ -11,12 +11,16 @@ import { parseScheduleDate } from "../../../shared/academicSchedule.mjs";
 import { getManualsWindow } from "../../../shared/manualsWindow.mjs";
 
 const table = "fechas_carga_manuales";
-const localFile = fileURLToPath(new URL("../../data/fechas_carga_manuales.json", import.meta.url));
 const usingDatabase = isSupabaseConfigured && supabase;
+
+// Resolver solo al usar el almacenamiento local: Workers no expone una URL de archivo.
+function localManualDatesFile() {
+  return fileURLToPath(new URL("../../data/fechas_carga_manuales.json", import.meta.url));
+}
 
 function readDates() {
   try {
-    return JSON.parse(readFileSync(localFile, "utf8"));
+    return JSON.parse(readFileSync(localManualDatesFile(), "utf8"));
   } catch (error) {
     if (error.code === "ENOENT") return [];
     throw error;
@@ -87,6 +91,7 @@ export async function saveManualDate(req, res) {
       if (error) throw error;
     } else {
       const rows = readDates().filter(item => item.seccion_id !== seccion_id || item.numero_semana !== number);
+      const localFile = localManualDatesFile();
       const temporaryFile = `${localFile}.tmp`;
       writeFileSync(temporaryFile, JSON.stringify([...rows, row], null, 2), "utf8");
       renameSync(temporaryFile, localFile);
