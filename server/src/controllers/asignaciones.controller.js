@@ -1,3 +1,4 @@
+import { synchronizeQuizAssignments } from "../../../shared/quizAssignments.mjs";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -57,6 +58,8 @@ function savePersistentAsignaciones(list) {
 
 let asignacionesMemoria = loadPersistentAsignaciones();
 
+export const getLocalSectionAssignments = sectionId => asignacionesMemoria.filter(item => item.seccion_id === sectionId);
+
 // 1. Obtener todas las asignaciones de una sección
 export const getAsignacionesPorSeccion = async (req, res) => {
   const { seccionId } = req.params;
@@ -69,7 +72,7 @@ export const getAsignacionesPorSeccion = async (req, res) => {
         .eq("seccion_id", seccionId);
 
       if (!error && data) {
-        return res.status(200).json({ success: true, data });
+        return res.status(200).json({ success: true, data: synchronizeQuizAssignments(data) });
       }
       // Si la tabla aún no existe en Supabase (código PGRST205), usamos la memoria persistente
       if (error && error.code !== "PGRST205") {
@@ -79,11 +82,11 @@ export const getAsignacionesPorSeccion = async (req, res) => {
 
     // Fallback memoria persistente
     const filtradas = asignacionesMemoria.filter((a) => a.seccion_id === seccionId);
-    return res.status(200).json({ success: true, data: filtradas });
+    return res.status(200).json({ success: true, data: synchronizeQuizAssignments(filtradas) });
   } catch (error) {
     console.error("Error al obtener asignaciones:", error);
     const filtradas = asignacionesMemoria.filter((a) => a.seccion_id === seccionId);
-    return res.status(200).json({ success: true, data: filtradas });
+    return res.status(200).json({ success: true, data: synchronizeQuizAssignments(filtradas) });
   }
 };
 
@@ -99,80 +102,32 @@ export const guardarAsignacion = async (req, res) => {
     });
   }
 
-  try {
-    let supabaseSaved = false;
-    let savedItem = null;
-
-    if (isSupabaseConfigured && supabase) {
-      try {
-        const { data, error } = await supabase
-          .from("asignaciones_instructores")
-          .upsert(
-            {
-              seccion_id: seccionId,
-              instructor_id: instructor_id || null,
-              tipo_asignacion,
-              referencia_id,
-              updated_at: new Date().toISOString()
-            },
-            { onConflict: "seccion_id, tipo_asignacion, referencia_id" }
-          )
-          .select()
-          .single();
-
-        if (!error && data) {
-          savedItem = data;
-          supabaseSaved = true;
-        }
-      } catch (_) {}
+  return guardarAsignacionesBatch({
+    ...req,
+    body: { asignaciones: [{ instructor_id, instructor_nombre, tipo_asignacion, referencia_id, metadata }] }
+  }, {
+    status(code) {
+      res.status(code);
+      return this;
+    },
+    json(result) {
+      if (!result.success) return res.json(result);
+      return res.json({
+        success: true,
+        message: "Asignación guardada con éxito",
+        data: result.data.find(item =>
+          item.tipo_asignacion === tipo_asignacion && item.referencia_id === referencia_id),
+        storage: isSupabaseConfigured && supabase ? "supabase" : "local"
+      });
     }
-
-    // Siempre sincronizar con memoria persistente
-    const index = asignacionesMemoria.findIndex(
-      (a) =>
-        a.seccion_id === seccionId &&
-        a.tipo_asignacion === tipo_asignacion &&
-        a.referencia_id === referencia_id
-    );
-
-    const nuevaAsignacion = {
-      id: savedItem?.id || (index >= 0 ? asignacionesMemoria[index].id : `asig-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`),
-      seccion_id: seccionId,
-      instructor_id: instructor_id || null,
-      instructor_nombre: instructor_nombre || "",
-      tipo_asignacion,
-      referencia_id,
-      metadata: metadata || {},
-      updated_at: new Date().toISOString()
-    };
-
-    if (index >= 0) {
-      asignacionesMemoria[index] = nuevaAsignacion;
-    } else {
-      asignacionesMemoria.push(nuevaAsignacion);
-    }
-    savePersistentAsignaciones(asignacionesMemoria);
-
-    return res.status(200).json({
-      success: true,
-      message: "Asignación guardada con éxito",
-      data: nuevaAsignacion,
-      storage: supabaseSaved ? "supabase" : "local"
-    });
-  } catch (error) {
-    console.error("Error al guardar asignación:", error);
-    res.status(500).json({
-      success: false,
-      message: "Error al guardar asignación",
-      error: error.message
-    });
-  }
+  });
 };
 
 // 3. Guardar asignaciones por lote (Batch)
 export const guardarAsignacionesBatch = async (req, res) => {
   const { seccionId } = req.params;
-  const { asignaciones } = req.body;
+  const { asignaciones: requestedAssignments } = req.body;
+  const asignaciones = Array.isArray(requestedAssignments) ? synchronizeQuizAssignments(requestedAssignments) : requestedAssignments;
 
   if (!Array.isArray(asignaciones)) {
     return res.status(400).json({
@@ -186,19 +141,19 @@ export const guardarAsignacionesBatch = async (req, res) => {
 
     // Intentar upsert en Supabase si está disponible
     if (isSupabaseConfigured && supabase) {
-      try {
-        const rowsToUpsert = asignaciones.map((a) => ({
-          seccion_id: seccionId,
-          instructor_id: a.instructor_id || null,
-          tipo_asignacion: a.tipo_asignacion,
-          referencia_id: a.referencia_id,
-          updated_at: timestamp
-        }));
+      const rowsToUpsert = asignaciones.map((a) => ({
+        seccion_id: seccionId,
+        instructor_id: a.instructor_id || null,
+        tipo_asignacion: a.tipo_asignacion,
+        referencia_id: a.referencia_id,
+        updated_at: timestamp
+      }));
 
-        await supabase
-          .from("asignaciones_instructores")
+      if (rowsToUpsert.length) {
+        const { error } = await supabase.from("asignaciones_instructores")
           .upsert(rowsToUpsert, { onConflict: "seccion_id, tipo_asignacion, referencia_id" });
-      } catch (_) {}
+        if (error) throw error;
+      }
     }
 
     // Sincronizar en memoria persistente local

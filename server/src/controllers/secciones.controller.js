@@ -1,9 +1,13 @@
+import { canViewSection } from "../../../shared/sectionAccess.mjs";
+import { generateSectionCode, normalizeSectionCareer } from "../../../shared/sectionCode.mjs";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { supabase, isSupabaseConfigured } from "../db/supabase.js";
 import crypto from "crypto";
 import { deletePruebasBySeccion } from "./pruebas.controller.js";
+
+export { generateSectionCode };
 
 const __dirname = (() => {
   try {
@@ -69,6 +73,7 @@ function savePersistentSecciones(data) {
 
 // Memoria local de respaldo respaldada en disco local
 let inMemorySecciones = loadPersistentSecciones();
+export const getLocalSchedulingSections = () => inMemorySecciones;
 
 // Conversor de hora HH:MM a minutos transcurridos desde medianoche
 export const timeToMinutes = (timeStr) => {
@@ -90,44 +95,6 @@ export const isTimeOverlap = (startA, endA, startB, endB) => {
   return minStartA < minEndB && minEndA > minStartB;
 };
 
-// Generador de código automático de sección (ej. MI1300, LU0800, JUE1500, SAB0900)
-export const generateSectionCode = (dia = "Lunes", horaInicio = "13:00") => {
-  const diaMap = {
-    lunes: "LU",
-    martes: "MA",
-    miercoles: "MI",
-    miércoles: "MI",
-    jueves: "JUE",
-    viernes: "VIE",
-    sabado: "SAB",
-    sábado: "SAB",
-    domingo: "DO"
-  };
-
-  const normalizedDay = (dia || "Lunes").toLowerCase().trim();
-  const dayPrefix = diaMap[normalizedDay] || "SEC";
-
-  let hourStr = "13";
-  let minStr = "00";
-
-  if (horaInicio && horaInicio.includes(":")) {
-    const parts = horaInicio.split(":");
-    hourStr = (parts[0] || "00").trim().padStart(2, "0");
-    minStr = (parts[1] || "00").trim().slice(0, 2).padStart(2, "0");
-  } else if (horaInicio) {
-    const digits = horaInicio.replace(/\D/g, "");
-    if (digits.length >= 4) {
-      hourStr = digits.slice(0, 2);
-      minStr = digits.slice(2, 4);
-    } else if (digits.length >= 1) {
-      hourStr = digits.slice(0, 2).padStart(2, "0");
-      minStr = "00";
-    }
-  }
-
-  return `${dayPrefix}${hourStr}${minStr}`;
-};
-
 // 1. Listar todas las secciones
 export const getSecciones = async (req, res) => {
   try {
@@ -145,7 +112,7 @@ export const getSecciones = async (req, res) => {
       const { data, error } = await query;
 
       if (!error && data) {
-        let filtered = data;
+        let filtered = data.filter(section => canViewSection(req.instructor, section));
         if (search) {
           const s = search.toLowerCase();
           filtered = filtered.filter(
@@ -165,7 +132,7 @@ export const getSecciones = async (req, res) => {
     }
 
     // Fallback en memoria
-    let filtered = [...inMemorySecciones];
+    let filtered = inMemorySecciones.filter(section => canViewSection(req.instructor, section));
     if (dia) filtered = filtered.filter((s) => s.dia === dia);
     if (activa !== undefined) filtered = filtered.filter((s) => String(s.activa) === String(activa));
     if (search) {
@@ -205,12 +172,15 @@ export const getSeccionById = async (req, res) => {
         .maybeSingle();
 
       if (!error && data) {
+        if (!canViewSection(req.instructor, data)) {
+          return res.status(404).json({ success: false, message: "Sección no encontrada." });
+        }
         return res.json({ success: true, seccion: data });
       }
     }
 
     const found = inMemorySecciones.find((s) => s.id === id || s.codigo === id);
-    if (!found) {
+    if (!found || !canViewSection(req.instructor, found)) {
       return res.status(404).json({
         success: false,
         message: "Sección no encontrada."
@@ -256,6 +226,10 @@ export const createSeccion = async (req, res) => {
         success: false,
         message: "El día y la hora de inicio son requeridos para registrar una sección."
       });
+    }
+
+    if (typeof coordinador !== "string" || !coordinador.trim()) {
+      return res.status(400).json({ success: false, message: "Selecciona el titular de la sección." });
     }
 
     const cleanCarrera = carrera.trim();
@@ -306,8 +280,7 @@ export const createSeccion = async (req, res) => {
       let conflictQuery = supabase
         .from("secciones")
         .select("id, codigo, dia, hora_inicio, hora_fin, carrera, periodo_academico")
-        .eq("dia", cleanDia)
-        .eq("carrera", cleanCarrera);
+        .ilike("dia", cleanDia);
 
       if (cleanPeriodo) {
         conflictQuery = conflictQuery.eq("periodo_academico", cleanPeriodo);
@@ -316,6 +289,7 @@ export const createSeccion = async (req, res) => {
       const { data: daySections } = await conflictQuery;
       if (daySections && daySections.length > 0) {
         const overlap = daySections.find((sec) =>
+          normalizeSectionCareer(sec.carrera) === normalizeSectionCareer(cleanCarrera) &&
           isTimeOverlap(cleanHoraInicio, cleanHoraFin, sec.hora_inicio, sec.hora_fin)
         );
 
@@ -332,7 +306,7 @@ export const createSeccion = async (req, res) => {
     const inMemoryOverlap = inMemorySecciones.find(
       (s) =>
         s.dia.toLowerCase() === cleanDia.toLowerCase() &&
-        (s.carrera || "").toLowerCase() === cleanCarrera.toLowerCase() &&
+        normalizeSectionCareer(s.carrera) === normalizeSectionCareer(cleanCarrera) &&
         (!cleanPeriodo || !s.periodo_academico || s.periodo_academico === cleanPeriodo) &&
         isTimeOverlap(cleanHoraInicio, cleanHoraFin, s.hora_inicio, s.hora_fin)
     );
@@ -345,19 +319,27 @@ export const createSeccion = async (req, res) => {
       });
     }
 
-    // Generar código automático combinando día abreviado + hora 24h (ej. MI1300, LU0800, JUE1500)
-    const autoCodigo = (codigo && codigo.trim()) || generateSectionCode(cleanDia, cleanHoraInicio);
+    const baseCode = generateSectionCode(cleanDia, cleanHoraInicio);
+    const legacyCode = baseCode.replace(/^(JU|VI|SA)(?=\d)/, prefix => ({ JU: "JUE", VI: "VIE", SA: "SAB" })[prefix]);
+    const requestedCode = codigo?.trim();
+    const autoCodigo = !requestedCode || requestedCode === baseCode || requestedCode === legacyCode
+      ? generateSectionCode(cleanDia, cleanHoraInicio, cleanCarrera)
+      : requestedCode;
+    const sectionName = nombre?.trim();
+    const generatedName = [baseCode, legacyCode].some(code =>
+      sectionName === `Sección ${code}` || sectionName === `Laboratorio de Histología - Sección ${code}`
+    );
 
     const newSectionData = {
       id: crypto.randomUUID(),
       codigo: autoCodigo.trim(),
-      nombre: (nombre || `Sección ${autoCodigo} - Laboratorio`).trim(),
+      nombre: generatedName || !sectionName ? `Sección ${autoCodigo}` : sectionName,
       carrera: cleanCarrera,
       dia: cleanDia,
       hora_inicio: cleanHoraInicio,
       hora_fin: cleanHoraFin,
       doctor_encargado: (doctor_encargado || "Dr. Rafael Perdomo Vaquero").trim(),
-      coordinador: (coordinador || "").trim(),
+      coordinador: coordinador.trim(),
       instructores_asignados: Array.isArray(instructores_asignados) ? instructores_asignados : [],
       periodo_academico: cleanPeriodo,
       activa: activa !== undefined ? Boolean(activa) : true,
@@ -382,12 +364,17 @@ export const createSeccion = async (req, res) => {
           message: "Sección creada exitosamente en la base de datos.",
           seccion: data
         });
+      } else if (error?.code === "23505") {
+        return res.status(409).json({ success: false, message: `Ya existe una sección con el código ${newSectionData.codigo}.` });
       } else if (error) {
         console.warn("Aviso al insertar sección en Supabase (guardando en respaldo):", error.message);
       }
     }
 
     // Guardar en memoria de respaldo
+    if (inMemorySecciones.some(section => section.codigo === newSectionData.codigo)) {
+      return res.status(409).json({ success: false, message: `Ya existe una sección con el código ${newSectionData.codigo}.` });
+    }
     inMemorySecciones.unshift(newSectionData);
     savePersistentSecciones(inMemorySecciones);
 
@@ -432,6 +419,12 @@ export const updateSeccion = async (req, res) => {
     }
     if (!currentSec) {
       currentSec = inMemorySecciones.find((s) => s.id === id);
+    }
+
+    const targetCoordinator = coordinador === undefined ? currentSec?.coordinador : coordinador;
+    if ((currentSec || coordinador !== undefined) &&
+      (typeof targetCoordinator !== "string" || !targetCoordinator.trim())) {
+      return res.status(400).json({ success: false, message: "Selecciona el titular de la sección." });
     }
 
     const targetDia = dia !== undefined ? dia.trim() : (currentSec?.dia || "");
@@ -486,8 +479,7 @@ export const updateSeccion = async (req, res) => {
           .from("secciones")
           .select("id, codigo, dia, hora_inicio, hora_fin, carrera, periodo_academico")
           .neq("id", id)
-          .eq("dia", targetDia)
-          .eq("carrera", targetCarrera);
+          .ilike("dia", targetDia);
 
         if (targetPeriodo) {
           conflictQuery = conflictQuery.eq("periodo_academico", targetPeriodo);
@@ -496,6 +488,7 @@ export const updateSeccion = async (req, res) => {
         const { data: daySections } = await conflictQuery;
         if (daySections && daySections.length > 0) {
           const overlap = daySections.find((sec) =>
+            normalizeSectionCareer(sec.carrera) === normalizeSectionCareer(targetCarrera) &&
             isTimeOverlap(targetHora, targetHoraFin, sec.hora_inicio, sec.hora_fin)
           );
 
@@ -513,7 +506,7 @@ export const updateSeccion = async (req, res) => {
         (s) =>
           s.id !== id &&
           s.dia.toLowerCase() === targetDia.toLowerCase() &&
-          (s.carrera || "").toLowerCase() === targetCarrera.toLowerCase() &&
+          normalizeSectionCareer(s.carrera) === normalizeSectionCareer(targetCarrera) &&
           (!targetPeriodo || !s.periodo_academico || s.periodo_academico === targetPeriodo) &&
           isTimeOverlap(targetHora, targetHoraFin, s.hora_inicio, s.hora_fin)
       );
@@ -563,8 +556,14 @@ export const updateSeccion = async (req, res) => {
           seccion: data
         });
       }
+      if (error?.code === "23505") {
+        return res.status(409).json({ success: false, message: `Ya existe una sección con el código ${updates.codigo}.` });
+      }
     }
 
+    if (updates.codigo && inMemorySecciones.some(section => section.id !== id && section.codigo === updates.codigo)) {
+      return res.status(409).json({ success: false, message: `Ya existe una sección con el código ${updates.codigo}.` });
+    }
     const index = inMemorySecciones.findIndex((s) => s.id === id);
     if (index !== -1) {
       inMemorySecciones[index] = { ...inMemorySecciones[index], ...updates };

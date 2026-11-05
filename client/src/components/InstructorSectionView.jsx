@@ -154,7 +154,7 @@ export default function InstructorSectionView({
             <div style={{ height: "26px", width: "1px", background: "#e2e8f0" }} />
 
             <div style={{ display: "flex", flexDirection: "column" }}>
-              <span style={{ fontSize: "0.68rem", color: "#64748b", fontWeight: 700, textTransform: "uppercase" }}>Coordinador de Sección</span>
+              <span style={{ fontSize: "0.68rem", color: "#64748b", fontWeight: 700, textTransform: "uppercase" }}>Titular de sección</span>
               <strong style={{ fontSize: "0.86rem", color: "#0369a1" }}>{seccion.coordinador || "Sin asignar"}</strong>
             </div>
 

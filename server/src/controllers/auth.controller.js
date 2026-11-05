@@ -24,7 +24,6 @@ function generateToken(instructor, sessionId) {
       segundo_nombre: instructor.segundo_nombre || "",
       primer_apellido: instructor.primer_apellido,
       segundo_apellido: instructor.segundo_apellido || "",
-      comite: instructor.comite || "",
       rol: normalizeInstructorRole(instructor.rol) || "Instructor",
       seccion: instructor.seccion || "",
       coordinacion: instructor.coordinacion || "",
@@ -225,7 +224,6 @@ export const loginInstructor = async (req, res) => {
         primer_apellido: instructorProfile.primer_apellido,
         segundo_apellido: instructorProfile.segundo_apellido,
         correo: instructorProfile.correo,
-        comite: instructorProfile.comite,
         rol: normalizeInstructorRole(instructorProfile.rol) || "Instructor",
         seccion: instructorProfile.seccion,
         coordinacion: instructorProfile.coordinacion,
@@ -254,13 +252,16 @@ export const registerInstructor = async (req, res) => {
       correo,
       email,
       password,
-      comite,
       rol,
       seccion,
       coordinacion
     } = req.body;
 
     const userEmail = (correo || email || "").trim().toLowerCase();
+    const assignedRole = rol === undefined ? "Instructor" : normalizeInstructorRole(rol);
+    if (!ASSIGNABLE_INSTRUCTOR_ROLES.includes(assignedRole)) {
+      return res.status(400).json({ success: false, message: "Selecciona Instructor o Coordinador." });
+    }
 
     if (!userEmail || !password || !primer_nombre || !primer_apellido || !numero_cuenta) {
       return res.status(400).json({
@@ -290,10 +291,6 @@ export const registerInstructor = async (req, res) => {
       });
     }
 
-    // Validar rol permitido en creación (Creador no se puede asignar)
-    const requestedRole = normalizeInstructorRole(rol);
-    const assignedRole = ASSIGNABLE_INSTRUCTOR_ROLES.includes(requestedRole) ? requestedRole : "Instructor";
-
     // 2. Insertar perfil en la tabla public.instructores
     const newInstructorProfile = {
       id: authUser.user.id,
@@ -303,7 +300,6 @@ export const registerInstructor = async (req, res) => {
       primer_apellido: primer_apellido.trim(),
       segundo_apellido: (segundo_apellido || "").trim(),
       correo: userEmail,
-      comite: (comite || "").trim(),
       rol: assignedRole,
       seccion: (seccion || "").trim(),
       coordinacion: (coordinacion || "").trim(),
@@ -423,7 +419,7 @@ export const getInstructores = async (req, res) => {
     if (isSupabaseConfigured && supabase) {
       const { data, error } = await supabase
         .from("instructores")
-        .select("id, numero_cuenta, primer_nombre, segundo_nombre, primer_apellido, segundo_apellido, correo, comite, rol, seccion, coordinacion, activo, ultimo_acceso, created_at")
+        .select("id, numero_cuenta, primer_nombre, segundo_nombre, primer_apellido, segundo_apellido, correo, rol, seccion, coordinacion, activo, ultimo_acceso, created_at")
         .order("created_at", { ascending: false });
 
       if (error) throw error;
@@ -459,7 +455,6 @@ export const updateInstructor = async (req, res) => {
       correo,
       email,
       password,
-      comite,
       rol,
       seccion,
       coordinacion,
@@ -495,7 +490,6 @@ export const updateInstructor = async (req, res) => {
     if (segundo_apellido !== undefined) updates.segundo_apellido = (segundo_apellido || "").trim();
     const userEmail = (correo || email || "").trim().toLowerCase();
     if (userEmail) updates.correo = userEmail;
-    if (comite !== undefined) updates.comite = (comite || "").trim();
     if (rol !== undefined) {
       const requestedRole = normalizeInstructorRole(rol);
       if (!ASSIGNABLE_INSTRUCTOR_ROLES.includes(requestedRole)) {

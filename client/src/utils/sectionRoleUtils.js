@@ -1,3 +1,8 @@
+import { hasAdministrationAccess } from "../../../shared/instructorRoles.mjs";
+import { isInstructorTitular, matchesInstructor } from "../../../shared/sectionAccess.mjs";
+
+export { isInstructorTitular, matchesInstructor };
+
 // Constantes de nombres de roles con soporte de compatibilidad
 export const SECTION_ROLES = {
   CREAR_PRUEBA: "Crear prueba semanal",
@@ -8,73 +13,8 @@ export const SECTION_ROLES = {
   ASISTENCIA: "Pasar lista de asistencia semanal"
 };
 
-/**
- * Determina si el usuario autenticado es el Instructor Titular (Coordinador de la sección).
- * El instructor titular tiene acceso total y sin restricciones a todos los módulos y semanas de su sección.
- */
-export function isInstructorTitular(user, seccion) {
-  if (!user) return false;
-  if (!seccion || !seccion.coordinador) return false;
-
-  const coordStr = (seccion.coordinador || "").toLowerCase().trim();
-  if (!coordStr) return false;
-
-  const pNom = (user.primer_nombre || "").toLowerCase().trim();
-  const pApe = (user.primer_apellido || "").toLowerCase().trim();
-  const full = (user.nombre_completo || "").toLowerCase().trim();
-  const combined = `${pNom} ${pApe}`.trim();
-
-  return (
-    coordStr === full ||
-    coordStr === combined ||
-    (pNom && pApe && coordStr.includes(pNom) && coordStr.includes(pApe)) ||
-    (full && full.includes(coordStr)) ||
-    Boolean(full && coordStr.includes(full))
-  );
-}
-
-/**
- * Comprueba si un usuario dado coincide con un registro de asignación
- * por ID (UUID), ID sintético de coordinador, número de cuenta o nombre.
- */
-export function matchesInstructor(user, targetId, targetName, seccion) {
-  if (!user) return false;
-
-  // 1. Coincidencia por ID de instructor UUID
-  if (user.id && targetId && String(user.id) === String(targetId)) {
-    return true;
-  }
-
-  // 2. Coincidencia por ID sintético de coordinador (coord-{seccionId})
-  if (targetId && String(targetId).startsWith("coord-")) {
-    if (isInstructorTitular(user, seccion)) return true;
-  }
-
-  // 3. Coincidencia por número de cuenta
-  if (user.numero_cuenta && targetId && String(user.numero_cuenta) === String(targetId)) {
-    return true;
-  }
-
-  // 4. Coincidencia por nombre completo o primer nombre + primer apellido
-  if (targetName) {
-    const tName = targetName.toLowerCase().trim();
-    const uFull = (user.nombre_completo || "").toLowerCase().trim();
-    const uNom = (user.primer_nombre || "").toLowerCase().trim();
-    const uApe = (user.primer_apellido || "").toLowerCase().trim();
-    const uCombined = `${uNom} ${uApe}`.trim();
-
-    if (uFull && (uFull === tName || tName.includes(uFull) || uFull.includes(tName))) {
-      return true;
-    }
-    if (uCombined && (uCombined === tName || tName.includes(uCombined) || uCombined.includes(tName))) {
-      return true;
-    }
-    if (uNom && uApe && tName.includes(uNom) && tName.includes(uApe)) {
-      return true;
-    }
-  }
-
-  return false;
+export function hasFullSectionAccess(user, section) {
+  return hasAdministrationAccess(user?.rol) || isInstructorTitular(user, section);
 }
 
 /**

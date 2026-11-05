@@ -97,6 +97,7 @@ export default function SectionInstructorsModal({
 
   const modalContent = (
     <div
+      className="section-editor-overlay"
       style={{
         position: "fixed",
         top: 0,
@@ -104,26 +105,22 @@ export default function SectionInstructorsModal({
         right: 0,
         bottom: 0,
         backgroundColor: "rgba(15, 23, 42, 0.65)",
-        backdropFilter: "blur(8px)",
-        WebkitBackdropFilter: "blur(8px)",
         zIndex: 99999999,
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        padding: "1rem"
       }}
       onClick={(e) => {
         if (e.target === e.currentTarget && !saving) onClose();
       }}
     >
       <div
-        className="glass-panel animate-scale-up"
+        className="glass-panel section-editor-panel"
         style={{
           background: "#ffffff",
           borderRadius: "1.5rem",
           maxWidth: "600px",
           width: "100%",
-          maxHeight: "90vh",
           display: "flex",
           flexDirection: "column",
           overflow: "hidden",
@@ -183,7 +180,7 @@ export default function SectionInstructorsModal({
               </span>
               {section.coordinador && (
                 <span>
-                  <strong>Coordinador:</strong> {section.coordinador}
+                  <strong>Titular de sección:</strong> {section.coordinador}
                 </span>
               )}
             </div>
@@ -324,7 +321,7 @@ export default function SectionInstructorsModal({
                           <div style={{ display: "flex", flexDirection: "column" }}>
                             <strong style={{ fontSize: "0.88rem", color: "#0f172a" }}>{name}</strong>
                             <span style={{ fontSize: "0.74rem", color: "#64748b" }}>
-                              Cuenta: {inst.numero_cuenta} {inst.comite ? `· Comité: ${inst.comite}` : ""}
+                              Cuenta: {inst.numero_cuenta}
                             </span>
                           </div>
 
@@ -454,7 +451,7 @@ export default function SectionInstructorsModal({
                                   border: "1px solid #fde68a"
                                 }}
                               >
-                                Coordinador
+                                Titular de sección
                               </span>
                             )}
                           </div>

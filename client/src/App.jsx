@@ -15,6 +15,33 @@ const INACTIVITY_TIMEOUT_MS = 20 * 60 * 1000;
 // Intervalo de comprobación de sesión activa (Heartbeat): 20 segundos
 const HEARTBEAT_INTERVAL_MS = 20 * 1000;
 
+function PortalSkeleton({ student = false }) {
+  return (
+    <div className="portal-skeleton" role="status">
+      <span className="portal-skeleton__status">{student ? "Cargando portal estudiantil" : "Cargando panel docente"}</span>
+      <div className="portal-skeleton__layout" aria-hidden="true">
+        <div className="portal-skeleton__hero">
+          <span className="portal-skeleton__avatar" />
+          <div className="portal-skeleton__lines">
+            <span className="portal-skeleton__short" />
+            <span className="portal-skeleton__title" />
+            <span />
+          </div>
+        </div>
+        <div className="portal-skeleton__cards">
+          {[1, 2, 3].map(card => (
+            <div key={card} className="portal-skeleton__lines portal-skeleton__card">
+              <span className="portal-skeleton__short" />
+              <span className="portal-skeleton__title" />
+              <span />
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [backendStatus, setBackendStatus] = useState("checking");
   const [currentInstructor, setCurrentInstructor] = useState(() => api.auth.getCurrentInstructor());
@@ -181,7 +208,7 @@ export default function App() {
         />
 
         <main className="main-content" style={{ paddingTop: "1rem" }}>
-          <Suspense fallback={<p role="status">Cargando portal…</p>}>
+          <Suspense fallback={<PortalSkeleton student />}>
             <StudentPortalView student={currentStudent} notify={notify} />
           </Suspense>
         </main>
@@ -281,7 +308,7 @@ export default function App() {
 
       {/* Panel Principal Dashboard */}
       <main className="main-content">
-        <Suspense fallback={<p role="status">Cargando portal…</p>}>
+        <Suspense fallback={<PortalSkeleton />}>
           <DashboardInstructor instructor={currentInstructor} notify={notify} adminMenuSlot={adminMenuSlot} />
         </Suspense>
       </main>

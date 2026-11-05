@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { supabase, isSupabaseConfigured } from "../db/supabase.js";
 import { CAREER_DEFAULT_TEMAS } from "./temario.controller.js";
+import { getCurrentAcademicWeek } from "../../../shared/academicWeek.mjs";
 
 const __dirname = (() => {
   try {
@@ -65,6 +66,8 @@ const getNormalizedCareerKey = (carrera) => {
   if (c.includes("nutri")) return "Nutricion";
   return "Medicina";
 };
+
+export const getLocalSchedulingWeeks = (career) => inMemorySemanasConfig[getNormalizedCareerKey(career)] || [];
 
 // Helper para calcular el parcial al que pertenece una semana por defecto (incluyendo semana de examen)
 function getParcialForWeek(semanaNum, totalWeeks = 15) {
@@ -137,7 +140,7 @@ export const getSemanasConfig = async (req, res) => {
     const semanasNumeros = Array.from(semanasSet).sort((a, b) => a - b);
     const totalWeeksCount = semanasNumeros.length || 12;
 
-    const result = semanasNumeros.map((semNum, idx) => {
+    const result = semanasNumeros.map((semNum) => {
       const found = savedWeeks.find((w) => Number(w.numero_semana) === semNum);
       const isExam = found
         ? Boolean(
@@ -170,17 +173,17 @@ export const getSemanasConfig = async (req, res) => {
         temas_ids: temasIds,
         fecha_inicio: found?.fecha_inicio || null,
         fecha_fin: found?.fecha_fin || null,
-        es_semana_actual: found ? Boolean(found.es_semana_actual) : idx === 0,
         descripcion: cleanNombre
       };
     });
 
+    const currentWeek = getCurrentAcademicWeek(result);
     res.json({
       success: true,
       carrera: normCarrera,
       countTemas: careerTemas.length,
       countSemanas: result.length,
-      data: result
+      data: result.map(week => ({ ...week, es_semana_actual: week === currentWeek }))
     });
   } catch (error) {
     console.error("Error al obtener configuración de semanas:", error);
@@ -380,6 +383,7 @@ export const saveSemanasConfig = async (req, res) => {
       });
     }
 
+    const currentWeek = getCurrentAcademicWeek(semanas);
     const payload = semanas.map((s) => ({
       carrera: normCarrera,
       numero_semana: parseInt(s.numero_semana, 10),
@@ -387,7 +391,7 @@ export const saveSemanasConfig = async (req, res) => {
       temas: s.es_examen ? "EXAMEN" : s.temas || "",
       fecha_inicio: s.fecha_inicio || null,
       fecha_fin: s.fecha_fin || null,
-      es_semana_actual: Boolean(s.es_semana_actual),
+      es_semana_actual: s === currentWeek,
       descripcion: s.descripcion || `Semana ${s.numero_semana}`,
       updated_at: new Date().toISOString()
     }));
@@ -398,16 +402,16 @@ export const saveSemanasConfig = async (req, res) => {
         .upsert(payload, { onConflict: "carrera, numero_semana" })
         .select();
 
-      if (!error) {
-        inMemorySemanasConfig[normCarrera] = payload;
-        savePersistentSemanas(inMemorySemanasConfig);
-        return res.json({
-          success: true,
-          message: `Configuración de semanas guardada correctamente para ${normCarrera}.`,
-          carrera: normCarrera,
-          data: data || payload
-        });
-      }
+      if (error) throw error;
+
+      inMemorySemanasConfig[normCarrera] = payload;
+      savePersistentSemanas(inMemorySemanasConfig);
+      return res.json({
+        success: true,
+        message: `Configuración de semanas guardada correctamente para ${normCarrera}.`,
+        carrera: normCarrera,
+        data: data || payload
+      });
     }
 
     inMemorySemanasConfig[normCarrera] = payload;
@@ -481,6 +485,15 @@ export const setSemanaActual = async (req, res) => {
   }
 };
 
+const replaceRemoteWeeks = async (career, weeks, topicMoves = []) => {
+  const { error } = await supabase.rpc("replace_academic_weeks", {
+    target_career: career,
+    replacement_weeks: weeks,
+    topic_moves: topicMoves
+  });
+  if (error) throw error;
+};
+
 // 6. Copiar configuración de semanas de una carrera a otra
 export const copySemanasConfig = async (req, res) => {
   try {
@@ -504,14 +517,13 @@ export const copySemanasConfig = async (req, res) => {
 
     let sourceWeeks = [];
     if (isSupabaseConfigured && supabase) {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("configuracion_semanas")
         .select("*")
         .ilike("carrera", `%${sourceCar}%`);
+      if (error) throw error;
       sourceWeeks = data || [];
-    }
-
-    if (sourceWeeks.length === 0) {
+    } else {
       sourceWeeks = inMemorySemanasConfig[sourceCar] || [];
     }
 
@@ -535,11 +547,11 @@ export const copySemanasConfig = async (req, res) => {
     }));
 
     if (isSupabaseConfigured && supabase) {
-      await supabase.from("configuracion_semanas").delete().ilike("carrera", `%${destCar}%`);
-      await supabase.from("configuracion_semanas").insert(payload);
+      await replaceRemoteWeeks(destCar, payload);
     }
 
     inMemorySemanasConfig[destCar] = payload;
+    savePersistentSemanas(inMemorySemanasConfig);
 
     res.json({
       success: true,
@@ -570,79 +582,6 @@ export const reorderSemanas = async (req, res) => {
       });
     }
 
-    if (isSupabaseConfigured && supabase) {
-      // Paso 1: Mapear temas hacia números temporales negativos para evitar colisiones
-      for (let idx = 0; idx < ordered_weeks.length; idx++) {
-        const w = ordered_weeks[idx];
-        const oldSem = Number(w.original_numero_semana ?? w.numero_semana);
-        const tempSem = -(idx + 1);
-
-        if (Array.isArray(w.tema_ids) && w.tema_ids.length > 0) {
-          await supabase
-            .from("temario")
-            .update({ semana: tempSem, updated_at: new Date().toISOString() })
-            .in("id", w.tema_ids);
-        } else if (oldSem > 0 && !w.es_examen) {
-          await supabase
-            .from("temario")
-            .update({ semana: tempSem, updated_at: new Date().toISOString() })
-            .ilike("carrera", `%${normCarrera}%`)
-            .eq("semana", oldSem);
-        }
-      }
-
-      // Paso 2: Convertir los números temporales al nuevo número de semana positivo (idx + 1)
-      for (let idx = 0; idx < ordered_weeks.length; idx++) {
-        const tempSem = -(idx + 1);
-        const finalSem = idx + 1;
-        await supabase
-          .from("temario")
-          .update({ semana: finalSem, updated_at: new Date().toISOString() })
-          .ilike("carrera", `%${normCarrera}%`)
-          .eq("semana", tempSem);
-      }
-
-      // Paso 3: Reemplazar semanas en configuracion_semanas
-      await supabase
-        .from("configuracion_semanas")
-        .delete()
-        .ilike("carrera", `%${normCarrera}%`);
-
-      const newConfigRows = ordered_weeks.map((w, idx) => {
-        const newSemNum = idx + 1;
-        const isExam = Boolean(w.es_examen);
-        let desc = (w.nombre_semana || w.descripcion || "").trim();
-        if (!desc || /^Semana\s+\d+$/i.test(desc)) {
-          desc = isExam ? `Semana ${newSemNum} - Examen ${w.parcial || ""}`.trim() : `Semana ${newSemNum}`;
-        }
-
-        return {
-          carrera: normCarrera,
-          numero_semana: newSemNum,
-          parcial: w.parcial || getParcialForWeek(newSemNum, ordered_weeks.length),
-          temas: isExam ? "EXAMEN" : "",
-          descripcion: desc,
-          fecha_inicio: w.fecha_inicio || null,
-          fecha_fin: w.fecha_fin || null,
-          es_semana_actual: Boolean(w.es_semana_actual),
-          updated_at: new Date().toISOString()
-        };
-      });
-
-      await supabase.from("configuracion_semanas").insert(newConfigRows);
-
-      inMemorySemanasConfig[normCarrera] = newConfigRows;
-      savePersistentSemanas(inMemorySemanasConfig);
-
-      return res.json({
-        success: true,
-        message: `Semanas reordenadas exitosamente para ${normCarrera}.`,
-        carrera: normCarrera,
-        data: newConfigRows
-      });
-    }
-
-    // Actualización en memoria si Supabase no está conectado
     const newConfigRows = ordered_weeks.map((w, idx) => {
       const newSemNum = idx + 1;
       const isExam = Boolean(w.es_examen);
@@ -664,12 +603,22 @@ export const reorderSemanas = async (req, res) => {
       };
     });
 
+    if (isSupabaseConfigured && supabase) {
+      const topicMoves = ordered_weeks.map((week, index) => ({
+        old_week: Number(week.original_numero_semana ?? week.numero_semana),
+        new_week: index + 1,
+        is_exam: Boolean(week.es_examen),
+        topic_ids: Array.isArray(week.tema_ids) ? week.tema_ids : []
+      }));
+      await replaceRemoteWeeks(normCarrera, newConfigRows, topicMoves);
+    }
+
     inMemorySemanasConfig[normCarrera] = newConfigRows;
     savePersistentSemanas(inMemorySemanasConfig);
 
     res.json({
       success: true,
-      message: `Semanas reordenadas exitosamente (memoria) para ${normCarrera}.`,
+      message: `Semanas reordenadas exitosamente para ${normCarrera}.`,
       carrera: normCarrera,
       data: newConfigRows
     });

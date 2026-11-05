@@ -1,3 +1,4 @@
+import { generateSectionCode, normalizeSectionCareer } from "../../../shared/sectionCode.mjs";
 import React, { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import {
@@ -58,44 +59,6 @@ const isTimeOverlap = (startA, endA, startB, endB) => {
   if (minEndB <= minStartB) minEndB = minStartB + 120;
 
   return minStartA < minEndB && minEndA > minStartB;
-};
-
-// Generador de código según la convención solicitada (Día abreviado + Hora 24h a 4 dígitos)
-const generateSectionCode = (dia = "Lunes", horaInicio = "13:00") => {
-  const diaMap = {
-    lunes: "LU",
-    martes: "MA",
-    miercoles: "MI",
-    miércoles: "MI",
-    jueves: "JUE",
-    viernes: "VIE",
-    sabado: "SAB",
-    sábado: "SAB",
-    domingo: "DO"
-  };
-
-  const normalizedDay = (dia || "Lunes").toLowerCase().trim();
-  const dayPrefix = diaMap[normalizedDay] || "SEC";
-
-  let hourStr = "13";
-  let minStr = "00";
-
-  if (horaInicio && horaInicio.includes(":")) {
-    const parts = horaInicio.split(":");
-    hourStr = (parts[0] || "00").trim().padStart(2, "0");
-    minStr = (parts[1] || "00").trim().slice(0, 2).padStart(2, "0");
-  } else if (horaInicio) {
-    const digits = horaInicio.replace(/\D/g, "");
-    if (digits.length >= 4) {
-      hourStr = digits.slice(0, 2);
-      minStr = digits.slice(2, 4);
-    } else if (digits.length >= 1) {
-      hourStr = digits.slice(0, 2).padStart(2, "0");
-      minStr = "00";
-    }
-  }
-
-  return `${dayPrefix}${hourStr}${minStr}`;
 };
 
 const CARRERAS_DISPONIBLES = [
@@ -172,12 +135,9 @@ export default function SectionManagementModal({
   };
 
   const handleDiaChange = (newDia) => {
-    const newCode = newDia && formData.hora_inicio ? generateSectionCode(newDia, formData.hora_inicio) : formData.codigo;
     setFormData((prev) => ({
       ...prev,
-      dia: newDia,
-      codigo: newCode,
-      nombre: newCode ? `Laboratorio de Histología - Sección ${newCode}` : prev.nombre
+      dia: newDia
     }));
   };
 
@@ -190,13 +150,10 @@ export default function SectionManagementModal({
       suggestedEnd = `${String(endH).padStart(2, "0")}:${m}`;
     }
 
-    const newCode = formData.dia && newHora ? generateSectionCode(formData.dia, newHora) : formData.codigo;
     setFormData((prev) => ({
       ...prev,
       hora_inicio: newHora,
-      hora_fin: suggestedEnd || prev.hora_fin,
-      codigo: newCode,
-      nombre: newCode ? `Laboratorio de Histología - Sección ${newCode}` : prev.nombre
+      hora_fin: suggestedEnd || prev.hora_fin
     }));
   };
 
@@ -212,18 +169,32 @@ export default function SectionManagementModal({
     }
   };
 
+  const original = sections.find(section => section.id === targetId);
+  const scheduleChanged = mode === "create" || formData.dia !== original?.dia || formData.hora_inicio !== original?.hora_inicio;
+  const generateCode = scheduleChanged && formData.dia && formData.hora_inicio && formData.carrera;
+  const displayCode = generateCode
+    ? generateSectionCode(formData.dia, formData.hora_inicio, formData.carrera)
+    : formData.codigo;
+  const displayName = generateCode
+    ? `Sección ${displayCode}`
+    : formData.nombre.replace(/^Laboratorio de Histología - (?=Sección )/, "");
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setInlineError("");
     setLoading(true);
 
     try {
+      const payload = { ...formData, codigo: displayCode, nombre: displayName };
       if (mode === "create" || mode === "edit") {
         if (!formData.carrera) {
           throw new Error("Por favor selecciona la Carrera para la sección.");
         }
         if (!formData.dia || !formData.hora_inicio) {
           throw new Error("Por favor completa el Día y la Hora de inicio de la sección.");
+        }
+        if (!formData.coordinador.trim()) {
+          throw new Error("Selecciona el titular de la sección.");
         }
 
         // 🛡️ REGLA: Máximo 4 secciones por día para la carrera de MEDICINA
@@ -246,7 +217,7 @@ export default function SectionManagementModal({
         const collision = sections.find(
           (s) =>
             s.id !== targetSectionId &&
-            (s.carrera || "").trim().toUpperCase() === formData.carrera.trim().toUpperCase() &&
+            normalizeSectionCareer(s.carrera) === normalizeSectionCareer(formData.carrera) &&
             (s.dia || "").trim().toLowerCase() === formData.dia.trim().toLowerCase() &&
             (!formData.periodo_academico || !s.periodo_academico || s.periodo_academico === formData.periodo_academico) &&
             isTimeOverlap(formData.hora_inicio, formData.hora_fin, s.hora_inicio, s.hora_fin)
@@ -261,16 +232,16 @@ export default function SectionManagementModal({
       }
 
       if (mode === "create") {
-        const res = await api.secciones.create(formData);
+        const res = await api.secciones.create(payload);
         notify(res.message || "Sección creada exitosamente.", "success");
         onSuccess && onSuccess();
         onClose();
       } else if (mode === "edit") {
         if (!targetId) {
-          throw new Error("Por favor selecciona una sección de la lista para editar.");
+          throw new Error("Cierra el formulario y elige una sección desde Fichas o Calendario.");
         }
 
-        const res = await api.secciones.update(targetId, formData);
+        const res = await api.secciones.update(targetId, payload);
         notify(res.message || "Sección actualizada exitosamente.", "success");
         onSuccess && onSuccess();
         onClose();
@@ -323,22 +294,18 @@ export default function SectionManagementModal({
 
   return createPortal(
     <div
+      className="section-editor-overlay"
       style={{
         position: "fixed",
         top: 0,
         left: 0,
         right: 0,
         bottom: 0,
-        width: "100vw",
-        height: "100vh",
         backgroundColor: "rgba(15, 23, 42, 0.7)",
-        backdropFilter: "blur(8px)",
-        WebkitBackdropFilter: "blur(8px)",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
         zIndex: 999999,
-        padding: "1rem",
         boxSizing: "border-box"
       }}
       onClick={(e) => {
@@ -346,12 +313,12 @@ export default function SectionManagementModal({
       }}
     >
       <div
+        className="section-editor-panel"
         style={{
           background: "#ffffff",
           borderRadius: "1.25rem",
           width: "100%",
           maxWidth: "700px",
-          maxHeight: "88vh",
           display: "flex",
           flexDirection: "column",
           boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.35)",
@@ -415,7 +382,7 @@ export default function SectionManagementModal({
               </h2>
               <span style={{ fontSize: "0.8rem", color: "#64748b" }}>
                 {mode === "create" && "Registrar una nueva sección de laboratorio con horarios y cupos"}
-                {mode === "edit" && "Modificar horarios, aula, cupos o docentes encargados"}
+                {mode === "edit" && selectedSection && `Sección ${selectedSection.codigo} · ${selectedSection.carrera}`}
                 {mode === "delete" && "Dar de baja y eliminar una sección del sistema"}
               </span>
             </div>
@@ -485,20 +452,21 @@ export default function SectionManagementModal({
               </div>
             )}
 
-            {/* Selector de Sección (Para Editar o Borrar) */}
-            {(mode === "edit" || mode === "delete") && (
+            {/* Selector de Sección para Borrar */}
+            {mode === "delete" && (
               <div
                 style={{
-                  background: mode === "delete" ? "#fff1f2" : "#f0fdfa",
-                  border: `1px solid ${mode === "delete" ? "#fecdd3" : "#99f6e4"}`,
+                  background: "#fff1f2",
+                  border: "1px solid #fecdd3",
                   borderRadius: "0.75rem",
                   padding: "1rem"
                 }}
               >
-                <label style={{ display: "block", fontSize: "0.82rem", fontWeight: 700, color: mode === "delete" ? "#9f1239" : "#0f766e", marginBottom: "0.4rem" }}>
-                  Seleccionar Sección a {mode === "edit" ? "Modificar" : "Eliminar"}:
+                <label htmlFor="section-to-delete" style={{ display: "block", fontSize: "0.82rem", fontWeight: 700, color: "#9f1239", marginBottom: "0.4rem" }}>
+                  Seleccionar sección a eliminar
                 </label>
                 <select
+                  id="section-to-delete"
                   value={targetId}
                   onChange={(e) => handleSelectSection(e.target.value)}
                   style={{
@@ -515,7 +483,7 @@ export default function SectionManagementModal({
                   }}
                 >
                   <option value="">
-                    {mode === "edit" ? "-- Selecciona una sección a editar --" : "-- Selecciona una sección a eliminar --"}
+                    Selecciona una sección a eliminar
                   </option>
                   {sections.map((sec) => (
                     <option key={sec.id} value={sec.id}>
@@ -524,15 +492,6 @@ export default function SectionManagementModal({
                   ))}
                 </select>
 
-                {mode === "edit" && targetId && (
-                  <div style={{ marginTop: "0.5rem", fontSize: "0.76rem", color: "#0f766e", display: "flex", alignItems: "center", gap: "0.4rem" }}>
-                    <span style={{ fontWeight: 700 }}>ID Permanente:</span>
-                    <code style={{ background: "#ffffff", padding: "0.15rem 0.4rem", borderRadius: "4px", border: "1px solid #99f6e4", fontFamily: "monospace" }}>
-                      {targetId}
-                    </code>
-                    <span style={{ color: "#64748b" }}>(Inmutable, se preserva en el sistema)</span>
-                  </div>
-                )}
               </div>
             )}
 
@@ -553,7 +512,7 @@ export default function SectionManagementModal({
                   Ninguna sección seleccionada para editar
                 </p>
                 <span style={{ fontSize: "0.82rem", color: "#64748b" }}>
-                  Por favor selecciona una sección en el menú desplegable superior para cargar y modificar sus datos.
+                  Cierra el formulario y elige una sección desde Fichas o Calendario.
                 </span>
               </div>
             )}
@@ -562,7 +521,7 @@ export default function SectionManagementModal({
             {(mode === "create" || (mode === "edit" && targetId)) && (
               <>
                 {/* Código de Sección y Nombre */}
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: "1rem" }}>
+                <div className="section-editor-grid" style={{ "--section-editor-columns": "1fr 2fr", gap: "1rem" }}>
                   <div>
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "0.35rem" }}>
                       <label style={{ ...labelStyle, marginBottom: 0 }}>
@@ -578,7 +537,7 @@ export default function SectionManagementModal({
                       readOnly
                       tabIndex={-1}
                       placeholder="Se generará automáticamente"
-                      value={formData.codigo}
+                      value={displayCode}
                       style={{
                         ...inputStyle,
                         fontWeight: 800,
@@ -589,7 +548,7 @@ export default function SectionManagementModal({
                         cursor: "not-allowed",
                         userSelect: "none"
                       }}
-                      title="Este código es generado automáticamente a partir del día y la hora de inicio"
+                      title="Este código es generado automáticamente a partir del día, la hora de inicio y la carrera"
                     />
                   </div>
                   <div>
@@ -607,7 +566,7 @@ export default function SectionManagementModal({
                       readOnly
                       tabIndex={-1}
                       placeholder="Se generará automáticamente"
-                      value={formData.nombre}
+                      value={displayName}
                       style={{
                         ...inputStyle,
                         color: "#334155",
@@ -623,7 +582,7 @@ export default function SectionManagementModal({
                 </div>
 
                 {/* Día, Hora Inicio y Hora Fin */}
-                <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr 1fr", gap: "1rem" }}>
+                <div className="section-editor-grid" style={{ "--section-editor-columns": "1.2fr 1fr 1fr", gap: "1rem" }}>
                   <div>
                     <label style={labelStyle}>
                       Día de la Sección <span style={{ color: "#e11d48" }}>*</span>
@@ -676,8 +635,8 @@ export default function SectionManagementModal({
                   </div>
                 </div>
 
-                {/* Doctor Encargado y Coordinador Asignado */}
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
+                {/* Doctor Encargado y Titular de sección */}
+                <div className="section-editor-grid" style={{ "--section-editor-columns": "1fr 1fr", gap: "1rem" }}>
                   <div>
                     <label style={labelStyle}>
                       Doctor(a) Encargado(a) de Cátedra
@@ -693,15 +652,17 @@ export default function SectionManagementModal({
                   </div>
 
                   <div>
-                    <label style={labelStyle}>
-                      Coordinador(a) Asignado(a)
+                    <label htmlFor="section-coordinator" style={labelStyle}>
+                      Titular de sección <span aria-hidden="true" style={{ color: "#e11d48" }}>*</span>
                     </label>
                     <select
+                      id="section-coordinator"
+                      required
                       value={formData.coordinador}
                       onChange={(e) => setFormData({ ...formData, coordinador: e.target.value })}
                       style={inputStyle}
                     >
-                      <option value="">-- Sin coordinador específico --</option>
+                      <option value="" disabled>Selecciona el titular de la sección</option>
                       {instructors.map((inst) => {
                         const name = `${inst.primer_nombre || ''} ${inst.primer_apellido || ''}`.trim() || inst.nombre_completo || "Instructor";
                         return (
@@ -715,7 +676,7 @@ export default function SectionManagementModal({
                 </div>
 
                 {/* Carrera y Periodo Académico */}
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
+                <div className="section-editor-grid" style={{ "--section-editor-columns": "1fr 1fr", gap: "1rem" }}>
                   <div>
                     <label style={labelStyle}>
                       Carrera <span style={{ color: "#e11d48" }}>*</span>
@@ -819,7 +780,7 @@ export default function SectionManagementModal({
                     padding: "1rem"
                   }}
                 >
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem", fontSize: "0.85rem" }}>
+                  <div className="section-editor-grid" style={{ "--section-editor-columns": "1fr 1fr", gap: "0.75rem", fontSize: "0.85rem" }}>
                     <div>
                       <span style={{ color: "#64748b", display: "block", fontSize: "0.75rem" }}>Código de Sección</span>
                       <strong>{selectedSecObj.codigo}</strong>
@@ -833,7 +794,7 @@ export default function SectionManagementModal({
                       <span>{selectedSecObj.doctor_encargado}</span>
                     </div>
                     <div>
-                      <span style={{ color: "#64748b", display: "block", fontSize: "0.75rem" }}>Coordinador Asignado</span>
+                      <span style={{ color: "#64748b", display: "block", fontSize: "0.75rem" }}>Titular de sección</span>
                       <span style={{ color: "#0f766e", fontWeight: 700 }}>
                         {selectedSecObj.coordinador || "No asignado"}
                       </span>
@@ -898,7 +859,7 @@ export default function SectionManagementModal({
           <button
             type="submit"
             form="section-mgmt-form"
-            disabled={loading}
+            disabled={loading || (mode === "edit" && !targetId)}
             style={{
               padding: "0.6rem 1.4rem",
               borderRadius: "0.6rem",

@@ -1,875 +1,402 @@
 import { hasAdministrationAccess } from "../../../shared/instructorRoles.mjs";
-import React, { useState, useEffect, useCallback } from "react";
-import {
-  Calendar,
-  CalendarDays,
-  ArrowLeft,
-  Save,
-  Wand2,
-  CheckCircle2,
-  Clock,
-  Sparkles,
-  Layers,
-  BookOpen,
-  Info,
-  CalendarCheck,
-  Copy,
-  RefreshCw,
-  AlertCircle
-} from "lucide-react";
+import { getAcademicDate, getCurrentAcademicWeek } from "../../../shared/academicWeek.mjs";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { AlertTriangle, ArrowLeft, BookOpen, CalendarDays, Check, Clock, Copy, GraduationCap, Save, Wand2, X } from "lucide-react";
 import { api } from "../services/api";
+import TemarioDialog from "./TemarioDialog";
+import AcademicEventsView from "./AcademicEventsView";
+import { addScheduleDays, generateScheduleDates, getScheduleBreaks, parseScheduleDate } from "../../../shared/academicSchedule.mjs";
 
-const CARRERAS_CONFIG = [
-  { id: "Medicina", label: "Medicina", icon: "🩺", color: "#0284c7", bg: "#f0f9ff", border: "#bae6fd" },
-  { id: "Enfermería", label: "Enfermería", icon: "💉", color: "#0d9488", bg: "#f0fdfa", border: "#99f6e4" },
-  { id: "Odontología", label: "Odontología", icon: "🦷", color: "#c026d3", bg: "#fdf4ff", border: "#f5d0fe" },
-  { id: "Microbiología", label: "Microbiología", icon: "🔬", color: "#d97706", bg: "#fffbeb", border: "#fde68a" },
-  { id: "Nutrición", label: "Nutrición", icon: "🥗", color: "#16a34a", bg: "#f0fdf4", border: "#bbf7d0" }
+const CAREERS = ["Medicina", "Enfermería", "Odontología", "Microbiología", "Nutrición"];
+const AREAS = [
+  { id: "schedule", title: "Semanas", hint: "Fechas y recesos", Icon: CalendarDays },
+  { id: "reposicion", title: "Reposiciones", hint: "Recuperar prácticas", Icon: Clock },
+  { id: "examen", title: "Exámenes", hint: "Calendario por carrera", Icon: GraduationCap }
 ];
+const breakDateFormat = new Intl.DateTimeFormat("es-HN", { day: "numeric", month: "short", timeZone: "UTC" });
 
-const PARCIALES_META = [
-  { id: "I Parcial", label: "I Parcial", semanas: [1, 2, 3, 4, 5], color: "#7c3aed", bg: "#faf5ff", border: "#e9d5ff" },
-  { id: "II Parcial", label: "II Parcial", semanas: [6, 7, 8, 9, 10, 11], color: "#0284c7", bg: "#f0f9ff", border: "#bae6fd" },
-  { id: "III Parcial", label: "III Parcial", semanas: [12, 13, 14, 15, 16], color: "#d97706", bg: "#fffbeb", border: "#fde68a" }
-];
-
-export default function WeekDefinitionView({ currentInstructor, onClose = () => {}, notify = () => {} }) {
-  const [selectedCarrera, setSelectedCarrera] = useState("Medicina");
-  const [semanas, setSemanas] = useState([]);
+export default function WeekDefinitionView({ currentInstructor, onClose, onOpenTemario, notify = () => {} }) {
+  const [career, setCareer] = useState(CAREERS[0]);
+  const [area, setArea] = useState("schedule");
+  const [weeks, setWeeks] = useState([]);
+  const [savedWeeks, setSavedWeeks] = useState([]);
+  const [today, setToday] = useState(getAcademicDate);
+  const [partial, setPartial] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [autoStartDate, setAutoStartDate] = useState("");
-  const [showAutoGenerator, setShowAutoGenerator] = useState(false);
-
-  // Modal para copiar fechas de semanas entre carreras
-  const [copyModalOpen, setCopyModalOpen] = useState(false);
-  const [copyFromCarrera, setCopyFromCarrera] = useState("Medicina");
+  const [loadError, setLoadError] = useState("");
+  const [saveError, setSaveError] = useState("");
+  const [dirty, setDirty] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [tool, setTool] = useState(null);
+  const [startDate, setStartDate] = useState("");
+  const [breakDate, setBreakDate] = useState("");
+  const [skippedMondays, setSkippedMondays] = useState([]);
+  const [sourceCareer, setSourceCareer] = useState("");
   const [copying, setCopying] = useState(false);
-
+  const [toolError, setToolError] = useState("");
+  const requestId = useRef(0);
   const isAuthorized = hasAdministrationAccess(currentInstructor?.rol);
 
-  const activeCarrera =
-    CARRERAS_CONFIG.find((c) => c.id === selectedCarrera) || CARRERAS_CONFIG[0];
-
-  // Cargar configuración de semanas de la carrera activa
-  const loadSemanas = useCallback(async () => {
+  const loadWeeks = useCallback(async () => {
     if (!isAuthorized) return;
+    const request = ++requestId.current;
     setLoading(true);
+    setLoadError("");
     try {
-      const res = await api.semanas.getConfig(selectedCarrera);
-      if (res?.data) {
-        setSemanas(res.data);
-      } else {
-        setSemanas([]);
+      const result = await api.semanas.getConfig(career);
+      if (request === requestId.current) {
+        const schedule = [...(result?.data || [])].sort((a, b) => Number(a.numero_semana) - Number(b.numero_semana));
+        setWeeks(schedule);
+        setSavedWeeks(schedule);
+        setSkippedMondays(getScheduleBreaks(schedule));
       }
-    } catch (err) {
-      console.error("Error al cargar configuración de semanas:", err);
-      notify(`Error al cargar la programación de ${selectedCarrera}`, "error");
+    } catch (error) {
+      if (request === requestId.current) setLoadError(error.message || "No pudimos cargar la programación.");
     } finally {
-      setLoading(false);
+      if (request === requestId.current) setLoading(false);
     }
-  }, [selectedCarrera, isAuthorized]);
+  }, [career, isAuthorized]);
 
   useEffect(() => {
-    if (isAuthorized) {
-      loadSemanas();
-    }
-  }, [loadSemanas, isAuthorized]);
+    loadWeeks();
+    return () => { requestId.current++; };
+  }, [loadWeeks]);
 
-  if (!isAuthorized) {
-    return (
-      <div className="animate-fade-in" style={{ padding: "2.5rem 2rem", textAlign: "center", background: "#ffffff", borderRadius: "1rem", border: "1px solid #e2e8f0", maxWidth: "580px", margin: "3rem auto", boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.05)" }}>
-        <div style={{ width: "56px", height: "56px", borderRadius: "50%", background: "#fee2e2", color: "#dc2626", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 1.25rem" }}>
-          <CalendarDays size={28} />
-        </div>
-        <h3 style={{ fontSize: "1.25rem", fontWeight: 800, color: "#1e293b", marginBottom: "0.5rem" }}>Acceso Restringido</h3>
-        <p style={{ fontSize: "0.95rem", color: "#64748b", lineHeight: 1.5, marginBottom: "1.5rem" }}>
-          El módulo de <strong>Definición de Semanas Académicas</strong> está reservado exclusivamente para instructores con rol de <strong>Creador</strong> o <strong>Administrador</strong>.
-        </p>
-        <button
-          onClick={onClose}
-          style={{
-            padding: "0.65rem 1.5rem",
-            background: "#0284c7",
-            color: "#ffffff",
-            border: "none",
-            borderRadius: "0.75rem",
-            fontWeight: 700,
-            cursor: "pointer",
-            display: "inline-flex",
-            alignItems: "center",
-            gap: "0.5rem"
-          }}
-        >
-          <ArrowLeft size={16} /> Volver al Dashboard
-        </button>
-      </div>
-    );
-  }
+  useEffect(() => {
+    const timer = setInterval(() => setToday(getAcademicDate()), 60_000);
+    return () => clearInterval(timer);
+  }, []);
 
-  // Manejar cambio en fecha inicio o fin
-  const handleDateChange = (numeroSemana, field, value) => {
-    setSemanas((prev) =>
-      prev.map((s) => (s.numero_semana === numeroSemana ? { ...s, [field]: value } : s))
-    );
+  const markChanged = () => {
+    setDirty(true);
+    setSaved(false);
+    setSaveError("");
   };
 
-  // Manejar cambio de semana actual activa
-  const handleSetSemanaActual = (numeroSemana) => {
-    setSemanas((prev) =>
-      prev.map((s) => ({
-        ...s,
-        es_semana_actual: s.numero_semana === numeroSemana
-      }))
-    );
+  const updateWeek = (number, field, value) => {
+    setWeeks(previous => previous.map(week => week.numero_semana === number ? { ...week, [field]: value } : week));
+    markChanged();
   };
 
-  // Generador automático de fechas a partir de un lunes inicial
-  const handleApplyAutoDates = () => {
-    if (!autoStartDate) {
-      notify("Selecciona la fecha de inicio (Lunes de la Semana 1)", "warning");
+  const addBreak = () => {
+    const date = parseScheduleDate(breakDate);
+    if (!date || date.getUTCDay() !== 1) {
+      setToolError("Selecciona el lunes de la semana de receso.");
       return;
     }
-
-    const start = new Date(autoStartDate + "T00:00:00");
-    if (isNaN(start.getTime())) {
-      notify("Fecha inválida", "error");
-      return;
-    }
-
-    const updated = semanas.map((s, idx) => {
-      const semStart = new Date(start);
-      semStart.setDate(start.getDate() + idx * 7);
-
-      const semEnd = new Date(semStart);
-      semEnd.setDate(semStart.getDate() + 5);
-
-      const fInicio = semStart.toISOString().split("T")[0];
-      const fFin = semEnd.toISOString().split("T")[0];
-
-      return {
-        ...s,
-        fecha_inicio: fInicio,
-        fecha_fin: fFin
-      };
-    });
-
-    setSemanas(updated);
-    setShowAutoGenerator(false);
-    notify(`Fechas de las ${semanas.length} semanas calculadas para ${selectedCarrera}. Revisa y presiona Guardar.`, "success");
+    setSkippedMondays(previous => [...new Set([...previous, breakDate])].sort());
+    setBreakDate("");
+    setToolError("");
   };
 
-  // Copiar fechas desde otra carrera
-  const handleExecuteCopy = async () => {
-    if (copyFromCarrera === selectedCarrera) {
-      notify("La carrera de origen no puede ser igual a la carrera actual", "warning");
+  const handleGenerate = (event) => {
+    event.preventDefault();
+    const start = parseScheduleDate(startDate);
+    if (!start || start.getUTCDay() !== 1) {
+      setToolError("La primera semana debe iniciar un lunes.");
       return;
     }
+    if (breakDate && parseScheduleDate(breakDate)?.getUTCDay() !== 1) {
+      setToolError("Selecciona el lunes de la semana de receso.");
+      return;
+    }
+    const skipped = [...new Set([...skippedMondays, ...(breakDate ? [breakDate] : [])])].sort();
+    setSkippedMondays(skipped);
+    setWeeks(previous => generateScheduleDates(previous, startDate, skipped));
+    markChanged();
+    setTool(null);
+    notify("Fechas calculadas. Revísalas y guarda la programación.", "success");
+  };
 
+  const handleCopy = async (event) => {
+    event.preventDefault();
+    if (!sourceCareer || sourceCareer === career || copying) return;
     setCopying(true);
+    setToolError("");
     try {
-      const res = await api.semanas.copy(copyFromCarrera, selectedCarrera);
-      notify(res.message || `Fechas copiadas exitosamente a ${selectedCarrera}`, "success");
-      setCopyModalOpen(false);
-      loadSemanas();
-    } catch (err) {
-      console.error("Error al copiar fechas de semanas:", err);
-      notify("Error al duplicar fechas entre carreras", "error");
+      const result = await api.semanas.copy(sourceCareer, career);
+      setTool(null);
+      setPartial("");
+      setSkippedMondays([]);
+      setDirty(false);
+      setSaved(true);
+      setSaveError("");
+      notify(result.message || `Programación copiada a ${career}`, "success");
+      await loadWeeks();
+    } catch (error) {
+      setToolError(error.message || "No pudimos copiar la programación.");
     } finally {
       setCopying(false);
     }
   };
 
-  // Guardar configuración en Backend
   const handleSave = async () => {
-    if (semanas.length === 0) {
-      notify("No hay semanas para guardar.", "info");
-      return;
-    }
-
+    if (!weeks.length || saving) return;
     setSaving(true);
+    setSaveError("");
     try {
-      await api.semanas.saveConfig(semanas, selectedCarrera);
-      notify(`Programación de semanas guardada con éxito para ${selectedCarrera}`, "success");
-    } catch (err) {
-      console.error("Error al guardar semanas:", err);
-      notify("Error al guardar la configuración de semanas", "error");
+      await api.semanas.saveConfig(weeks, career);
+      setSavedWeeks(weeks);
+      setDirty(false);
+      setSaved(true);
+      notify(`Programación guardada para ${career}`, "success");
+    } catch (error) {
+      setSaveError(error.message || "No pudimos guardar la programación.");
     } finally {
       setSaving(false);
     }
   };
 
+  const groups = new Map();
+  for (const week of weeks) {
+    const name = week.parcial?.trim() || "Sin parcial";
+    if (!groups.has(name)) groups.set(name, []);
+    groups.get(name).push(week);
+  }
+  const shownGroups = [...groups].filter(([name]) => !partial || partial === name);
+  const currentWeek = getCurrentAcademicWeek(weeks, today);
+  const datedWeeks = weeks.filter(week => week.fecha_inicio && week.fecha_fin).length;
+  const generating = tool === "generate";
+
+  const openTool = mode => {
+    setToolError("");
+    setSourceCareer("");
+    setStartDate(weeks.find(week => parseScheduleDate(week.fecha_inicio)?.getUTCDay() === 1)?.fecha_inicio || "");
+    setBreakDate("");
+    setTool(mode);
+  };
+
+  const back = (
+    <button type="button" className="user-button user-button--back" onClick={onClose}>
+      <ArrowLeft size={17} aria-hidden="true" /> Panel docente
+    </button>
+  );
+
+  if (!isAuthorized) {
+    return (
+      <section className="user-directory">
+        {back}
+        <p className="user-directory__state">Creador y Coordinador pueden definir la programación.</p>
+      </section>
+    );
+  }
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "1.75rem", maxWidth: "1280px", margin: "0 auto" }}>
-      {/* ======================================================================= */}
-      {/* 🧭 ENCABEZADO Y CONTROLES SUPERIORES */}
-      {/* ======================================================================= */}
-      <div
-        className="glass-panel"
-        style={{
-          background: "linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)",
-          borderRadius: "1.25rem",
-          border: "1px solid #e2e8f0",
-          boxShadow: "0 10px 30px -5px rgba(0, 0, 0, 0.04)",
-          padding: "1.5rem 1.75rem",
-          display: "flex",
-          flexDirection: "column",
-          gap: "1.25rem"
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "1rem" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "0.85rem" }}>
-            <button
-              onClick={onClose}
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                width: "40px",
-                height: "40px",
-                borderRadius: "0.75rem",
-                background: "#f1f5f9",
-                border: "1px solid #cbd5e1",
-                color: "#334155",
-                cursor: "pointer",
-                transition: "all 0.15s ease"
-              }}
-              title="Regresar al Dashboard"
-            >
-              <ArrowLeft size={18} />
-            </button>
+    <section className="user-directory week-definition" aria-labelledby="week-definition-title">
+      {back}
+      <header className="user-directory__hero">
+        <div>
+          <p className="user-directory__eyebrow"><CalendarDays size={17} aria-hidden="true" /> Administración general</p>
+          <h2 id="week-definition-title">Definir semanas por carrera</h2>
+          <p>Organiza el periodo, las reposiciones y los exámenes de cada carrera.</p>
+        </div>
+      </header>
 
-            <div
-              style={{
-                width: "44px",
-                height: "44px",
-                borderRadius: "0.85rem",
-                background: "linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)",
-                color: "#ffffff",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                boxShadow: "0 6px 16px rgba(99, 102, 241, 0.3)"
-              }}
-            >
-              <CalendarDays size={22} />
-            </div>
-
-            <div>
-              <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                <h1 style={{ fontSize: "1.45rem", fontWeight: 900, color: "#0f172a", margin: 0, letterSpacing: "-0.01em" }}>
-                  Definir Semanas por Carrera
-                </h1>
-                <span
-                  style={{
-                    background: activeCarrera.bg,
-                    color: activeCarrera.color,
-                    border: `1px solid ${activeCarrera.border}`,
-                    fontSize: "0.74rem",
-                    fontWeight: 800,
-                    padding: "0.2rem 0.6rem",
-                    borderRadius: "9999px",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "0.3rem"
-                  }}
-                >
-                  <span>{activeCarrera.icon}</span>
-                  <span>{selectedCarrera}</span>
-                </span>
-              </div>
-              <p style={{ fontSize: "0.84rem", color: "#64748b", margin: 0 }}>
-                {semanas.length > 0
-                  ? `Mostrando únicamente las ${semanas.length} semanas con temas creados para ${selectedCarrera}.`
-                  : `Configuración de fechas para ${selectedCarrera}.`}
-              </p>
-            </div>
-          </div>
-
-          <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", flexWrap: "wrap" }}>
-            <button
-              onClick={() => setCopyModalOpen(true)}
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "0.45rem",
-                background: "#ffffff",
-                border: "1px solid #cbd5e1",
-                color: "#334155",
-                padding: "0.55rem 0.95rem",
-                borderRadius: "0.75rem",
-                fontSize: "0.84rem",
-                fontWeight: 700,
-                cursor: "pointer",
-                boxShadow: "0 2px 4px rgba(0,0,0,0.03)",
-                transition: "all 0.15s ease"
-              }}
-            >
-              <Copy size={15} color="#0284c7" />
-              <span>Copiar Fechas</span>
-            </button>
-
-            {semanas.length > 0 && (
-              <button
-                onClick={() => setShowAutoGenerator(!showAutoGenerator)}
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "0.45rem",
-                  background: showAutoGenerator ? "#e0e7ff" : "#ffffff",
-                  border: "1px solid #cbd5e1",
-                  color: "#4338ca",
-                  padding: "0.55rem 1rem",
-                  borderRadius: "0.75rem",
-                  fontSize: "0.85rem",
-                  fontWeight: 700,
-                  cursor: "pointer",
-                  boxShadow: "0 2px 5px rgba(0,0,0,0.03)",
-                  transition: "all 0.15s ease"
-                }}
-              >
-                <Wand2 size={16} color="#6366f1" />
-                <span>Autocalcular Fechas</span>
-              </button>
-            )}
-
-            <button
-              onClick={handleSave}
-              disabled={saving || loading || semanas.length === 0}
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "0.45rem",
-                background: "linear-gradient(135deg, #16a34a 0%, #15803d 100%)",
-                border: "none",
-                color: "#ffffff",
-                padding: "0.55rem 1.25rem",
-                borderRadius: "0.75rem",
-                fontSize: "0.85rem",
-                fontWeight: 800,
-                cursor: saving || loading || semanas.length === 0 ? "not-allowed" : "pointer",
-                boxShadow: "0 4px 12px rgba(22, 163, 74, 0.25)",
-                transition: "all 0.15s ease",
-                opacity: saving || semanas.length === 0 ? 0.75 : 1
-              }}
-            >
-              <Save size={16} />
-              <span>{saving ? "Guardando..." : `Guardar (${selectedCarrera})`}</span>
-            </button>
+      <section className="temario-context" aria-labelledby="week-career-title">
+        <div className="temario-context__career">
+          <h3 id="week-career-title">Carrera activa</h3>
+          <div className="user-field">
+            <select aria-label="Elegir carrera" value={career} disabled={saving || copying} onChange={event => {
+              requestId.current++;
+              setCareer(event.target.value);
+              setWeeks([]);
+              setSavedWeeks([]);
+              setSkippedMondays([]);
+              setPartial("");
+              setDirty(false);
+              setSaved(false);
+              setSaveError("");
+              setLoading(true);
+            }}>
+              {CAREERS.map(value => <option key={value}>{value}</option>)}
+            </select>
           </div>
         </div>
 
-        {/* =================================================================== */}
-        {/* 🩺 SELECTOR DE CARRERAS (PESTAÑAS INDEPENDIENTES) */}
-        {/* =================================================================== */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "0.6rem",
-            padding: "0.5rem",
-            background: "#f1f5f9",
-            borderRadius: "0.85rem",
-            overflowX: "auto"
-          }}
-        >
-          {CARRERAS_CONFIG.map((c) => {
-            const isSelected = selectedCarrera === c.id;
-            return (
-              <button
-                key={c.id}
-                onClick={() => setSelectedCarrera(c.id)}
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "0.45rem",
-                  padding: "0.5rem 1.1rem",
-                  borderRadius: "0.65rem",
-                  border: isSelected ? `2px solid ${c.color}` : "1px solid transparent",
-                  background: isSelected ? "#ffffff" : "transparent",
-                  color: isSelected ? c.color : "#64748b",
-                  fontWeight: isSelected ? 800 : 600,
-                  fontSize: "0.86rem",
-                  cursor: "pointer",
-                  boxShadow: isSelected ? "0 4px 10px rgba(0,0,0,0.06)" : "none",
-                  transition: "all 0.15s ease",
-                  whiteSpace: "nowrap"
-                }}
-              >
-                <span style={{ fontSize: "1.05rem" }}>{c.icon}</span>
-                <span>{c.label}</span>
-                {isSelected && (
-                  <span
-                    style={{
-                      width: "7px",
-                      height: "7px",
-                      borderRadius: "50%",
-                      background: c.color,
-                      display: "inline-block"
-                    }}
-                  />
-                )}
-              </button>
-            );
-          })}
-        </div>
+      </section>
 
-        {/* Generador Automático Desplegable */}
-        {showAutoGenerator && semanas.length > 0 && (
-          <div
-            style={{
-              background: "#eff6ff",
-              border: "1px solid #bfdbfe",
-              borderRadius: "0.85rem",
-              padding: "1rem 1.25rem",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              flexWrap: "wrap",
-              gap: "1rem"
-            }}
-          >
-            <div style={{ display: "flex", alignItems: "center", gap: "0.6rem" }}>
-              <Sparkles size={18} color="#2563eb" />
-              <div>
-                <span style={{ fontSize: "0.88rem", fontWeight: 800, color: "#1e3a8a", display: "block" }}>
-                  Autollenar las {semanas.length} semanas de {selectedCarrera} a partir de la fecha de inicio
-                </span>
-                <span style={{ fontSize: "0.78rem", color: "#3b82f6" }}>
-                  Ingresa el primer día de clases (Semana {semanas[0]?.numero_semana || 1}) y el sistema programará automáticamente todas las semanas consecutivas (Lunes a Sábado).
-                </span>
-              </div>
-            </div>
-
-            <div style={{ display: "flex", alignItems: "center", gap: "0.6rem" }}>
-              <input
-                type="date"
-                value={autoStartDate}
-                onChange={(e) => setAutoStartDate(e.target.value)}
-                style={{
-                  padding: "0.45rem 0.75rem",
-                  borderRadius: "0.6rem",
-                  border: "1px solid #93c5fd",
-                  background: "#ffffff",
-                  fontSize: "0.85rem",
-                  fontWeight: 600,
-                  color: "#1e293b",
-                  outline: "none"
-                }}
-              />
-              <button
-                onClick={handleApplyAutoDates}
-                style={{
-                  background: "#2563eb",
-                  color: "#ffffff",
-                  border: "none",
-                  padding: "0.48rem 1rem",
-                  borderRadius: "0.6rem",
-                  fontSize: "0.82rem",
-                  fontWeight: 800,
-                  cursor: "pointer",
-                  boxShadow: "0 2px 6px rgba(37, 99, 235, 0.25)"
-                }}
-              >
-                Aplicar a {selectedCarrera}
-              </button>
-            </div>
-          </div>
-        )}
+      <div className="temario-nav week-definition__nav" role="group" aria-label="Áreas del calendario académico">
+        {AREAS.map(({ id, title, hint, Icon }) => (
+          <button type="button" key={id} className="temario-nav__tab" data-area={id} aria-pressed={area === id}
+            disabled={saving || copying} onClick={() => setArea(id)}>
+            <span className="temario-nav__icon"><Icon size={19} aria-hidden="true" /></span>
+            <strong>{title}</strong>
+            <span className="temario-nav__hint">{hint}</span>
+            {area === id && <Check className="temario-nav__check" size={14} aria-hidden="true" />}
+          </button>
+        ))}
       </div>
 
-      {/* ======================================================================= */}
-      {/* 📅 CONTENEDOR PRINCIPAL: GRUPOS POR PARCIAL O ESTADO VACÍO */}
-      {/* ======================================================================= */}
-      {loading ? (
-        <div style={{ padding: "4rem", textAlign: "center", color: "#64748b" }}>
-          <Clock size={32} style={{ animation: "spin 1.5s linear infinite", margin: "0 auto 1rem", color: activeCarrera.color }} />
-          <p style={{ fontWeight: 700 }}>Cargando programación de semanas para {selectedCarrera}...</p>
-        </div>
-      ) : semanas.length === 0 ? (
-        /* Estado cuando la carrera no tiene temas registrados en temario */
-        <div
-          className="glass-panel"
-          style={{
-            background: "#ffffff",
-            borderRadius: "1.25rem",
-            border: "1px dashed #cbd5e1",
-            padding: "3.5rem 2rem",
-            textAlign: "center",
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            gap: "0.75rem"
-          }}
-        >
-          <span style={{ fontSize: "3rem" }}>{activeCarrera.icon}</span>
-          <h2 style={{ fontSize: "1.25rem", fontWeight: 800, color: "#0f172a", margin: 0 }}>
-            No hay temas registrados en el temario de {selectedCarrera}
-          </h2>
-          <p style={{ fontSize: "0.88rem", color: "#64748b", maxWidth: "500px", margin: "0 0 1rem", lineHeight: 1.45 }}>
-            Para definir las semanas y fechas de <strong>{selectedCarrera}</strong>, primero debes registrar sus temas en el módulo <strong>"Administrar Temario"</strong>.
-          </p>
-          <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap", justifyContent: "center" }}>
-            <button
-              onClick={onClose}
-              style={{
-                background: activeCarrera.color,
-                color: "#ffffff",
-                border: "none",
-                padding: "0.6rem 1.25rem",
-                borderRadius: "0.75rem",
-                fontSize: "0.86rem",
-                fontWeight: 700,
-                cursor: "pointer",
-                boxShadow: "0 4px 12px rgba(0,0,0,0.1)"
-              }}
-            >
-              Ir a Administrar Temario
+      {area !== "schedule" ? (
+        <AcademicEventsView key={`${career}-${area}`} career={career} kind={area} weeks={savedWeeks} notify={notify} />
+      ) : (
+        <>
+          <div className="week-definition__tools">
+            <button type="button" className="user-button" disabled={loading || saving || Boolean(loadError) || !weeks.length} onClick={() => openTool("generate")}>
+              <Wand2 size={17} aria-hidden="true" /> Generar fechas
+            </button>
+            <button type="button" className="user-button" disabled={loading || saving} onClick={() => openTool("copy")}>
+              <Copy size={17} aria-hidden="true" /> Copiar programación
             </button>
           </div>
+      {loading ? (
+        <p className="user-directory__state" role="status">Cargando semanas de {career}…</p>
+      ) : loadError ? (
+        <div className="user-directory__state" role="alert">
+          <p>{loadError}</p>
+          <button type="button" className="user-button" onClick={loadWeeks}>Reintentar</button>
         </div>
+      ) : weeks.length === 0 ? (
+        <section className="user-directory__state">
+          <CalendarDays size={24} aria-hidden="true" />
+          <h3>Aún no hay semanas para {career}</h3>
+          <p>Agrega semanas desde el área Semanas de Temario.</p>
+          {onOpenTemario && <button type="button" className="user-button" onClick={() => onOpenTemario(career)}>
+            <BookOpen size={17} aria-hidden="true" /> Abrir Temario
+          </button>}
+        </section>
       ) : (
-        /* Renderizar únicamente los parciales y semanas que tienen temas creados para esta carrera */
-        <div style={{ display: "flex", flexDirection: "column", gap: "2rem" }}>
-          {PARCIALES_META.map((parcialMeta) => {
-            const semanasDelParcial = semanas.filter((s) =>
-              parcialMeta.semanas.includes(Number(s.numero_semana))
-            );
-
-            if (semanasDelParcial.length === 0) return null;
-
-            return (
-              <div key={parcialMeta.id} style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
-                {/* Título de Sección del Parcial */}
-                <div style={{ display: "flex", alignItems: "center", gap: "0.6rem" }}>
-                  <div
-                    style={{
-                      width: "10px",
-                      height: "22px",
-                      borderRadius: "4px",
-                      background: parcialMeta.color
-                    }}
-                  />
-                  <h2 style={{ fontSize: "1.15rem", fontWeight: 800, color: "#0f172a", margin: 0 }}>
-                    {parcialMeta.label}
-                  </h2>
-                  <span
-                    style={{
-                      fontSize: "0.75rem",
-                      fontWeight: 700,
-                      color: parcialMeta.color,
-                      background: parcialMeta.bg,
-                      border: `1px solid ${parcialMeta.border}`,
-                      padding: "0.15rem 0.6rem",
-                      borderRadius: "9999px"
-                    }}
-                  >
-                    {semanasDelParcial.length} {semanasDelParcial.length === 1 ? "Semana" : "Semanas"} ({semanasDelParcial.map((s) => `S${s.numero_semana}`).join(", ")})
-                  </span>
-                </div>
-
-                {/* Grid de Semanas */}
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
-                    gap: "1.25rem"
-                  }}
-                >
-                  {semanasDelParcial.map((sem) => {
-                    const isActual = sem.es_semana_actual;
-                    return (
-                      <div
-                        key={sem.numero_semana}
-                        className="glass-panel"
-                        style={{
-                          background: isActual ? "#f0fdf4" : "#ffffff",
-                          border: isActual ? "2px solid #86efac" : "1px solid #e2e8f0",
-                          borderRadius: "1rem",
-                          padding: "1.25rem",
-                          boxShadow: isActual
-                            ? "0 10px 25px -5px rgba(22, 163, 74, 0.15)"
-                            : "0 4px 15px rgba(0, 0, 0, 0.03)",
-                          display: "flex",
-                          flexDirection: "column",
-                          justifyContent: "space-between",
-                          gap: "1rem",
-                          position: "relative",
-                          transition: "all 0.15s ease"
-                        }}
-                      >
-                        {/* Cabecera de la Tarjeta */}
-                        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "0.5rem" }}>
-                          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                            <div
-                              style={{
-                                width: "32px",
-                                height: "32px",
-                                borderRadius: "0.6rem",
-                                background: isActual ? "#15803d" : "#0f172a",
-                                color: "#ffffff",
-                                display: "flex",
-                                alignItems: "center",
-                                justifyContent: "center",
-                                fontSize: "0.85rem",
-                                fontWeight: 900
-                              }}
-                            >
-                              S{sem.numero_semana}
-                            </div>
-                            <div>
-                              <span style={{ fontSize: "0.95rem", fontWeight: 800, color: "#0f172a", display: "block" }}>
-                                Semana {sem.numero_semana}
-                              </span>
-                              <span style={{ fontSize: "0.72rem", color: "#64748b", fontWeight: 600 }}>
-                                {sem.parcial}
-                              </span>
-                            </div>
-                          </div>
-
-                          <button
-                            onClick={() => handleSetSemanaActual(sem.numero_semana)}
-                            style={{
-                              border: isActual ? "1px solid #86efac" : "1px solid #cbd5e1",
-                              background: isActual ? "#dcfce7" : "#f8fafc",
-                              color: isActual ? "#15803d" : "#64748b",
-                              fontSize: "0.7rem",
-                              fontWeight: 800,
-                              padding: "0.2rem 0.55rem",
-                              borderRadius: "9999px",
-                              cursor: "pointer",
-                              display: "inline-flex",
-                              alignItems: "center",
-                              gap: "0.25rem",
-                              transition: "all 0.15s ease"
-                            }}
-                            title="Marcar como la semana académica en curso"
-                          >
-                            {isActual ? (
-                              <>
-                                <CheckCircle2 size={12} color="#15803d" />
-                                <span>Semana Actual</span>
-                              </>
-                            ) : (
-                              <span>Establecer Actual</span>
-                            )}
-                          </button>
-                        </div>
-
-                        {/* Temas Académicos Oficiales CREADOS para esta Carrera */}
-                        <div
-                          style={{
-                            background: isActual ? "#ffffff" : "#f8fafc",
-                            border: "1px solid #e2e8f0",
-                            borderRadius: "0.65rem",
-                            padding: "0.6rem 0.75rem"
-                          }}
-                        >
-                          <div style={{ display: "flex", alignItems: "center", gap: "0.35rem", marginBottom: "0.25rem" }}>
-                            <BookOpen size={12} color="#64748b" />
-                            <span style={{ fontSize: "0.7rem", fontWeight: 800, color: "#64748b", textTransform: "uppercase" }}>
-                              Temas en {selectedCarrera}
-                            </span>
-                          </div>
-                          <span style={{ fontSize: "0.82rem", fontWeight: 700, color: "#1e293b", lineHeight: 1.35, display: "block" }}>
-                            {sem.temas}
-                          </span>
-                        </div>
-
-                        {/* Rango de Fechas: Desde / Hasta */}
-                        <div style={{ display: "flex", flexDirection: "column", gap: "0.6rem" }}>
-                          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.5rem" }}>
-                            {/* Fecha Inicio */}
-                            <div style={{ display: "flex", flexDirection: "column", gap: "0.2rem" }}>
-                              <label style={{ fontSize: "0.72rem", fontWeight: 700, color: "#475569" }}>
-                                Fecha Inicio:
-                              </label>
-                              <input
-                                type="date"
-                                value={sem.fecha_inicio || ""}
-                                onChange={(e) => handleDateChange(sem.numero_semana, "fecha_inicio", e.target.value)}
-                                style={{
-                                  padding: "0.4rem 0.5rem",
-                                  borderRadius: "0.5rem",
-                                  border: "1px solid #cbd5e1",
-                                  fontSize: "0.78rem",
-                                  fontWeight: 600,
-                                  color: "#0f172a",
-                                  background: "#ffffff",
-                                  outline: "none"
-                                }}
-                              />
-                            </div>
-
-                            {/* Fecha Fin */}
-                            <div style={{ display: "flex", flexDirection: "column", gap: "0.2rem" }}>
-                              <label style={{ fontSize: "0.72rem", fontWeight: 700, color: "#475569" }}>
-                                Fecha Fin:
-                              </label>
-                              <input
-                                type="date"
-                                value={sem.fecha_fin || ""}
-                                onChange={(e) => handleDateChange(sem.numero_semana, "fecha_fin", e.target.value)}
-                                style={{
-                                  padding: "0.4rem 0.5rem",
-                                  borderRadius: "0.5rem",
-                                  border: "1px solid #cbd5e1",
-                                  fontSize: "0.78rem",
-                                  fontWeight: 600,
-                                  color: "#0f172a",
-                                  background: "#ffffff",
-                                  outline: "none"
-                                }}
-                              />
-                            </div>
-                          </div>
-
-                          {/* Notas / Descripción Opcional */}
-                          <input
-                            type="text"
-                            placeholder="Descripción opcional (Ej. I Examen)"
-                            value={sem.descripcion || ""}
-                            onChange={(e) => handleDateChange(sem.numero_semana, "descripcion", e.target.value)}
-                            style={{
-                              padding: "0.35rem 0.6rem",
-                              borderRadius: "0.5rem",
-                              border: "1px solid #e2e8f0",
-                              fontSize: "0.74rem",
-                              color: "#64748b",
-                              background: isActual ? "#ffffff" : "#f8fafc",
-                              outline: "none"
-                            }}
-                          />
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {/* Modal de Copia de Fechas entre Carreras */}
-      {copyModalOpen && (
-        <div
-          style={{
-            position: "fixed",
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            backgroundColor: "rgba(15, 23, 42, 0.7)",
-            backdropFilter: "blur(8px)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 99999999,
-            padding: "1rem"
-          }}
-          onClick={() => setCopyModalOpen(false)}
-        >
-          <div
-            style={{
-              background: "#ffffff",
-              borderRadius: "1.25rem",
-              width: "100%",
-              maxWidth: "500px",
-              padding: "1.75rem",
-              display: "flex",
-              flexDirection: "column",
-              gap: "1.25rem",
-              boxShadow: "0 25px 50px -12px rgba(0,0,0,0.35)",
-              border: "1px solid #e2e8f0"
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div style={{ display: "flex", alignItems: "center", gap: "0.6rem" }}>
-              <div
-                style={{
-                  width: "40px",
-                  height: "40px",
-                  borderRadius: "0.75rem",
-                  background: "#e0f2fe",
-                  color: "#0284c7",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center"
-                }}
-              >
-                <Copy size={20} />
-              </div>
-              <div>
-                <h3 style={{ margin: 0, fontSize: "1.15rem", fontWeight: 800, color: "#0f172a" }}>
-                  Copiar Fechas de Semanas a {selectedCarrera}
-                </h3>
-                <span style={{ fontSize: "0.78rem", color: "#64748b" }}>
-                  Duplica las fechas de inicio y fin de otra carrera hacia {selectedCarrera}.
-                </span>
-              </div>
+        <>
+          <section className="week-definition__overview" aria-label="Resumen de programación">
+            <div><strong>{datedWeeks} de {weeks.length}</strong><span>semanas con fechas</span></div>
+            <div><strong>{currentWeek ? `Semana ${currentWeek.numero_semana}` : "Sin semana actual"}</strong><span>según las fechas programadas</span></div>
+          </section>
+          {groups.size > 1 && (
+            <div className="week-definition__filters" role="group" aria-label="Filtrar por parcial">
+              <button type="button" className="user-button" aria-pressed={!partial} onClick={() => setPartial("")}>Todos los parciales</button>
+              {[...groups].map(([name]) => (
+                <button type="button" key={name} className="user-button" aria-pressed={partial === name} onClick={() => setPartial(name)}>
+                  {name}
+                </button>
+              ))}
             </div>
+          )}
 
-            <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
-              <label style={{ fontSize: "0.82rem", fontWeight: 700, color: "#334155" }}>
-                Selecciona la carrera de origen:
-              </label>
-              <select
-                value={copyFromCarrera}
-                onChange={(e) => setCopyFromCarrera(e.target.value)}
-                style={{
-                  padding: "0.6rem 0.8rem",
-                  borderRadius: "0.6rem",
-                  border: "1px solid #cbd5e1",
-                  fontSize: "0.88rem",
-                  fontWeight: 600,
-                  outline: "none"
-                }}
-              >
-                {CARRERAS_CONFIG.filter((c) => c.id !== selectedCarrera).map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.icon} {c.label}
-                  </option>
-                ))}
-              </select>
+          <div className="week-definition__save" role="group" aria-label="Guardado de la programación">
+            <div>
+              <strong>{career}</strong>
+              <p role="status">{dirty ? "Cambios sin guardar" : saved ? "Programación guardada" : "Programación de semanas"}</p>
+              {saveError && <p className="user-dialog__error" role="alert">{saveError}</p>}
             </div>
-
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.6rem", marginTop: "0.5rem" }}>
-              <button
-                onClick={() => setCopyModalOpen(false)}
-                style={{
-                  background: "#f1f5f9",
-                  border: "none",
-                  padding: "0.55rem 1rem",
-                  borderRadius: "0.6rem",
-                  fontSize: "0.84rem",
-                  fontWeight: 700,
-                  color: "#475569",
-                  cursor: "pointer"
-                }}
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={handleExecuteCopy}
-                disabled={copying}
-                style={{
-                  background: "linear-gradient(135deg, #0284c7 0%, #0369a1 100%)",
-                  border: "none",
-                  padding: "0.55rem 1.2rem",
-                  borderRadius: "0.6rem",
-                  fontSize: "0.84rem",
-                  fontWeight: 800,
-                  color: "#ffffff",
-                  cursor: copying ? "not-allowed" : "pointer"
-                }}
-              >
-                {copying ? "Copiando..." : `Copiar a ${selectedCarrera}`}
-              </button>
-            </div>
+            <button type="button" className="user-button user-button--primary" disabled={saving} onClick={handleSave}>
+              <Save size={18} aria-hidden="true" /> {saving ? "Guardando…" : "Guardar programación"}
+            </button>
           </div>
-        </div>
+
+          {shownGroups.map(([name, items]) => (
+            <section key={name} className="temario-week">
+              <header><h3>{name}</h3><span>{items.length} {items.length === 1 ? "semana" : "semanas"}</span></header>
+              <ul className="user-directory__list week-definition__cards">
+                {items.map(week => (
+                  <li key={week.numero_semana} className="user-card week-definition__card" data-current={week === currentWeek}>
+                    <header>
+                      <div className="user-card__identity">
+                        <span className="user-card__avatar" aria-hidden="true">S{week.numero_semana}</span>
+                        <h4>Semana {week.numero_semana}</h4>
+                      </div>
+                      <div className="user-card__badges">
+                        <span className="user-badge">{week.es_examen ? "Examen" : "Clase"}</span>
+                        {week === currentWeek && (
+                          <span className="user-badge user-badge--active week-definition__current">
+                            <Check size={14} aria-hidden="true" /> Semana actual
+                          </span>
+                        )}
+                      </div>
+                    </header>
+                    <p className="week-definition__topics">{week.es_examen ? (week.nombre_semana || "Semana de examen") : week.temas || "Sin temas asignados"}</p>
+                    <div className="week-definition__dates">
+                      <label className="user-field">Inicio
+                        <input type="date" aria-label={`Inicio de semana ${week.numero_semana}`} disabled={saving}
+                          value={week.fecha_inicio || ""} onChange={event => updateWeek(week.numero_semana, "fecha_inicio", event.target.value)} />
+                      </label>
+                      <label className="user-field">Fin
+                        <input type="date" aria-label={`Fin de semana ${week.numero_semana}`} disabled={saving}
+                          value={week.fecha_fin || ""} onChange={event => updateWeek(week.numero_semana, "fecha_fin", event.target.value)} />
+                      </label>
+                    </div>
+                    {week.descripcion && (
+                      <p className="week-definition__description">
+                        <strong>Descripción</strong>
+                        <span>{week.descripcion}</span>
+                      </p>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ))}
+        </>
       )}
-    </div>
+        </>
+      )}
+
+      {tool && (
+        <TemarioDialog title={generating ? "Generar fechas" : "Copiar programación"} career={career} Icon={generating ? Wand2 : Copy}
+          busy={copying} onClose={() => setTool(null)}
+          footer={<>
+            {toolError && <p className="user-dialog__error" role="alert">{toolError}</p>}
+            <div className="user-dialog__buttons">
+              <button type="button" className="user-button" disabled={copying} onClick={() => setTool(null)}>Cancelar</button>
+              <button type="submit" form="week-definition-tool"
+                className={generating ? "user-button user-button--primary" : "user-button user-button--destructive"}
+                disabled={copying || (generating ? !startDate : !sourceCareer)}>
+                {generating ? "Aplicar fechas" : copying ? "Copiando…" : "Reemplazar programación"}
+              </button>
+            </div>
+          </>}>
+          <form id="week-definition-tool" className="user-dialog__body" onSubmit={generating ? handleGenerate : handleCopy}>
+            {generating ? (
+              <>
+                <p>Cada semana comenzará el lunes y terminará el domingo. Podrás revisar las fechas antes de guardar.</p>
+                <label className="user-field">Lunes de inicio
+                  <input type="date" required value={startDate} onChange={event => {
+                    setStartDate(event.target.value);
+                    setToolError("");
+                  }} />
+                </label>
+                <fieldset className="temario-week-topics">
+                  <legend>¿Qué semanas completas son feriado o receso?</legend>
+                  <p>Agrega el lunes de cada semana que quieras omitir. Las semanas de clase conservarán su numeración.</p>
+                  <label className="user-field">Lunes del feriado o receso
+                    <input type="date" value={breakDate} onChange={event => {
+                      setBreakDate(event.target.value);
+                      setToolError("");
+                    }} />
+                  </label>
+                  <button type="button" className="user-button" disabled={!breakDate} onClick={addBreak}>Agregar semana de receso</button>
+                  {skippedMondays.length > 0 && (
+                    <ul className="week-definition__breaks">
+                      {skippedMondays.map(monday => (
+                        <li key={monday}>
+                          <span>{breakDateFormat.format(parseScheduleDate(monday))} – {breakDateFormat.format(parseScheduleDate(addScheduleDays(monday, 6)))}</span>
+                          <button type="button" className="user-button user-button--icon" aria-label={`Quitar receso del ${monday}`}
+                            onClick={() => setSkippedMondays(previous => previous.filter(day => day !== monday))}>
+                            <X size={17} aria-hidden="true" />
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </fieldset>
+              </>
+            ) : (
+              <>
+                <div className="user-dialog__warning"><AlertTriangle size={21} aria-hidden="true" />
+                  <p>La copia reemplaza la programación guardada de {career}, incluidos los parciales y las fechas.
+                    {dirty && " También se perderán los cambios sin guardar de esta pantalla."}</p>
+                </div>
+                <label className="user-field">Carrera de origen
+                  <select aria-label="Carrera de origen" required disabled={copying} value={sourceCareer} onChange={event => setSourceCareer(event.target.value)}>
+                    <option value="">Selecciona el origen</option>
+                    {CAREERS.filter(value => value !== career).map(value => <option key={value}>{value}</option>)}
+                  </select>
+                </label>
+              </>
+            )}
+          </form>
+        </TemarioDialog>
+      )}
+    </section>
   );
 }

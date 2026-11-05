@@ -1,29 +1,13 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import {
-  GraduationCap,
-  Search,
-  Save,
-  CheckCircle2,
-  AlertTriangle,
-  Users,
-  Calendar,
-  ArrowLeft,
-  RefreshCw,
-  AlertCircle,
-  ShieldAlert,
-  ShieldCheck,
-  CheckCheck,
-  Lock,
-  Sparkles,
-  Info,
-  Award
-} from "lucide-react";
+import { GraduationCap, Search, Save, Users, ArrowLeft, ShieldCheck, Lock, CheckCircle2, Clock } from "lucide-react";
 import { api } from "../services/api";
 import {
   calculateStudentAcademicSummary,
   getCanonicalExamGrade
 } from "../utils/academicEngine";
-import { isInstructorTitular } from "../utils/sectionRoleUtils";
+import { hasFullSectionAccess } from "../utils/sectionRoleUtils";
+import { displaySectionCode } from "../../../shared/sectionCode.mjs";
+import "./WeeklyExamGradingView.css";
 
 export default function WeeklyExamGradingView({
   seccion,
@@ -36,7 +20,13 @@ export default function WeeklyExamGradingView({
   const [saving, setSaving] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
 
-  const isTitular = useMemo(() => isInstructorTitular(currentInstructor, seccion), [currentInstructor, seccion]);
+  const currentUser = currentInstructor || api.auth.getCurrentInstructor();
+  const hasFullAccess = hasFullSectionAccess(currentUser, seccion);
+  const [loadError, setLoadError] = useState("");
+  const [saveError, setSaveError] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [editingAccount, setEditingAccount] = useState(null);
+  const savedStudents = useRef([]);
 
   // Referencia estable de notify
   const notifyRef = useRef(notify);
@@ -63,6 +53,13 @@ export default function WeeklyExamGradingView({
 
   const handleSelectSemana = (num) => {
     const n = Number(num);
+    if (saving || n === selectedSemana) return;
+    if (hasUnsavedChanges) {
+      if (!window.confirm("Hay notas sin guardar. ¿Descartar los cambios y cambiar de examen?")) return;
+      setEstudiantes(savedStudents.current);
+      setHasUnsavedChanges(false);
+    }
+    setSaveError("");
     setSelectedSemana(n);
     hasInitializedWeekRef.current = true;
     try {
@@ -77,16 +74,17 @@ export default function WeeklyExamGradingView({
 
   // 1. Cargar datos del servidor
   const loadData = useCallback(async (isInitial = false) => {
-    if (!seccion?.id || !isTitular) return;
+    if (!seccion?.id || !hasFullAccess) return;
     if (isInitial) setLoading(true);
+    setLoadError("");
 
     try {
       const [resEst, resSemanas, resTemario, resAsig, resPuntajes] = await Promise.all([
         api.estudiantes.getBySeccion(seccion.id, carrera),
-        api.semanas.getConfig(carrera).catch(() => ({ data: [] })),
-        api.temario.getAll({ carrera }).catch(() => ({ data: [] })),
-        api.asignaciones.getBySeccion(seccion.id).catch(() => ({ data: [] })),
-        api.temario.getPuntajes(carrera).catch(() => ({ data: null }))
+        api.semanas.getConfig(carrera),
+        api.temario.getAll({ carrera }),
+        api.asignaciones.getBySeccion(seccion.id),
+        api.temario.getPuntajes(carrera)
       ]);
 
       if (resEst?.data) {
@@ -94,6 +92,8 @@ export default function WeeklyExamGradingView({
           (a.nombre_completo || "").localeCompare(b.nombre_completo || "")
         );
         setEstudiantes(sorted);
+        savedStudents.current = sorted;
+        setHasUnsavedChanges(false);
       }
 
       let loadedSemanas = [];
@@ -141,11 +141,11 @@ export default function WeeklyExamGradingView({
       }
     } catch (err) {
       console.error("Error al cargar notas de examen parcial:", err);
-      notifyRef.current("Error al cargar la información de estudiantes", "error");
+      setLoadError("No pudimos cargar los estudiantes y las notas del examen. Inténtalo de nuevo.");
     } finally {
       setLoading(false);
     }
-  }, [seccion?.id, carrera]);
+  }, [seccion?.id, carrera, hasFullAccess]);
 
   useEffect(() => {
     loadData(true);
@@ -293,34 +293,17 @@ export default function WeeklyExamGradingView({
   }, [asignaciones, examMeta.id, currentWeekInfo.numero_semana]);
 
   const assignedInstructorForExam =
-    assignedRecordForExam?.instructor_nombre || seccion?.coordinador || "Coordinador de Sección";
+    assignedRecordForExam?.instructor_nombre || seccion?.coordinador || "Titular de sección";
 
-  // 🛡️ REGLA ESTRICTA: El rol de examen parcial es ÚNICA Y POR DEFECTO para el Coordinador de la Sección
   const canEdit = useMemo(() => {
     if (!currentWeekInfo.esExamen) return false;
 
     const user = currentInstructor || api.auth.getCurrentInstructor();
     if (!user) return false;
+    if (hasFullSectionAccess(user, seccion)) return true;
 
-    // Verificar si el usuario actual es el Coordinador de la Sección
-    const coordName = (seccion?.coordinador || "").toLowerCase().trim();
     const userFullName = (user.nombre_completo || "").toLowerCase().trim();
     const userCombinedName = `${user.primer_nombre || ""} ${user.primer_apellido || ""}`.toLowerCase().trim();
-    const pNom = (user.primer_nombre || "").toLowerCase().trim();
-    const pApe = (user.primer_apellido || "").toLowerCase().trim();
-
-    const isCoordinatorUser =
-      Boolean(coordName) &&
-      (coordName === userFullName ||
-        coordName === userCombinedName ||
-        userFullName.includes(coordName) ||
-        coordName.includes(userFullName) ||
-        (pNom && pApe && coordName.includes(pNom) && coordName.includes(pApe)));
-
-    // Si el usuario es el Coordinador, tiene acceso por defecto y exclusivo
-    if (isCoordinatorUser) {
-      return true;
-    }
 
     // Coincidencia con registro explícito de asignación
     if (assignedRecordForExam?.instructor_id) {
@@ -340,6 +323,8 @@ export default function WeeklyExamGradingView({
   const getStudentExamGrade = (est) => {
     if (!est) return "";
     const colKey = examMeta.columnKey;
+    // Conservar el texto provisional mientras se escribe un decimal.
+    if (typeof est[colKey] === "string") return est[colKey];
     const examIndex = colKey === "primer_examen" ? 0 : colKey === "segundo_examen" ? 1 : 2;
     const val = getCanonicalExamGrade(est, examIndex, currentWeekInfo);
     if (val === undefined || val === null || val === "") return "";
@@ -365,6 +350,7 @@ export default function WeeklyExamGradingView({
 
   // Manejar cambio en la calificación de examen parcial con hasta 3 decimales
   const handleGradeChange = (numero_cuenta, rawValue) => {
+    if (saving) return;
     if (!canEdit) {
       notifyRef.current(
         `Solo ${assignedInstructorForExam || "el docente asignado"} tiene permisos para editar las notas del ${examMeta.label}.`,
@@ -373,7 +359,8 @@ export default function WeeklyExamGradingView({
       return;
     }
 
-    const cleanVal = String(rawValue).replace(",", ".");
+    const normalizedValue = String(rawValue).replace(",", ".");
+    const cleanVal = normalizedValue.startsWith(".") ? `0${normalizedValue}` : normalizedValue;
 
     if (cleanVal === "") {
       setEstudiantes((prev) =>
@@ -398,11 +385,11 @@ export default function WeeklyExamGradingView({
       return;
     }
 
-    if (!/^\d*(\.\d{0,3})?$/.test(cleanVal)) {
+    if (!/^\d+(\.\d{0,3})?$/.test(cleanVal) || !Number.isFinite(Number(cleanVal))) {
       return;
     }
 
-    const storedVal = cleanVal.endsWith(".") ? cleanVal : Number(cleanVal);
+    const storedVal = cleanVal;
 
     setEstudiantes((prev) =>
       prev.map((est) => {
@@ -429,93 +416,16 @@ export default function WeeklyExamGradingView({
     setHasUnsavedChanges(true);
   };
 
-  // Asignar nota rápida a todos en este examen
-  const handleBatchGradeExam = () => {
-    if (!canEdit) {
-      notifyRef.current("No tienes permisos para modificar notas en este examen.", "warning");
-      return;
-    }
-
-    const defaultScoreStr = window.prompt(
-      `Ingresa la calificación a aplicar a TODOS los alumnos para el ${examMeta.label} (hasta 3 decimales, ej. 20.000):`,
-      "20.000"
-    );
-
-    if (defaultScoreStr === null) return;
-    const cleanStr = defaultScoreStr.replace(",", ".");
-    const num = Number(cleanStr);
-    if (isNaN(num) || num < 0) {
-      notifyRef.current("Por favor ingresa una nota numérica válida mayor o igual a 0", "error");
-      return;
-    }
-
-    const roundedNum = Math.round(num * 1000) / 1000;
-
-    setEstudiantes((prev) =>
-      prev.map((est) => {
-        const currentNotas = est.notas || {};
-        const updatedNotas = {
-          ...currentNotas,
-          [examMeta.columnKey]: roundedNum,
-          [examMeta.id]: roundedNum
-        };
-
-        const updatedExamCols = { [examMeta.columnKey]: roundedNum };
-        const nextTotal = recalculateTotal(est, updatedNotas, updatedExamCols);
-
-        return {
-          ...est,
-          [examMeta.columnKey]: roundedNum,
-          notas: updatedNotas,
-          total: nextTotal
-        };
-      })
-    );
-    setHasUnsavedChanges(true);
-    notifyRef.current(`Nota ${roundedNum} aplicada a todos los alumnos para el ${examMeta.label}`, "info");
-  };
-
-  // Limpiar notas de este examen
-  const handleClearExamGrades = () => {
-    if (!canEdit) {
-      notifyRef.current("No tienes permisos para modificar notas en este examen.", "warning");
-      return;
-    }
-
-    if (!window.confirm(`¿Seguro que deseas limpiar las notas del ${examMeta.label}?`)) {
-      return;
-    }
-
-    setEstudiantes((prev) =>
-      prev.map((est) => {
-        const currentNotas = { ...(est.notas || {}) };
-        delete currentNotas[examMeta.columnKey];
-        delete currentNotas[examMeta.id];
-
-        const updatedExamCols = { [examMeta.columnKey]: 0 };
-        const nextTotal = recalculateTotal(est, currentNotas, updatedExamCols);
-
-        return {
-          ...est,
-          [examMeta.columnKey]: "",
-          notas: currentNotas,
-          total: nextTotal
-        };
-      })
-    );
-    setHasUnsavedChanges(true);
-    notifyRef.current(`Se limpiaron las notas del ${examMeta.label}`, "info");
-  };
-
   // Guardar calificaciones en el backend
   const handleSaveAll = async () => {
-    if (!seccion?.id) return;
+    if (!seccion?.id || saving || !hasUnsavedChanges) return;
     if (!canEdit) {
       notifyRef.current(`No tienes permisos para guardar cambios en el ${examMeta.label}.`, "warning");
       return;
     }
 
     setSaving(true);
+    setSaveError("");
     try {
       const updates = estudiantes.map((est) => ({
         numero_cuenta: est.numero_cuenta,
@@ -528,11 +438,12 @@ export default function WeeklyExamGradingView({
       }));
 
       await api.estudiantes.saveBatch(seccion.id, updates, carrera);
+      savedStudents.current = estudiantes;
       setHasUnsavedChanges(false);
       notifyRef.current(`¡Notas del ${examMeta.label} guardadas con éxito!`, "success");
     } catch (err) {
       console.error("Error al guardar notas de examen parcial:", err);
-      notifyRef.current("Error al guardar las notas en el servidor", "error");
+      setSaveError(err.message || "No pudimos guardar las notas. Tus cambios siguen aquí para reintentar.");
     } finally {
       setSaving(false);
     }
@@ -562,685 +473,115 @@ export default function WeeklyExamGradingView({
 
   // Filtrado por búsqueda
   const filteredEstudiantes = useMemo(() => {
-    if (!searchTerm.trim()) return estudiantes;
+    const matchesStatus = estudiantes.filter(student => {
+      const grade = getStudentExamGrade(student);
+      const graded = grade !== "" && grade !== null;
+      return student.numero_cuenta === editingAccount || statusFilter === "all" || (statusFilter === "graded" ? graded : !graded);
+    });
+    if (!searchTerm.trim()) return matchesStatus;
     const s = searchTerm.toLowerCase().trim();
-    return estudiantes.filter(
+    return matchesStatus.filter(
       (e) =>
         (e.nombre_completo || "").toLowerCase().includes(s) ||
-        (e.numero_cuenta || "").toLowerCase().includes(s)
+        String(e.numero_cuenta || "").toLowerCase().includes(s)
     );
-  }, [estudiantes, searchTerm]);
+  }, [estudiantes, searchTerm, statusFilter, examMeta, editingAccount]);
 
-  if (!isTitular) {
-    return (
-      <div className="animate-fade-in" style={{ padding: "2.5rem 2rem", textAlign: "center", background: "#ffffff", borderRadius: "1rem", border: "1.5px solid #e2e8f0", maxWidth: "580px", margin: "3rem auto", boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.05)" }}>
-        <div style={{ width: "56px", height: "56px", borderRadius: "50%", background: "#fee2e2", color: "#dc2626", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 1.25rem" }}>
-          <GraduationCap size={28} />
-        </div>
-        <h3 style={{ fontSize: "1.25rem", fontWeight: 800, color: "#1e293b", marginBottom: "0.5rem" }}>Acceso Exclusivo del Instructor Titular</h3>
-        <p style={{ fontSize: "0.95rem", color: "#64748b", lineHeight: 1.5, marginBottom: "1.5rem" }}>
-          El módulo de <strong>Subir Nota de Examen Parcial</strong> está reservado únicamente para el <strong>Instructor Titular</strong> de la sección.
-        </p>
-        <button
-          onClick={onClose}
-          style={{
-            padding: "0.65rem 1.5rem",
-            background: "#4f46e5",
-            color: "#ffffff",
-            border: "none",
-            borderRadius: "0.75rem",
-            fontWeight: 700,
-            cursor: "pointer",
-            display: "inline-flex",
-            alignItems: "center",
-            gap: "0.5rem"
-          }}
-        >
-          <ArrowLeft size={16} /> Volver a la Sección
-        </button>
-      </div>
-    );
-  }
-
-  if (loading) {
-    return (
-      <div
-        className="glass-panel"
-        style={{
-          padding: "3.5rem",
-          background: "#ffffff",
-          borderRadius: "1rem",
-          border: "1px solid #e2e8f0",
-          textAlign: "center",
-          color: "#64748b",
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          gap: "1rem"
-        }}
-      >
-        <RefreshCw size={28} className="animate-spin" color="#7c3aed" />
-        <span style={{ fontSize: "0.95rem", fontWeight: 700 }}>
-          Cargando exámenes parciales y calificaciones...
-        </span>
-      </div>
-    );
-  }
+  const discardChanges = () => {
+    if (!window.confirm("¿Descartar las notas que todavía no has guardado?")) return;
+    setEstudiantes(savedStudents.current);
+    setHasUnsavedChanges(false);
+    setSaveError("");
+  };
 
   return (
-    <div
-      className="glass-panel animate-fade-in"
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        gap: "1.5rem"
-      }}
-    >
-      {/* =================================================================== */}
-      {/* 1. CABECERA DEL MÓDULO                                             */}
-      {/* =================================================================== */}
-      <div
-        style={{
-          padding: "1.5rem 1.75rem",
-          background: "#ffffff",
-          borderRadius: "1.1rem",
-          border: "1px solid #e2e8f0",
-          boxShadow: "0 4px 15px -3px rgba(0, 0, 0, 0.04)",
-          display: "flex",
-          flexDirection: "column",
-          gap: "1.1rem"
-        }}
-      >
-        {/* Fila 1: Título, Sección, Botón Volver y Botón Guardar */}
-        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: "1rem" }}>
-          <div>
-            <div style={{ display: "flex", alignItems: "center", gap: "0.65rem", flexWrap: "wrap", marginBottom: "0.35rem" }}>
-              {!hideBackButton && (
-                <button
-                  onClick={onClose}
-                  style={{
-                    background: "#f1f5f9",
-                    border: "none",
-                    borderRadius: "0.5rem",
-                    padding: "0.4rem 0.65rem",
-                    cursor: "pointer",
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: "0.3rem",
-                    color: "#475569",
-                    fontSize: "0.8rem",
-                    fontWeight: 700,
-                    marginRight: "0.35rem"
-                  }}
-                  title="Volver a los módulos de la sección"
-                >
-                  <ArrowLeft size={15} />
-                  <span>Volver</span>
-                </button>
-              )}
-
-              <div
-                style={{
-                  width: "34px",
-                  height: "34px",
-                  borderRadius: "0.55rem",
-                  background: "linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%)",
-                  color: "#ffffff",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center"
-                }}
-              >
-                <GraduationCap size={20} />
-              </div>
-
-              <h2 style={{ fontSize: "1.35rem", fontWeight: 900, color: "#0f172a", margin: 0, letterSpacing: "-0.01em" }}>
-                Subir Nota de Examen Parcial
-              </h2>
-
-              <span
-                style={{
-                  background: "linear-gradient(135deg, #0284c7 0%, #0369a1 100%)",
-                  color: "#ffffff",
-                  padding: "0.2rem 0.65rem",
-                  borderRadius: "0.45rem",
-                  fontSize: "0.75rem",
-                  fontWeight: 900,
-                  letterSpacing: "0.03em"
-                }}
-              >
-                {seccion?.codigo}
-              </span>
-
-              <span
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "0.3rem",
-                  background: "#f1f5f9",
-                  color: "#475569",
-                  padding: "0.2rem 0.6rem",
-                  borderRadius: "9999px",
-                  fontSize: "0.74rem",
-                  fontWeight: 700
-                }}
-              >
-                <Users size={12} />
-                <span>{estudiantes.length} Alumnos</span>
-              </span>
-            </div>
-
-            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap", fontSize: "0.82rem", color: "#64748b" }}>
-              <span>{carrera}</span>
-              <span>•</span>
-              <span>{seccion?.dia} {seccion?.hora_inicio} - {seccion?.hora_fin}</span>
-              {assignedInstructorForExam && (
-                <>
-                  <span>•</span>
-                  <span style={{ color: "#7c3aed", fontWeight: 700 }}>
-                    Docente asignado: {assignedInstructorForExam}
-                  </span>
-                </>
-              )}
-            </div>
-          </div>
-
-          {/* Botones de Acción / Guardar */}
-          <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
-            {hasUnsavedChanges && (
-              <span
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "0.35rem",
-                  fontSize: "0.76rem",
-                  fontWeight: 800,
-                  color: "#d97706",
-                  background: "#fef3c7",
-                  border: "1px solid #fde68a",
-                  padding: "0.35rem 0.75rem",
-                  borderRadius: "9999px"
-                }}
-              >
-                <AlertCircle size={13} />
-                <span>Cambios sin guardar</span>
-              </span>
-            )}
-
-            <button
-              onClick={handleSaveAll}
-              disabled={saving || !canEdit}
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "0.5rem",
-                background: !canEdit
-                  ? "#94a3b8"
-                  : hasUnsavedChanges
-                  ? "linear-gradient(135deg, #10b981 0%, #059669 100%)"
-                  : "linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%)",
-                color: "#ffffff",
-                border: "none",
-                padding: "0.6rem 1.25rem",
-                borderRadius: "0.65rem",
-                fontSize: "0.88rem",
-                fontWeight: 800,
-                cursor: (!canEdit || saving) ? "not-allowed" : "pointer",
-                boxShadow: canEdit
-                  ? (hasUnsavedChanges ? "0 4px 14px rgba(16, 185, 129, 0.3)" : "0 4px 14px rgba(124, 58, 237, 0.25)")
-                  : "none",
-                opacity: (!canEdit || saving) ? 0.7 : 1,
-                transition: "all 0.2s ease"
-              }}
-              title={!canEdit ? "No tienes permisos de edición para este examen" : "Guardar calificaciones"}
-            >
-              {saving ? (
-                <>
-                  <RefreshCw size={15} className="animate-spin" />
-                  <span>Guardando...</span>
-                </>
-              ) : !canEdit ? (
-                <>
-                  <Lock size={15} />
-                  <span>Solo Lectura</span>
-                </>
-              ) : (
-                <>
-                  <Save size={15} />
-                  <span>Guardar Nota de Examen</span>
-                </>
-              )}
-            </button>
-          </div>
+    <section className="user-directory partial-grades" aria-labelledby="partial-grades-title">
+      {!hideBackButton && <button type="button" className="user-button user-button--back" onClick={onClose}><ArrowLeft size={17} aria-hidden="true" /> Volver a módulos</button>}
+      <header className="user-directory__hero">
+        <div>
+          <p className="user-directory__eyebrow"><GraduationCap size={18} aria-hidden="true" /> Sección {displaySectionCode(seccion?.codigo)} · {carrera}</p>
+          <h2 id="partial-grades-title">Subir nota de examen parcial</h2>
+          <p>Selecciona el examen y registra las calificaciones de tu sección.</p>
         </div>
-
-        {/* =================================================================== */}
-        {/* BANNER DE REGLA Y PERMISO DE ASIGNACIÓN                             */}
-        {/* =================================================================== */}
-        {!currentWeekInfo.esExamen ? (
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "0.55rem",
-              background: "#fffbeb",
-              border: "1.5px solid #fde68a",
-              borderRadius: "0.75rem",
-              padding: "0.65rem 1rem",
-              color: "#92400e",
-              fontSize: "0.82rem",
-              fontWeight: 700
-            }}
-          >
-            <Info size={18} color="#d97706" style={{ flexShrink: 0 }} />
-            <span>
-              <strong>Semana Regular de Clase:</strong> La Semana {currentWeekInfo.numero_semana} no está configurada como semana de examen. Selecciona una de las <strong>semanas asignadas a examen parcial</strong> en las pestañas inferiores.
-            </span>
-          </div>
-        ) : canEdit ? (
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "0.55rem",
-              background: "#f0fdf4",
-              border: "1.5px solid #86efac",
-              borderRadius: "0.75rem",
-              padding: "0.65rem 1rem",
-              color: "#166534",
-              fontSize: "0.82rem",
-              fontWeight: 700
-            }}
-          >
-            <ShieldCheck size={18} color="#16a34a" style={{ flexShrink: 0 }} />
-            <span>
-              Tienes asignado el rol oficial de <strong>Subir nota de examen parcial</strong> para el <strong>{examMeta.label}</strong> (Semana {currentWeekInfo.numero_semana}). Puedes ingresar y modificar calificaciones.
-            </span>
-          </div>
-        ) : (
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "0.55rem",
-              background: "#fffbeb",
-              border: "1.5px solid #fde68a",
-              borderRadius: "0.75rem",
-              padding: "0.65rem 1rem",
-              color: "#92400e",
-              fontSize: "0.82rem",
-              fontWeight: 700
-            }}
-          >
-            <ShieldAlert size={18} color="#d97706" style={{ flexShrink: 0 }} />
-            <span>
-              <strong>Modo de Solo Lectura:</strong> Para el <strong>{examMeta.label}</strong> (Semana {currentWeekInfo.numero_semana}), la calificación de examen está asignada a <strong>{assignedInstructorForExam || "ningún docente (sin asignar)"}</strong>. Solo la persona asignada tiene autorización para calificar.
-            </span>
-          </div>
-        )}
-
-        {/* =================================================================== */}
-        {/* SELECTOR EXCLUSIVO DE SEMANAS ASIGNADAS A EXAMEN PARCIAL           */}
-        {/* =================================================================== */}
-        <div
-          style={{
-            background: "#faf5ff",
-            border: "1.5px solid #e9d5ff",
-            borderRadius: "0.85rem",
-            padding: "0.85rem 1.15rem",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            flexWrap: "wrap",
-            gap: "1rem"
-          }}
-        >
-          {/* Pestañas de Semanas de Examen */}
-          <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", flexWrap: "wrap" }}>
-            <span style={{ fontSize: "0.82rem", fontWeight: 800, color: "#6b21a8", textTransform: "uppercase", letterSpacing: "0.02em" }}>
-              Exámenes Parciales:
-            </span>
-
-            {examWeeks.map((ew) => {
-              const isSelected = ew.numero_semana === currentWeekInfo.numero_semana;
-              const displayName = getWeekDisplayName(ew);
-
-              return (
-                <button
-                  key={ew.numero_semana}
-                  onClick={() => handleSelectSemana(ew.numero_semana)}
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: "0.35rem",
-                    padding: "0.45rem 0.85rem",
-                    borderRadius: "0.6rem",
-                    border: isSelected ? "2px solid #7c3aed" : "1.5px solid #d8b4fe",
-                    background: isSelected ? "linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%)" : "#ffffff",
-                    color: isSelected ? "#ffffff" : "#6b21a8",
-                    fontSize: "0.82rem",
-                    fontWeight: 800,
-                    cursor: "pointer",
-                    boxShadow: isSelected ? "0 2px 8px rgba(124, 58, 237, 0.25)" : "none",
-                    transition: "all 0.15s ease"
-                  }}
-                >
-                  <GraduationCap size={14} />
-                  <span>{displayName}</span>
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Estadísticas del examen seleccionado */}
-          {currentWeekInfo.esExamen && (
-            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "0.35rem", background: "#ffffff", border: "1px solid #bbf7d0", padding: "0.3rem 0.65rem", borderRadius: "0.5rem", fontSize: "0.78rem" }}>
-                <div style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#16a34a" }} />
-                <span style={{ color: "#166534", fontWeight: 800 }}>Calificados: {stats.gradedCount}</span>
-              </div>
-
-              <div style={{ display: "flex", alignItems: "center", gap: "0.35rem", background: "#ffffff", border: "1px solid #fed7aa", padding: "0.3rem 0.65rem", borderRadius: "0.5rem", fontSize: "0.78rem" }}>
-                <div style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#f97316" }} />
-                <span style={{ color: "#c2410c", fontWeight: 800 }}>Pendientes: {stats.pendingCount}</span>
-              </div>
-
-              <div style={{ display: "flex", alignItems: "center", gap: "0.35rem", background: "#ffffff", border: "1px solid #e9d5ff", padding: "0.3rem 0.65rem", borderRadius: "0.5rem", fontSize: "0.78rem" }}>
-                <span style={{ color: "#6b21a8", fontWeight: 800 }}>Promedio: {stats.average} pts</span>
-              </div>
+      </header>
+      {!hasFullAccess ? (
+        <div className="user-directory__state"><Lock size={24} aria-hidden="true" /><h3>Acceso completo requerido</h3>
+          <p>Disponible para el titular de sección y los usuarios con rol de Creador o Coordinador.</p></div>
+      ) : loading ? (
+        <div className="partial-grades__skeleton" role="status" aria-label="Cargando exámenes y calificaciones"><span /><span /><span /></div>
+      ) : loadError ? (
+        <div className="user-directory__state" role="alert"><p>{loadError}</p><button type="button" className="user-button" onClick={() => loadData(true)}>Reintentar</button></div>
+      ) : !examWeeks.length ? <p className="user-directory__state">No hay semanas de examen disponibles para esta carrera.</p> : (
+        <>
+          <div className="partial-grades__overview">
+            <div className="partial-grades__selection">
+              <label className="user-field">Examen a calificar
+                <select aria-label="Examen a calificar" value={currentWeekInfo.numero_semana} disabled={saving} onChange={event => handleSelectSemana(event.target.value)}>
+                  {!examWeeks.some(week => week.numero_semana === currentWeekInfo.numero_semana) && <option value={currentWeekInfo.numero_semana}>Selecciona una semana de examen</option>}
+                  {examWeeks.map(week => <option key={week.numero_semana} value={week.numero_semana}>{getWeekDisplayName(week)} · {week.parcial}</option>)}
+                </select>
+              </label>
+              <p className="partial-grades__exam-name">{examMeta.label}</p>
+              {currentWeekInfo.fecha_inicio && currentWeekInfo.fecha_fin && <p className="partial-grades__dates">{new Intl.DateTimeFormat("es-HN", { day: "numeric", month: "short", timeZone: "UTC" }).format(new Date(currentWeekInfo.fecha_inicio + "T00:00:00Z"))} – {new Intl.DateTimeFormat("es-HN", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" }).format(new Date(currentWeekInfo.fecha_fin + "T00:00:00Z"))} · Semana académica</p>}
             </div>
-          )}
-        </div>
-
-        {/* Fila 3: Acciones masivas y Barra de Búsqueda */}
-        {currentWeekInfo.esExamen && (
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "0.75rem", paddingTop: "0.25rem" }}>
-            {/* Acciones Rápidas */}
-            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
-              <button
-                onClick={handleBatchGradeExam}
-                disabled={!canEdit}
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "0.35rem",
-                  background: canEdit ? "#f5f3ff" : "#f1f5f9",
-                  border: canEdit ? "1.5px solid #d8b4fe" : "1px solid #cbd5e1",
-                  color: canEdit ? "#6d28d9" : "#94a3b8",
-                  padding: "0.4rem 0.75rem",
-                  borderRadius: "0.55rem",
-                  fontSize: "0.78rem",
-                  fontWeight: 800,
-                  cursor: canEdit ? "pointer" : "not-allowed",
-                  opacity: canEdit ? 1 : 0.6,
-                  transition: "all 0.15s ease"
-                }}
-                title={!canEdit ? "Solo lectura" : `Asignar nota a todos en ${examMeta.label}`}
-              >
-                <CheckCheck size={14} />
-                <span>Asignar nota a todos en {examMeta.label}</span>
-              </button>
-
-              <button
-                onClick={handleClearExamGrades}
-                disabled={!canEdit}
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "0.35rem",
-                  background: "#f8fafc",
-                  border: "1px solid #cbd5e1",
-                  color: canEdit ? "#475569" : "#94a3b8",
-                  padding: "0.4rem 0.75rem",
-                  borderRadius: "0.55rem",
-                  fontSize: "0.78rem",
-                  fontWeight: 700,
-                  cursor: canEdit ? "pointer" : "not-allowed",
-                  opacity: canEdit ? 1 : 0.6,
-                  transition: "all 0.15s ease"
-                }}
-                title={!canEdit ? "Solo lectura" : `Limpiar notas de ${examMeta.label}`}
-              >
-                <span>Limpiar Examen</span>
-              </button>
-            </div>
-
-            {/* Barra de Búsqueda */}
-            <div style={{ position: "relative", width: "100%", maxWidth: "300px" }}>
-              <Search size={14} color="#94a3b8" style={{ position: "absolute", left: "0.75rem", top: "50%", transform: "translateY(-50%)" }} />
-              <input
-                type="text"
-                placeholder="Buscar alumno por nombre o cuenta..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                style={{
-                  width: "100%",
-                  padding: "0.45rem 0.75rem 0.45rem 2rem",
-                  borderRadius: "0.5rem",
-                  border: "1px solid #cbd5e1",
-                  fontSize: "0.82rem",
-                  outline: "none",
-                  background: "#f8fafc"
-                }}
-              />
+            <div className="partial-grades__permission" data-editable={canEdit}>
+              <strong>{canEdit ? <ShieldCheck size={20} aria-hidden="true" /> : <Lock size={20} aria-hidden="true" />}{canEdit ? "Puedes registrar calificaciones" : "Solo lectura"}</strong>
+              <p>{canEdit ? "Tu acceso completo a la sección permite ingresar y modificar estas notas." : "Selecciona una semana de examen para registrar las calificaciones."}</p>
+              <p>Titular de sección <b>{seccion?.coordinador || assignedInstructorForExam}</b></p>
+              <small>Admite hasta 3 decimales. Una nota de 0 cuenta como calificada.</small>
             </div>
           </div>
-        )}
-      </div>
-
-      {/* =================================================================== */}
-      {/* 2. LISTA DE ALUMNOS CON LA CASILLA DE EXAMEN PARCIAL                */}
-      {/* =================================================================== */}
-      <div
-        style={{
-          background: "#ffffff",
-          borderRadius: "1.1rem",
-          border: "1px solid #e2e8f0",
-          boxShadow: "0 4px 15px -3px rgba(0, 0, 0, 0.04)",
-          padding: "1.25rem 1.5rem",
-          display: "flex",
-          flexDirection: "column",
-          gap: "0.85rem"
-        }}
-      >
-        {!currentWeekInfo.esExamen ? (
-          <div
-            style={{
-              padding: "3rem",
-              textAlign: "center",
-              background: "#f8fafc",
-              borderRadius: "0.65rem",
-              border: "1.5px dashed #cbd5e1",
-              color: "#64748b",
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              gap: "0.75rem"
-            }}
-          >
-            <GraduationCap size={36} color="#94a3b8" />
-            <strong style={{ fontSize: "1rem", color: "#334155" }}>
-              Semana {currentWeekInfo.numero_semana} es una Semana Regular de Clase
-            </strong>
-            <span style={{ fontSize: "0.85rem", maxWidth: "450px" }}>
-              Los exámenes parciales solo se evalúan en las semanas asignadas a examen parcial. Selecciona una de las pestañas superiores para calificar.
-            </span>
-          </div>
-        ) : (
-          <>
-            {/* Cabecera de la tabla */}
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "50px 1.4fr 1.6fr",
-                gap: "0.75rem",
-                padding: "0.65rem 0.85rem",
-                background: "#f8fafc",
-                borderRadius: "0.65rem",
-                border: "1px solid #e2e8f0",
-                fontSize: "0.75rem",
-                fontWeight: 800,
-                color: "#475569",
-                textTransform: "uppercase",
-                letterSpacing: "0.03em",
-                alignItems: "center"
-              }}
-            >
-              <span>#</span>
-              <span>Alumno / N° de Cuenta</span>
-              <div style={{ textAlign: "center" }}>
-                <div style={{ color: "#7c3aed", fontWeight: 900 }}>
-                  {examMeta.label}
-                </div>
-                <div style={{ fontSize: "0.68rem", color: "#64748b", fontWeight: 600, textTransform: "none" }}>
-                  Semana {currentWeekInfo.numero_semana} — ({currentWeekInfo.parcial})
-                </div>
-              </div>
+          <dl className="partial-grades__stats" aria-label="Resumen de calificaciones">
+            {[["Estudiantes", estudiantes.length, Users], ["Calificados", stats.gradedCount, CheckCircle2], ["Pendientes", stats.pendingCount, Clock], ["Promedio", stats.average, GraduationCap]].map(([label, value, Icon]) => (
+              <div key={label}><dt><Icon size={16} aria-hidden="true" /> {label}</dt><dd>{value}</dd></div>
+            ))}
+          </dl>
+          <section className="user-directory__results" aria-labelledby="exam-students-title">
+            <div className="user-directory__toolbar">
+              <div><h3 id="exam-students-title">Calificaciones por estudiante</h3><p>{filteredEstudiantes.length} de {estudiantes.length} estudiantes</p></div>
+              <label className="user-directory__search"><Search size={17} aria-hidden="true" /><input type="search" aria-label="Buscar estudiante" placeholder="Nombre o cuenta" value={searchTerm} onChange={event => setSearchTerm(event.target.value)} /></label>
             </div>
-
-            {/* Listado de alumnos */}
-            {filteredEstudiantes.length === 0 ? (
-              <div
-                style={{
-                  padding: "2.5rem",
-                  textAlign: "center",
-                  background: "#f8fafc",
-                  borderRadius: "0.65rem",
-                  border: "1.5px dashed #cbd5e1",
-                  color: "#64748b",
-                  fontSize: "0.85rem"
-                }}
-              >
-                {searchTerm ? "No se encontraron alumnos con ese criterio de búsqueda." : "No hay alumnos matriculados en esta sección."}
-              </div>
-            ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
-                {filteredEstudiantes.map((est, index) => {
-                  const gradeVal = getStudentExamGrade(est);
-
+            <div className="partial-grades__filters" role="group" aria-label="Filtrar calificaciones">
+              {[["all", "Todos", estudiantes.length], ["pending", "Pendientes", stats.pendingCount], ["graded", "Calificados", stats.gradedCount]].map(([value, label, count]) => (
+                <button type="button" key={value} aria-pressed={statusFilter === value} onClick={() => setStatusFilter(value)}>{label} <span>{count}</span></button>
+              ))}
+            </div>
+            {!filteredEstudiantes.length ? <p className="user-directory__state">{estudiantes.length ? "Ningún estudiante coincide con los filtros." : "Aún no hay estudiantes matriculados en esta sección."}</p> : (
+              <ul className="partial-grades__students">
+                {filteredEstudiantes.map(student => {
+                  const grade = getStudentExamGrade(student);
+                  const graded = grade !== "" && grade !== null;
                   return (
-                    <div
-                      key={est.numero_cuenta || est.id || index}
-                      style={{
-                        display: "grid",
-                        gridTemplateColumns: "50px 1.4fr 1.6fr",
-                        gap: "0.75rem",
-                        alignItems: "center",
-                        padding: "0.75rem 0.85rem",
-                        borderRadius: "0.65rem",
-                        border: "1px solid #e2e8f0",
-                        background: "#ffffff",
-                        transition: "all 0.15s ease"
-                      }}
-                    >
-                      {/* Número correlativo */}
-                      <span style={{ fontSize: "0.8rem", fontWeight: 800, color: "#94a3b8" }}>
-                        {String(index + 1).padStart(2, "0")}
-                      </span>
-
-                      {/* Nombre Completo y Cuenta */}
-                      <div style={{ display: "flex", flexDirection: "column", gap: "0.15rem", paddingRight: "0.5rem" }}>
-                        <strong style={{ fontSize: "0.92rem", color: "#0f172a", lineHeight: 1.25 }}>
-                          {est.nombre_completo || "Sin Nombre Registrado"}
-                        </strong>
-                        <span style={{ fontSize: "0.74rem", color: "#64748b", fontFamily: "monospace" }}>
-                          Cuenta: {est.numero_cuenta || "Sin cuenta"}
-                        </span>
-                      </div>
-
-                      {/* Casilla de calificación del examen parcial */}
-                      <div style={{ display: "flex", justifyContent: "center" }}>
-                        <div
-                          style={{
-                            position: "relative",
-                            width: "100%",
-                            maxWidth: "180px"
-                          }}
-                        >
-                          <input
-                            type="text"
-                            inputMode="decimal"
-                            value={gradeVal}
-                            onChange={(e) => handleGradeChange(est.numero_cuenta, e.target.value)}
-                            onBlur={() => {
-                              if (typeof gradeVal === "string" && gradeVal.endsWith(".")) {
-                                handleGradeChange(est.numero_cuenta, gradeVal.slice(0, -1));
-                              }
-                            }}
-                            disabled={!canEdit}
-                            placeholder="0.000"
-                            style={{
-                              width: "100%",
-                              textAlign: "center",
-                              padding: "0.55rem 0.75rem",
-                              borderRadius: "0.55rem",
-                              border: gradeVal !== "" ? "2px solid #7c3aed" : "1.5px solid #cbd5e1",
-                              background: !canEdit ? "#f1f5f9" : gradeVal !== "" ? "#faf5ff" : "#ffffff",
-                              color: !canEdit ? "#94a3b8" : "#581c87",
-                              fontSize: "0.95rem",
-                              fontWeight: 800,
-                              outline: "none",
-                              cursor: canEdit ? "text" : "not-allowed",
-                              transition: "all 0.15s ease"
-                            }}
-                            title={!canEdit ? `Solo lectura. Docente asignado: ${assignedInstructorForExam || "ninguno"}` : `Calificación ${examMeta.label}`}
-                          />
-                        </div>
-                      </div>
-                    </div>
+                    <li className="partial-grades__student" data-graded={graded} key={student.numero_cuenta}>
+                      <div className="partial-grades__student-info"><h4>{student.nombre_completo || "Sin nombre registrado"}</h4><p>Cuenta {student.numero_cuenta}</p>
+                        <span>{graded ? <CheckCircle2 size={14} aria-hidden="true" /> : <Clock size={14} aria-hidden="true" />}{graded ? "Calificado" : "Pendiente"}</span></div>
+                      <label className="user-field partial-grades__grade">Nota del examen
+                        <input type="text" inputMode="decimal" value={grade} placeholder="Sin nota" disabled={!canEdit || saving}
+                          aria-label={`Nota de ${student.nombre_completo || student.numero_cuenta}`}
+                          onFocus={() => setEditingAccount(student.numero_cuenta)}
+                          onChange={event => handleGradeChange(student.numero_cuenta, event.target.value)}
+                          onBlur={() => {
+                            if (typeof grade === "string" && grade.endsWith(".")) handleGradeChange(student.numero_cuenta, grade.slice(0, -1));
+                            setEditingAccount(null);
+                          }} />
+                        <small>Puntos · hasta 3 decimales</small>
+                      </label>
+                    </li>
                   );
                 })}
-              </div>
+              </ul>
             )}
-
-            {/* Botón inferior de guardar */}
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "0.75rem", paddingTop: "0.75rem" }}>
-              <button
-                onClick={handleSaveAll}
-                disabled={saving || !canEdit}
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "0.5rem",
-                  background: !canEdit
-                    ? "#94a3b8"
-                    : hasUnsavedChanges
-                    ? "linear-gradient(135deg, #10b981 0%, #059669 100%)"
-                    : "linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%)",
-                  color: "#ffffff",
-                  border: "none",
-                  padding: "0.65rem 1.5rem",
-                  borderRadius: "0.65rem",
-                  fontSize: "0.88rem",
-                  fontWeight: 800,
-                  cursor: (!canEdit || saving) ? "not-allowed" : "pointer",
-                  boxShadow: canEdit ? "0 4px 14px rgba(124, 58, 237, 0.25)" : "none",
-                  opacity: (!canEdit || saving) ? 0.7 : 1,
-                  transition: "all 0.2s ease"
-                }}
-                title={!canEdit ? "Solo lectura" : `Guardar notas de ${examMeta.label}`}
-              >
-                {saving ? (
-                  <>
-                    <RefreshCw size={15} className="animate-spin" />
-                    <span>Guardando notas...</span>
-                  </>
-                ) : !canEdit ? (
-                  <>
-                    <Lock size={15} />
-                    <span>Solo Lectura ({examMeta.label})</span>
-                  </>
-                ) : (
-                  <>
-                    <Save size={15} />
-                    <span>Guardar Notas de {examMeta.label}</span>
-                  </>
-                )}
-              </button>
+          </section>
+          <footer className="partial-grades__save">
+            {saveError && <p className="user-dialog__error" role="alert">{saveError}</p>}
+            <div><p role="status">{hasUnsavedChanges ? "Cambios sin guardar" : "Sin cambios pendientes"}</p>
+              <div>{hasUnsavedChanges && <button type="button" className="user-button" disabled={saving} onClick={discardChanges}>Descartar cambios</button>}
+                <button type="button" className="user-button user-button--primary" disabled={!canEdit || saving || !hasUnsavedChanges} onClick={handleSaveAll}><Save size={17} aria-hidden="true" />{saving ? "Guardando…" : "Guardar notas del examen"}</button>
+              </div>
             </div>
-          </>
-        )}
-      </div>
-    </div>
+          </footer>
+        </>
+      )}
+    </section>
   );
 }

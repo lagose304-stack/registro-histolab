@@ -437,6 +437,32 @@ export const api = {
       return await handleResponse(res);
     },
 
+    async saveAttendance(seccionId, semana, updates) {
+      return handleResponse(await fetch(`${API_BASE}/estudiantes/seccion/${encodeURIComponent(seccionId)}/asistencia/${semana}`, {
+        method: "PUT",
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ updates })
+      }));
+    },
+
+    async getManualSchedule(sectionId) {
+      return handleResponse(await fetch(`${API_BASE}/estudiantes/seccion/${encodeURIComponent(sectionId)}/fechas-manuales`, {
+        headers: getAuthHeaders()
+      }));
+    },
+
+    async saveManualDate(sectionId, week, date) {
+      return handleResponse(await fetch(`${API_BASE}/estudiantes/seccion/${encodeURIComponent(sectionId)}/fechas-manuales/${week}`, {
+        method: "PUT", headers: getAuthHeaders(), body: JSON.stringify({ fecha_carga: date })
+      }));
+    },
+
+    async saveManualGrades(sectionId, week, updates) {
+      return handleResponse(await fetch(`${API_BASE}/estudiantes/seccion/${encodeURIComponent(sectionId)}/manuales/${week}`, {
+        method: "PUT", headers: getAuthHeaders(), body: JSON.stringify({ updates })
+      }));
+    },
+
     async saveBatch(seccionId, updates, carrera = null) {
       const res = await fetch(`${API_BASE}/estudiantes/seccion/${seccionId}/batch`, {
         method: "PUT",
@@ -476,6 +502,46 @@ export const api = {
 
   // Configuración de Semanas Académicas
   semanas: {
+    async getSectionAttendanceEvents(sectionId) {
+      return handleResponse(await fetch(`${API_BASE}/semanas/agenda/asistencia/${encodeURIComponent(sectionId)}`, {
+        headers: getAuthHeaders()
+      }));
+    },
+    async getAgenda(carrera, desde, hasta, tipo) {
+      const query = new URLSearchParams(tipo === "examen" ? { carrera, tipo } : { carrera, desde, hasta });
+      return handleResponse(await fetch(`${API_BASE}/semanas/agenda?${query}`, { headers: getAuthHeaders() }));
+    },
+
+    async saveExamBatch(carrera, changes) {
+      return handleResponse(await fetch(`${API_BASE}/semanas/agenda/examenes`, {
+        method: "PUT",
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ carrera, changes })
+      }));
+    },
+
+    async getAgendaAvailability(carrera, fecha, seccionId, excludeId) {
+      const query = new URLSearchParams({ carrera, fecha, seccion_id: seccionId });
+      if (excludeId) query.set("excluir", excludeId);
+      return handleResponse(await fetch(`${API_BASE}/semanas/agenda/disponibilidad?${query}`, { headers: getAuthHeaders() }));
+    },
+
+    async saveAgendaEvent(event, id) {
+      const path = id ? `/${encodeURIComponent(id)}` : "";
+      return handleResponse(await fetch(`${API_BASE}/semanas/agenda${path}`, {
+        method: id ? "PUT" : "POST",
+        headers: getAuthHeaders(),
+        body: JSON.stringify(event)
+      }));
+    },
+
+    async deleteAgendaEvent(id) {
+      return handleResponse(await fetch(`${API_BASE}/semanas/agenda/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+        headers: getAuthHeaders()
+      }));
+    },
+
     async getConfig(carrera = "Medicina") {
       const res = await fetch(`${API_BASE}/semanas?carrera=${encodeURIComponent(carrera)}`, {
         headers: getAuthHeaders()

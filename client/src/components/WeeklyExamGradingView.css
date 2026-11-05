@@ -1,0 +1,62 @@
+.section-panel > .partial-grades { width: 100%; max-width: none; }
+.partial-grades { overflow-wrap: anywhere; }
+.partial-grades__overview { display: grid; gap: .75rem; grid-template-columns: repeat(auto-fit, minmax(min(100%, 19rem), 1fr)); }
+.partial-grades__selection, .partial-grades__permission, .partial-grades__student, .partial-grades__save {
+  min-width: 0;
+  padding: clamp(.85rem, 2vw, 1.2rem);
+  border: 1px solid #b7c8db;
+  border-radius: .85rem;
+  background: #fff;
+}
+.partial-grades__selection { display: grid; align-content: start; gap: .6rem; border-top: 3px solid #7454a1; }
+.partial-grades__selection select { width: 100%; min-width: 0; }
+.partial-grades__exam-name { color: #624283; font-weight: 800; }
+.partial-grades__dates { font-size: .85rem; color: #4c6076; }
+.partial-grades__permission { display: grid; align-content: start; gap: .6rem; background: #f4f7fb; }
+.partial-grades__permission[data-editable="true"] { background: #f3f8f4; border-color: #acc7b5; }
+.partial-grades__permission strong { display: flex; align-items: center; gap: .5rem; color: #28583f; }
+.partial-grades__permission strong svg { flex: none; }
+.partial-grades__permission p { font-size: .9rem; color: #3b5267; }
+.partial-grades__permission b { display: block; margin-top: .2rem; color: #213f53; }
+.partial-grades__permission small { font-size: .8rem; color: #4c6076; }
+.partial-grades__stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .6rem; margin: 0; }
+.partial-grades__stats > div { min-width: 0; padding: .85rem; border: 1px solid #bacbd8; border-radius: .7rem; background: #fff; }
+.partial-grades__stats dt { display: flex; align-items: center; gap: .35rem; font-size: .8rem; color: #435b70; }
+.partial-grades__stats dt svg { flex: none; }
+.partial-grades__stats dd { margin: .35rem 0 0; font-size: clamp(1.25rem, 3vw, 1.65rem); font-weight: 800; color: #5c3d7c; }
+.partial-grades__stats > div:nth-child(2) { border-top: 3px solid #418565; }
+.partial-grades__stats > div:nth-child(3) { border-top: 3px solid #b28237; }
+.partial-grades__filters { display: flex; gap: .5rem; flex-wrap: wrap; }
+.partial-grades__filters button { display: flex; align-items: center; justify-content: center; flex: 1 1 auto; gap: .4rem; min-height: 44px; padding: .5rem .7rem; border: 1px solid #b5c5d4; border-radius: .65rem; background: #fff; color: #395067; font: inherit; font-size: .85rem; font-weight: 700; cursor: pointer; }
+.partial-grades__filters button[aria-pressed="true"] { background: #ede6f5; color: #573679; border-color: #75529c; box-shadow: inset 0 0 0 1px #75529c; }
+.partial-grades__filters span { padding: .1rem .4rem; background: #ffffffa8; border-radius: .35rem; }
+.partial-grades input { box-sizing: border-box; min-width: 0; width: 100%; }
+.partial-grades__students { display: grid; gap: .65rem; margin: 0; padding: 0; list-style: none; }
+.partial-grades__student { display: grid; gap: .85rem; border-left: 4px solid #a48a5e; }
+.partial-grades__student[data-graded="true"] { border-left-color: #48876c; }
+.partial-grades__student-info { min-width: 0; }
+.partial-grades__student-info h4 { margin: 0 0 .3rem; font-size: 1rem; color: #183c53; }
+.partial-grades__student-info p { color: #4d6578; font-size: .85rem; }
+.partial-grades__student-info > span { display: inline-flex; align-items: center; gap: .3rem; padding: .2rem .45rem; border-radius: .4rem; margin-top: .5rem; background: #fff5df; color: #7e5c21; font-size: .75rem; font-weight: 700; }
+.partial-grades__student[data-graded="true"] .partial-grades__student-info > span { background: #eaf5ed; color: #286144; }
+.partial-grades__grade { padding: .65rem; background: #f8f5fc; border: 1px solid #d4c6e1; border-radius: .65rem; }
+.partial-grades__grade input { min-height: 48px; text-align: center; font-size: 1.2rem; font-weight: 800; color: #5b3a7e; }
+.partial-grades__grade small { color: #5c6578; font-size: .75rem; font-weight: 400; }
+.partial-grades__save { position: sticky; bottom: 0; z-index: 1; display: grid; gap: .65rem; border-top: 3px solid #76549d; box-shadow: 0 -4px 14px #183c530b; padding-bottom: max(.85rem, env(safe-area-inset-bottom)); }
+.partial-grades__save > div, .partial-grades__save > div > div { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: .65rem; }
+.partial-grades__save > div > p { font-size: .85rem; color: #4c6076; }
+.partial-grades__save .user-button--primary { background: #67448c; border-color: #67448c; }
+.partial-grades__skeleton { display: grid; gap: .85rem; }
+.partial-grades__skeleton span { display: block; height: 110px; border-radius: .85rem; background: #e6edf2; animation: exam-loading 1.5s ease-in-out infinite alternate; }
+.partial-grades :is(input, select, button, summary):focus-visible { outline: 3px solid #9b77bd; outline-offset: 3px; }
+@keyframes exam-loading { to { opacity: .5; } }
+@media (prefers-reduced-motion: reduce) { .partial-grades__skeleton span { animation: none; } }
+@media (min-width: 600px) {
+  .partial-grades__stats { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .partial-grades__student { grid-template-columns: minmax(0, 1fr) minmax(10rem, 13rem); align-items: center; }
+  .partial-grades__filters { width: fit-content; }
+}
+@media (max-width: 599px) {
+  .partial-grades__save > div > div { width: 100%; }
+  .partial-grades__save .user-button { flex: 1 1 auto; }
+}

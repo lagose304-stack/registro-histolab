@@ -232,7 +232,7 @@ export async function exportStyledExcel({
 
   worksheet.mergeCells(3, Math.floor(totalCols / 2) + 1, 3, totalCols);
   const cellCoord = worksheet.getCell(3, Math.floor(totalCols / 2) + 1);
-  cellCoord.value = `Coordinador de Sección: ${seccion?.coordinador || "Sin asignar"}`;
+  cellCoord.value = `Titular de sección: ${seccion?.coordinador || "Sin asignar"}`;
   cellCoord.font = { name: "Arial", size: 9, bold: true, color: { argb: "FF0369A1" } };
   cellCoord.alignment = { vertical: "middle", horizontal: "left" };
   cellCoord.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFFFFF" } };

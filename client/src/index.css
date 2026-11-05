@@ -534,3 +534,53 @@ h1, h2, h3, h4, h5 {
 }
 
 .navbar-admin-slot:empty { display: none; }
+
+/* Vista provisional mientras se carga el portal */
+.portal-skeleton { max-width: 76rem; margin-inline: auto; }
+.portal-skeleton__status {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  clip-path: inset(50%);
+  overflow: hidden;
+  white-space: nowrap;
+}
+.portal-skeleton__layout, .portal-skeleton__cards { display: grid; gap: .85rem; }
+.portal-skeleton__hero, .portal-skeleton__card {
+  padding: clamp(1rem, 3vw, 1.5rem);
+  border: 1px solid #cadde8;
+  border-radius: 1rem;
+}
+.portal-skeleton__hero {
+  display: flex;
+  align-items: center;
+  gap: .85rem;
+  min-height: 8.5rem;
+  background: linear-gradient(115deg, #eaf6fa, #f8fbfd);
+}
+.portal-skeleton__card { min-height: 6.75rem; background: #fff; }
+.portal-skeleton__avatar, .portal-skeleton__lines span {
+  display: block;
+  border-radius: .45rem;
+  background: #cddfe9;
+}
+.portal-skeleton__avatar { width: 44px; height: 44px; flex: none; border-radius: .75rem; }
+.portal-skeleton__lines { display: grid; gap: .65rem; min-width: 0; }
+.portal-skeleton__hero .portal-skeleton__lines { flex: 1; max-width: 30rem; }
+.portal-skeleton__lines span { width: 86%; height: .65rem; }
+.portal-skeleton__lines .portal-skeleton__short { width: 32%; }
+.portal-skeleton__lines .portal-skeleton__title { width: 64%; height: 1.05rem; }
+
+@media (min-width: 36rem) {
+  .portal-skeleton__cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (min-width: 58rem) {
+  .portal-skeleton__cards { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .portal-skeleton__layout { animation: portal-skeleton-pulse 1.5s ease-in-out infinite alternate; }
+}
+@keyframes portal-skeleton-pulse {
+  from { opacity: 1; }
+  to { opacity: .68; }
+}

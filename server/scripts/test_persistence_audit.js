@@ -10,7 +10,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const DATA_DIR = path.join(__dirname, "../data");
 
-const BASE_URL = "http://localhost:5000/api";
+const BASE_URL = "http://127.0.0.1:43174/api";
 const JWT_SECRET = process.env.JWT_SECRET || "histolab_default_secret_key_2026";
 
 // Generar un token válido de instructor para probar endpoints protegidos

@@ -29,7 +29,7 @@ import {
 import { api } from "../services/api";
 import { safeStorage } from "../utils/safeStorage";
 import {
-  isInstructorTitular,
+  hasFullSectionAccess,
   isWeekAssignedToUser,
   getAssignedRecordForWeek,
   SECTION_ROLES
@@ -59,7 +59,7 @@ export default function ReviewQuizSubmissionsView({
   const [asignaciones, setAsignaciones] = useState([]);
 
   const currentUser = currentInstructor || api.auth.getCurrentInstructor();
-  const isTitular = useMemo(() => isInstructorTitular(currentUser, seccion), [currentUser, seccion]);
+  const hasFullAccess = useMemo(() => hasFullSectionAccess(currentUser, seccion), [currentUser, seccion]);
 
   // Modal de Calificación
   const [selectedEntrega, setSelectedEntrega] = useState(null);
@@ -206,7 +206,7 @@ export default function ReviewQuizSubmissionsView({
 
   // Semanas filtradas por rol del usuario (el titular ve todas; los asignados solo sus semanas asignadas)
   const availableWeeks = useMemo(() => {
-    if (isTitular) return allAvailableWeeks;
+    if (hasFullAccess) return allAvailableWeeks;
     return allAvailableWeeks.filter((w) =>
       isWeekAssignedToUser(
         asignaciones,
@@ -216,7 +216,7 @@ export default function ReviewQuizSubmissionsView({
         seccion
       )
     );
-  }, [allAvailableWeeks, isTitular, asignaciones, currentUser, seccion]);
+  }, [allAvailableWeeks, hasFullAccess, asignaciones, currentUser, seccion]);
 
   // Asegurar que la semana seleccionada pertenezca a availableWeeks
   useEffect(() => {
@@ -1021,7 +1021,7 @@ export default function ReviewQuizSubmissionsView({
               No tienes semanas asignadas para revisar pruebas
             </h3>
             <p style={{ margin: 0, fontSize: "0.88rem", color: "#64748b", maxWidth: "480px", lineHeight: 1.5 }}>
-              En esta sección no tienes asignado el rol oficial de <strong>Revisión de prueba semanal</strong> en ninguna semana. Si requieres acceso para revisar y calificar respuestas, contacta al instructor titular ({seccion?.coordinador || "Coordinador de Sección"}).
+              En esta sección no tienes asignado el rol oficial de <strong>Revisión de prueba semanal</strong> en ninguna semana. Si requieres acceso para revisar y calificar respuestas, contacta al titular de sección ({seccion?.coordinador || "Titular de sección"}).
             </p>
           </div>
         ) : (

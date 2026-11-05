@@ -55,8 +55,8 @@ Para iniciar **simultáneamente** el Frontend y el Backend en paralelo:
 npm run dev
 ```
 
-- **Frontend**: `http://localhost:5173`
-- **Backend API**: `http://localhost:5000` (con endpoints como `http://localhost:5000/api/registros` y `http://localhost:5000/api/health`)
+- **Frontend**: `http://127.0.0.1:43173`
+- **Backend API**: `http://127.0.0.1:43174` (con endpoints como `http://127.0.0.1:43174/api/registros` y `http://127.0.0.1:43174/api/health`)
 
 ---
 
@@ -64,7 +64,7 @@ npm run dev
 
 | Comando | Descripción |
 |---|---|
-| `npm run dev` | Inicia simultáneamente Frontend (`:5173`) y Backend (`:5000`) |
+| `npm run dev` | Inicia simultáneamente Frontend (`:43173`) y Backend (`:43174`) |
 | `npm run dev:client` | Inicia únicamente el servidor de desarrollo de Vite (Frontend) |
 | `npm run dev:server` | Inicia únicamente la API de Express (Backend) con recarga automática |
 | `npm run build` | Compila la aplicación de React para producción |

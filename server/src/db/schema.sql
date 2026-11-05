@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS public.instructores (
     nombre_completo TEXT NOT NULL,
     correo TEXT UNIQUE NOT NULL,
     contrasena TEXT NOT NULL,
-    rol TEXT DEFAULT 'Instructor' CHECK (rol IN ('Instructor', 'Coordinador', 'Administrador', 'Creador')),
+    rol TEXT NOT NULL DEFAULT 'Instructor' CHECK (rol IN ('Instructor', 'Coordinador', 'Creador')),
     activo BOOLEAN DEFAULT true,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
@@ -31,12 +31,15 @@ CREATE TABLE IF NOT EXISTS public.secciones (
     edificio TEXT DEFAULT 'Edificio B1',
     aula TEXT DEFAULT 'Laboratorio de Histología',
     cupos_maximos INTEGER DEFAULT 30,
+    coordinador TEXT NOT NULL CONSTRAINT secciones_coordinador_obligatorio CHECK (coordinador ~ '[^[:space:]]'),
     activo BOOLEAN DEFAULT true,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 ALTER TABLE public.secciones ENABLE ROW LEVEL SECURITY;
+COMMENT ON COLUMN public.secciones.coordinador IS
+  'Nombre del titular de la sección. Esta asignación es independiente del rol global en public.instructores.rol.';
 DROP POLICY IF EXISTS "Acceso total para API en secciones" ON public.secciones;
 CREATE POLICY "Acceso total para API en secciones" ON public.secciones FOR ALL TO public USING (true) WITH CHECK (true);
 
@@ -78,7 +81,9 @@ CREATE TABLE IF NOT EXISTS public.configuracion_semanas (
 
 ALTER TABLE public.configuracion_semanas ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Acceso total para API en configuracion_semanas" ON public.configuracion_semanas;
-CREATE POLICY "Acceso total para API en configuracion_semanas" ON public.configuracion_semanas FOR ALL TO public USING (true) WITH CHECK (true);
+
+REVOKE ALL ON TABLE public.configuracion_semanas FROM PUBLIC, anon, authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.configuracion_semanas TO service_role;
 
 CREATE INDEX IF NOT EXISTS idx_config_semanas_carrera ON public.configuracion_semanas(carrera);
 
@@ -305,3 +310,16 @@ CREATE POLICY "Acceso total para API en configuracion_puntajes" ON public.config
 CREATE INDEX IF NOT EXISTS idx_config_puntajes_carrera ON public.configuracion_puntajes(carrera);
 
 
+
+-- Fechas especiales para cargar manuales previos a examen por sección.
+CREATE TABLE IF NOT EXISTS public.fechas_carga_manuales (
+  seccion_id uuid NOT NULL REFERENCES public.secciones(id) ON DELETE CASCADE,
+  numero_semana integer NOT NULL CHECK (numero_semana > 0),
+  fecha_carga date NOT NULL,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (seccion_id, numero_semana)
+);
+
+ALTER TABLE public.fechas_carga_manuales ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON TABLE public.fechas_carga_manuales FROM PUBLIC, anon, authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.fechas_carga_manuales TO service_role;

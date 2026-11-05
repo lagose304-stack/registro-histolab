@@ -161,6 +161,15 @@ export const CAREER_DEFAULT_TEMAS = {
 // Generar array plano inicial para la memoria respaldado por disco local
 let inMemoryTemas = loadPersistentTemas() || Object.values(CAREER_DEFAULT_TEMAS).flat();
 
+export const getLocalAcademicSettings = career => {
+  const key = getNormalizedCareerKey(career);
+  return {
+    topics: inMemoryTemas.filter(topic => getNormalizedCareerKey(topic.carrera) === key),
+    scores: inMemoryPuntajes[key] || loadPersistentPuntajes()[key] || {}
+  };
+};
+
+
 /**
  * Normaliza el nombre de la carrera para búsquedas
  */

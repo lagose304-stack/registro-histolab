@@ -28,7 +28,7 @@ import {
 } from "lucide-react";
 import { api } from "../services/api";
 import {
-  isInstructorTitular,
+  hasFullSectionAccess,
   isWeekAssignedToUser,
   getAssignedRecordForWeek,
   SECTION_ROLES
@@ -124,7 +124,7 @@ export default function WeeklyQuizCreationView({
   const [asignaciones, setAsignaciones] = useState([]);
 
   const currentUser = currentInstructor || api.auth.getCurrentInstructor();
-  const isTitular = useMemo(() => isInstructorTitular(currentUser, seccion), [currentUser, seccion]);
+  const hasFullAccess = useMemo(() => hasFullSectionAccess(currentUser, seccion), [currentUser, seccion]);
 
   const carrera = seccion?.carrera || "Medicina";
 
@@ -253,11 +253,11 @@ export default function WeeklyQuizCreationView({
 
   // Semanas filtradas por rol del docente (el titular ve todas; los asignados solo las suyas)
   const visibleWeeks = useMemo(() => {
-    if (isTitular) return availableWeeks;
+    if (hasFullAccess) return availableWeeks;
     return availableWeeks.filter((w) =>
       isWeekAssignedToUser(asignaciones, SECTION_ROLES.CREAR_PRUEBA, w.numero_semana, currentUser, seccion)
     );
-  }, [availableWeeks, isTitular, asignaciones, currentUser, seccion]);
+  }, [availableWeeks, hasFullAccess, asignaciones, currentUser, seccion]);
 
   // Mapa de pruebas ya guardadas por semana
   const quizzesBySemanaMap = useMemo(() => {
@@ -932,7 +932,7 @@ export default function WeeklyQuizCreationView({
               No tienes semanas asignadas para crear pruebas
             </h3>
             <p style={{ margin: 0, fontSize: "0.88rem", color: "#64748b", maxWidth: "480px", lineHeight: 1.5 }}>
-              En esta sección no tienes asignado el rol oficial de <strong>Crear prueba semanal</strong> en ninguna semana. Si requieres acceso para diseñar reactivos, contacta al instructor titular ({seccion?.coordinador || "Coordinador de Sección"}).
+              En esta sección no tienes asignado el rol oficial de <strong>Crear prueba semanal</strong> en ninguna semana. Si requieres acceso para diseñar reactivos, contacta al titular de sección ({seccion?.coordinador || "Titular de sección"}).
             </p>
           </div>
         ) : (

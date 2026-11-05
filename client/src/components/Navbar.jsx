@@ -24,7 +24,7 @@ export default function Navbar({
 
   const subInfo = isStudent
     ? currentStudent?.carrera || "Estudiante"
-    : currentInstructor?.rol || currentInstructor?.comite || currentInstructor?.seccion || "Docente";
+    : currentInstructor?.rol || currentInstructor?.seccion || "Docente";
 
   const hasUser = Boolean(currentInstructor || currentStudent);
 

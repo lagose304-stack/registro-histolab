@@ -1,4 +1,4 @@
-const BASE_URL = "http://localhost:5000/api";
+const BASE_URL = "http://127.0.0.1:43174/api";
 
 async function runTest() {
   console.log("🚀 Iniciando prueba integral del flujo de Pruebas Semanales...");

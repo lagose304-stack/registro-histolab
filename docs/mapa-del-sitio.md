@@ -4,7 +4,7 @@
 
 - [Estudiantes](mapa-estudiantes.md) — acceso al portal, notas, pruebas y entregas propias.
 - [Instructores comunes](mapa-instructores.md) — secciones asignadas o coordinadas, funciones semanales y facultades del titular.
-- [Instructores administrativos](mapa-instructores-administrativos.md) — Administración General para Creador y Administrador, y su relación con los permisos de sección.
+- [Instructores administrativos](mapa-instructores-administrativos.md) — Administración General para Creador y Coordinador, y su relación con los permisos de sección.
 
 Los mapas describen el acceso que presenta la interfaz. Para confirmar la autorización efectiva de una operación, consulta la ruta y su controlador.
 

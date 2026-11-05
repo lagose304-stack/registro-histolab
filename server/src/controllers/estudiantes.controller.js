@@ -1,3 +1,15 @@
+import { getAttendanceKeys, getAttendanceWindow } from "../../../shared/attendanceWindow.mjs";
+import { canViewSection, isInstructorTitular, isSectionAssignedToInstructor, matchesInstructor } from "../../../shared/sectionAccess.mjs";
+import { hasAdministrationAccess } from "../../../shared/instructorRoles.mjs";
+import { normalizeSectionCareer } from "../../../shared/sectionCode.mjs";
+import { getLocalSchedulingSections } from "./secciones.controller.js";
+import { getLocalSchedulingWeeks } from "./semanas.controller.js";
+import { getLocalSectionAssignments } from "./asignaciones.controller.js";
+import { getSectionAttendanceEvents } from "./academicAgenda.controller.js";
+import { getManualSchedule } from "./manualsSchedule.controller.js";
+import { getLocalAcademicSettings } from "./temario.controller.js";
+import { getManualsWindow } from "../../../shared/manualsWindow.mjs";
+import { calculateStudentAcademicSummary } from "../../../client/src/utils/academicEngine.js";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -43,11 +55,12 @@ function loadPersistentEstudiantes() {
   };
 }
 
-function savePersistentEstudiantes(data) {
+function savePersistentEstudiantes(data, throwOnError = false) {
   try {
     ensureDataDir();
     fs.writeFileSync(ESTUDIANTES_FILE, JSON.stringify(data, null, 2), "utf-8");
   } catch (err) {
+    if (throwOnError) throw err;
     console.warn("Aviso al guardar estudiantes locales:", err.message);
   }
 }
@@ -792,3 +805,180 @@ export const updateEstudianteGradeDirect = async (seccion_id, numero_cuenta, car
   return true;
 };
 
+
+
+// Guardado de la lista semanal con horario y asignaciones verificados en el servidor.
+export const saveWeeklyAttendance = async (req, res) => {
+  try {
+    const { seccion_id, semana } = req.params;
+    const weekNumber = Number(semana);
+    const { updates } = req.body || {};
+    const states = new Set([null, "Asistio", "Falta injustificada", "Falta justificada"]);
+    if (!Number.isInteger(weekNumber) || weekNumber < 1 || !Array.isArray(updates) || !updates.length ||
+      updates.some(item => !item || !item.numero_cuenta || !states.has(item.estado)) ||
+      new Set(updates.map(item => String(item.numero_cuenta))).size !== updates.length) {
+      return res.status(400).json({ message: "Envía una semana y estados de asistencia válidos." });
+    }
+
+    let section, weeks, assignments;
+    if (isSupabaseConfigured && supabase) {
+      const sectionResult = await supabase.from("secciones").select("*").eq("id", seccion_id).maybeSingle();
+      if (sectionResult.error) throw sectionResult.error;
+      section = sectionResult.data;
+      if (section) {
+        const [weekResult, assignmentResult] = await Promise.all([
+          supabase.from("configuracion_semanas").select("*"),
+          supabase.from("asignaciones_instructores").select("*").eq("seccion_id", seccion_id)
+        ]);
+        if (weekResult.error) throw weekResult.error;
+        if (assignmentResult.error) throw assignmentResult.error;
+        weeks = weekResult.data.filter(week => normalizeSectionCareer(week.carrera) === normalizeSectionCareer(section.carrera));
+        assignments = assignmentResult.data;
+      }
+    } else {
+      section = getLocalSchedulingSections().find(item => item.id === seccion_id);
+      weeks = getLocalSchedulingWeeks(section?.carrera);
+      assignments = getLocalSectionAssignments(seccion_id);
+    }
+    if (!section) return res.status(404).json({ message: "Sección no encontrada." });
+
+    const user = req.instructor;
+    const fullAccess = hasAdministrationAccess(user?.rol) || isInstructorTitular(user, section);
+    const assigned = assignments.find(item => item.tipo_asignacion === "Pasar lista de asistencia semanal" &&
+      item.referencia_id === `semana_${weekNumber}`);
+    if (!fullAccess && (!isSectionAssignedToInstructor(user, section) || !assigned?.instructor_id ||
+      !matchesInstructor(user, assigned.instructor_id, assigned.instructor_nombre, section))) {
+      return res.status(403).json({ message: "No tienes asignada la asistencia de esta semana." });
+    }
+    const attendanceEvents = await getSectionAttendanceEvents(section);
+    const window = getAttendanceWindow(section, weeks, weekNumber, new Date(), attendanceEvents);
+    if (!window.isOpen) return res.status(403).json({ message: window.reason });
+
+    const tableName = normalizeCarreraToTable(section.carrera);
+    const accounts = updates.map(item => String(item.numero_cuenta));
+    let rows = inMemoryEstudiantes[tableName] || [];
+    if (isSupabaseConfigured && supabase) {
+      const result = await supabase.from(tableName).select("numero_cuenta,asistencias")
+        .eq("seccion_id", seccion_id).in("numero_cuenta", accounts);
+      if (result.error) throw result.error;
+      rows = result.data;
+    } else {
+      rows = rows.filter(row => row.seccion_id === seccion_id && accounts.includes(String(row.numero_cuenta)));
+    }
+    if (rows.length !== updates.length) return res.status(404).json({ message: "Algún estudiante ya no pertenece a esta sección. Actualiza la lista." });
+
+    const attendanceKeys = getAttendanceKeys(weeks.find(week => Number(week.numero_semana) === weekNumber));
+    const changes = rows.map(row => {
+      const value = updates.find(item => String(item.numero_cuenta) === String(row.numero_cuenta)).estado;
+      return { row, asistencias: { ...(row.asistencias || {}), ...Object.fromEntries(attendanceKeys.map(key => [key, value])) } };
+    });
+    if (isSupabaseConfigured && supabase) {
+      for (const { row, asistencias } of changes) {
+        if (!getAttendanceWindow(section, weeks, weekNumber, new Date(), attendanceEvents).isOpen) {
+          return res.status(403).json({ message: "El horario para pasar lista terminó durante el guardado. Actualiza la lista para comprobar los registros." });
+        }
+        let query = supabase.from(tableName).update({ asistencias, updated_at: new Date().toISOString() })
+          .eq("seccion_id", seccion_id).eq("numero_cuenta", row.numero_cuenta);
+        query = row.asistencias === null ? query.is("asistencias", null) : query.eq("asistencias", JSON.stringify(row.asistencias));
+        const result = await query.select("numero_cuenta");
+        if (result.error) throw result.error;
+        if (!result.data?.length) {
+          return res.status(409).json({ message: "La asistencia cambió en otra sesión. Actualiza la lista antes de guardar de nuevo." });
+        }
+      }
+    } else {
+      const nextRows = (inMemoryEstudiantes[tableName] || []).map(row => {
+        const change = row.seccion_id === seccion_id && changes.find(item => item.row === row);
+        return change ? { ...row, asistencias: change.asistencias, updated_at: new Date().toISOString() } : row;
+      });
+      savePersistentEstudiantes({ ...inMemoryEstudiantes, [tableName]: nextRows }, true);
+      inMemoryEstudiantes[tableName] = nextRows;
+    }
+    return res.json({ success: true, updatedCount: changes.length });
+  } catch (error) {
+    console.error("Error al guardar asistencia semanal:", error.message);
+    return res.status(500).json({ message: "No pudimos completar el guardado. Actualiza la lista antes de reintentar." });
+  }
+};
+
+export const saveWeeklyManuals = async (req, res) => {
+  try {
+    const { seccion_id, semana } = req.params;
+    const number = Number(semana);
+    const updates = req.body?.updates;
+    if (!Number.isInteger(number) || number < 1 || !Array.isArray(updates) || !updates.length ||
+      updates.some(item => !item?.numero_cuenta || !Array.isArray(item.manuales) || !item.manuales.length ||
+        item.manuales.some(manual => !manual?.tema_id || (manual.nota !== null &&
+          (typeof manual.nota !== "number" || !Number.isFinite(manual.nota) || manual.nota < 0 || manual.nota > 1)))) ||
+      new Set(updates.map(item => String(item.numero_cuenta))).size !== updates.length) {
+      return res.status(400).json({ message: "Envía notas de manuales entre 0 y 1 punto." });
+    }
+    const schedule = await getManualSchedule(seccion_id);
+    if (!schedule || !canViewSection(req.instructor, schedule.section)) {
+      return res.status(403).json({ message: "Solo el equipo docente de esta sección puede registrar manuales." });
+    }
+    const window = getManualsWindow(schedule.section, schedule.weeks, number, new Date(), schedule.events, schedule.deadlines);
+    if (!window.isOpen) return res.status(403).json({ message: window.reason });
+    let { topics, scores } = getLocalAcademicSettings(schedule.section.carrera);
+    const tableName = normalizeCarreraToTable(schedule.section.carrera);
+    const accounts = updates.map(item => String(item.numero_cuenta));
+    let rows = (inMemoryEstudiantes[tableName] || []).filter(row =>
+      row.seccion_id === seccion_id && accounts.includes(String(row.numero_cuenta)));
+    if (isSupabaseConfigured && supabase) {
+      const results = await Promise.all([
+        supabase.from("temario").select("*"),
+        supabase.from("configuracion_puntajes").select("*"),
+        supabase.from(tableName).select("*").eq("seccion_id", seccion_id).in("numero_cuenta", accounts)
+      ]);
+      const failure = results.find(result => result.error);
+      if (failure) throw failure.error;
+      const career = normalizeSectionCareer(schedule.section.carrera);
+      topics = results[0].data.filter(topic => normalizeSectionCareer(topic.carrera) === career);
+      scores = results[1].data.find(score => normalizeSectionCareer(score.carrera) === career) || {};
+      rows = results[2].data;
+    }
+    const allowed = topics.filter(topic => Number(topic.semana) === number && topic.tiene_manual !== false);
+    if (rows.length !== updates.length) return res.status(404).json({ message: "Actualiza la lista de estudiantes antes de guardar." });
+    if (updates.some(item => item.manuales.some(manual => !allowed.some(topic => String(topic.id) === String(manual.tema_id))))) {
+      return res.status(400).json({ message: "Algún manual no pertenece a la semana seleccionada." });
+    }
+    const changes = rows.map(row => {
+      const update = updates.find(item => String(item.numero_cuenta) === String(row.numero_cuenta));
+      const notas = { ...(row.notas || {}) };
+      for (const manual of update.manuales) {
+        const topic = allowed.find(item => String(item.id) === String(manual.tema_id));
+        delete notas[`manual_tema_${topic.numero_tema}`];
+        delete notas[`Manual de ${topic.titulo}`];
+        delete notas[topic.id];
+        if (manual.nota === null) delete notas[`manual_${topic.id}`];
+        else notas[`manual_${topic.id}`] = Math.round(manual.nota * 1000) / 1000;
+      }
+      const total = calculateStudentAcademicSummary(row, scores, topics, schedule.weeks, notas).total;
+      return { row, notas, total };
+    });
+    if (isSupabaseConfigured && supabase) {
+      for (const { row, notas, total } of changes) {
+        if (!getManualsWindow(schedule.section, schedule.weeks, number, new Date(), schedule.events, schedule.deadlines).isOpen) {
+          return res.status(403).json({ message: "El plazo terminó durante el guardado. Actualiza la lista para comprobar los registros." });
+        }
+        let query = supabase.from(tableName).update({ notas, total, updated_at: new Date().toISOString() })
+          .eq("seccion_id", seccion_id).eq("numero_cuenta", row.numero_cuenta);
+        query = row.notas === null ? query.is("notas", null) : query.eq("notas", JSON.stringify(row.notas));
+        const result = await query.select("numero_cuenta");
+        if (result.error) throw result.error;
+        if (!result.data?.length) return res.status(409).json({ message: "Las notas cambiaron en otra sesión. Actualiza la lista antes de guardar." });
+      }
+    } else {
+      const nextRows = (inMemoryEstudiantes[tableName] || []).map(row => {
+        const change = changes.find(item => item.row === row);
+        return change ? { ...row, notas: change.notas, total: change.total, updated_at: new Date().toISOString() } : row;
+      });
+      savePersistentEstudiantes({ ...inMemoryEstudiantes, [tableName]: nextRows }, true);
+      inMemoryEstudiantes[tableName] = nextRows;
+    }
+    return res.json({ success: true, updatedCount: changes.length });
+  } catch (error) {
+    console.error("Guardar manuales semanales:", error.message);
+    return res.status(500).json({ message: "No pudimos completar el guardado de manuales. Actualiza la lista antes de reintentar." });
+  }
+};

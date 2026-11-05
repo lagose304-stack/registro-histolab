@@ -3011,7 +3011,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                     )}
                     {seccion?.coordinador && (
                       <span className="sp-tag-pill">
-                        👨‍🏫 Coord: {seccion.coordinador}
+                        👨‍🏫 Titular de sección: {seccion.coordinador}
                       </span>
                     )}
                     <button

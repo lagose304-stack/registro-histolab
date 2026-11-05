@@ -15,7 +15,7 @@ import pruebasRoutes from "./routes/pruebas.routes.js";
 dotenv.config();
 
 const app = express();
-const CLIENT_URL = process.env.CLIENT_URL || "http://localhost:5173";
+const CLIENT_URL = process.env.CLIENT_URL || "http://127.0.0.1:43173";
 
 // Middlewares
 app.use(

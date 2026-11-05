@@ -27,7 +27,7 @@ import {
 } from "lucide-react";
 import { api } from "../services/api";
 import {
-  isInstructorTitular,
+  hasFullSectionAccess,
   isWeekAssignedToUser,
   getAssignedRecordForWeek,
   checkSectionSchedule,
@@ -84,7 +84,7 @@ export default function LiveQuizControlView({
 
   // Identificación del usuario y rol de instructor titular
   const currentUser = currentInstructor || api.auth.getCurrentInstructor();
-  const isTitular = useMemo(() => isInstructorTitular(currentUser, seccion), [currentUser, seccion]);
+  const hasFullAccess = useMemo(() => hasFullSectionAccess(currentUser, seccion), [currentUser, seccion]);
 
   // Verificación de horario exclusivo de la sección para el instructor asignado
   const scheduleCheck = useMemo(() => checkSectionSchedule(seccion), [seccion]);
@@ -96,12 +96,12 @@ export default function LiveQuizControlView({
 
   // Semanas visibles según permisos: el titular ve todas; el asignado solo donde tiene Crear/Revisar prueba
   const visibleSemanasConfig = useMemo(() => {
-    if (isTitular) return semanasConfig;
+    if (hasFullAccess) return semanasConfig;
     return semanasConfig.filter((s) => {
       const num = Number(s.numero_semana);
       return num && isWeekAssignedToUser(asignaciones, QUIZ_ROLES, num, currentUser, seccion);
     });
-  }, [isTitular, semanasConfig, asignaciones, QUIZ_ROLES, currentUser, seccion]);
+  }, [hasFullAccess, semanasConfig, asignaciones, QUIZ_ROLES, currentUser, seccion]);
 
   // Cargar semanas, temario, pruebas, asignaciones y estudiantes de la sección
   const loadInitialData = useCallback(async () => {
@@ -190,10 +190,10 @@ export default function LiveQuizControlView({
         });
         setSelectedSemana(Number(firstPub ? firstPub.numero_semana : visibleSemanasConfig[0].numero_semana));
       }
-    } else if (!isTitular) {
+    } else if (!hasFullAccess) {
       setSelectedSemana(null);
     }
-  }, [visibleSemanasConfig, selectedSemana, sectionQuizzes, isTitular]);
+  }, [visibleSemanasConfig, selectedSemana, sectionQuizzes, hasFullAccess]);
 
   // Registro del docente asignado a la semana seleccionada
   const assignedRecord = useMemo(() => {
@@ -290,14 +290,14 @@ export default function LiveQuizControlView({
     if (!seccion?.id || !selectedSemana) return;
 
     // Validación estricta de permisos: solo asignado a crear/revisar o titular
-    const canControl = isTitular || isWeekAssignedToUser(asignaciones, QUIZ_ROLES, selectedSemana, currentUser, seccion);
+    const canControl = hasFullAccess || isWeekAssignedToUser(asignaciones, QUIZ_ROLES, selectedSemana, currentUser, seccion);
     if (!canControl) {
-      notifyRef.current("Solo el docente asignado a esta prueba semanal o el Instructor Titular pueden controlar la sesión en vivo.", "error");
+      notifyRef.current("El control en vivo requiere acceso completo o una asignación para esta prueba.", "error");
       return;
     }
 
     // Regla de horario exclusivo: el instructor asignado ÚNICAMENTE puede habilitar la prueba en vivo el mismo día y dentro del rango de horario de la sección
-    if (accion === "habilitar" && !isTitular) {
+    if (accion === "habilitar" && !hasFullAccess) {
       const currentSched = checkSectionSchedule(seccion);
       if (!currentSched.isWithin) {
         notifyRef.current(
@@ -311,7 +311,7 @@ export default function LiveQuizControlView({
     setActionLoading(true);
 
     try {
-      const payload = { accion, es_titular: isTitular, ...extra };
+      const payload = { accion, es_titular: hasFullAccess, ...extra };
       const res = await api.pruebas.controlLive(seccion.id, selectedSemana, payload);
       if (!res?.success) {
         throw new Error(res?.message || "Error al enviar comando");
@@ -515,7 +515,7 @@ export default function LiveQuizControlView({
       </div>
 
       {/* 2. SELECTOR DE SEMANA O RESTRICCIÓN DE PERMISOS */}
-      {!loading && !isTitular && visibleSemanasConfig.length === 0 ? (
+      {!loading && !hasFullAccess && visibleSemanasConfig.length === 0 ? (
         <div
           style={{
             background: "#ffffff",
@@ -547,7 +547,7 @@ export default function LiveQuizControlView({
           </h3>
           <p style={{ margin: "0 auto", maxWidth: "560px", fontSize: "0.86rem", color: "#64748b", lineHeight: 1.5 }}>
             El control en vivo de las pruebas semanales solo puede ser gestionado por el docente asignado a la
-            creación y revisión de la prueba de cada semana, o por el <strong>Instructor Titular</strong> de la sección.
+            creación y revisión de la prueba de cada semana, o por quienes tienen acceso completo a la sección.
           </p>
         </div>
       ) : (
@@ -570,7 +570,7 @@ export default function LiveQuizControlView({
                 <span style={{ fontSize: "0.82rem", fontWeight: 800, color: "#334155", textTransform: "uppercase" }}>
                   Selecciona la Semana Académica a Controlar:
                 </span>
-                {isTitular && (
+                {hasFullAccess && (
                   <span
                     style={{
                       display: "inline-flex",
@@ -586,7 +586,7 @@ export default function LiveQuizControlView({
                     }}
                   >
                     <Crown size={12} />
-                    <span>Instructor Titular (Control total)</span>
+                    <span>Acceso completo</span>
                   </span>
                 )}
               </div>
@@ -666,7 +666,7 @@ export default function LiveQuizControlView({
                     </span>
                   </div>
 
-                  {!isTitular && (
+                  {!hasFullAccess && (
                     <span
                       style={{
                         padding: "0.15rem 0.55rem",
@@ -682,9 +682,9 @@ export default function LiveQuizControlView({
                     </span>
                   )}
 
-                  {isTitular && (
+                  {hasFullAccess && (
                     <span style={{ fontSize: "0.7rem", color: "#64748b" }}>
-                      Como titular puedes habilitar y controlar esta prueba en vivo sin restricciones.
+                      Con acceso completo puedes habilitar y controlar esta prueba en vivo sin restricciones.
                     </span>
                   )}
                 </div>
@@ -892,7 +892,7 @@ export default function LiveQuizControlView({
                 {/* 1. CASO INACTIVA: BOTÓN HABILITAR */}
                 {liveSession.estado === "inactiva" && (
                   <div style={{ display: "flex", flexDirection: "column", width: "100%", gap: "0.85rem" }}>
-                    {!isTitular && !scheduleCheck.isWithin && (
+                    {!hasFullAccess && !scheduleCheck.isWithin && (
                       <div
                         style={{
                           background: "#fffbeb",
@@ -939,31 +939,31 @@ export default function LiveQuizControlView({
                     <button
                       type="button"
                       onClick={() => handleExecuteControl("habilitar", { duracion_segundos: activeQuiz.tiempo_por_pregunta_segundos || 90 })}
-                      disabled={actionLoading || (!isTitular && !scheduleCheck.isWithin)}
+                      disabled={actionLoading || (!hasFullAccess && !scheduleCheck.isWithin)}
                       style={{
                         width: "100%",
                         padding: "0.9rem 1.5rem",
                         borderRadius: "0.75rem",
-                        border: !isTitular && !scheduleCheck.isWithin ? "1.5px solid #cbd5e1" : "none",
-                        background: !isTitular && !scheduleCheck.isWithin
+                        border: !hasFullAccess && !scheduleCheck.isWithin ? "1.5px solid #cbd5e1" : "none",
+                        background: !hasFullAccess && !scheduleCheck.isWithin
                           ? "#f1f5f9"
                           : "linear-gradient(135deg, #16a34a 0%, #15803d 100%)",
-                        color: !isTitular && !scheduleCheck.isWithin ? "#94a3b8" : "#ffffff",
+                        color: !hasFullAccess && !scheduleCheck.isWithin ? "#94a3b8" : "#ffffff",
                         fontSize: "0.95rem",
                         fontWeight: 900,
-                        cursor: (!isTitular && !scheduleCheck.isWithin) || actionLoading ? "not-allowed" : "pointer",
+                        cursor: (!hasFullAccess && !scheduleCheck.isWithin) || actionLoading ? "not-allowed" : "pointer",
                         display: "flex",
                         alignItems: "center",
                         justifyContent: "center",
                         gap: "0.55rem",
-                        boxShadow: !isTitular && !scheduleCheck.isWithin ? "none" : "0 4px 14px rgba(22, 163, 74, 0.35)",
+                        boxShadow: !hasFullAccess && !scheduleCheck.isWithin ? "none" : "0 4px 14px rgba(22, 163, 74, 0.35)",
                         transition: "all 0.15s ease"
                       }}
-                      title={!isTitular && !scheduleCheck.isWithin ? scheduleCheck.reason : "Habilitar sala en vivo"}
+                      title={!hasFullAccess && !scheduleCheck.isWithin ? scheduleCheck.reason : "Habilitar sala en vivo"}
                     >
-                      {!isTitular && !scheduleCheck.isWithin ? <Lock size={18} /> : <Unlock size={18} />}
+                      {!hasFullAccess && !scheduleCheck.isWithin ? <Lock size={18} /> : <Unlock size={18} />}
                       <span>
-                        {!isTitular && !scheduleCheck.isWithin
+                        {!hasFullAccess && !scheduleCheck.isWithin
                           ? `Habilitación Bloqueada (Fuera del Horario: ${seccion?.dia || ""} ${seccion?.hora_inicio || ""})`
                           : "Habilitar Prueba en Vivo (Abrir Sala de Espera)"}
                       </span>

@@ -1,36 +1,19 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import {
-  BookOpen,
-  Search,
-  Save,
-  CheckCircle2,
-  AlertTriangle,
-  Users,
-  Calendar,
-  ArrowLeft,
-  RefreshCw,
-  AlertCircle,
-  ShieldAlert,
-  ShieldCheck,
-  CheckCheck,
-  Lock,
-  Sparkles,
-  Info,
-  HelpCircle,
-  FileText,
-  User
-} from "lucide-react";
+import { ArrowLeft, BookOpen, Calendar, Clock, Save, Search, Users } from "lucide-react";
 import { api } from "../services/api";
-import {
-  calculateStudentAcademicSummary,
-  getCanonicalManualGrade
-} from "../utils/academicEngine";
-import {
-  isInstructorTitular,
-  isWeekAssignedToUser,
-  matchesInstructor,
-  SECTION_ROLES
-} from "../utils/sectionRoleUtils";
+import { getCanonicalManualGrade } from "../utils/academicEngine";
+import { canViewSection } from "../../../shared/sectionAccess.mjs";
+import { getManualsWindow } from "../../../shared/manualsWindow.mjs";
+import { getCurrentAcademicWeek } from "../../../shared/academicWeek.mjs";
+import { displaySectionCode } from "../../../shared/sectionCode.mjs";
+import "./WeeklyManualsGradingView.css";
+
+const dateTimeFormatter = new Intl.DateTimeFormat("es-HN", {
+  timeZone: "America/Tegucigalpa", weekday: "short", day: "numeric", month: "short", hour: "numeric", minute: "2-digit", hour12: true
+});
+const dateFormatter = new Intl.DateTimeFormat("es-HN", {
+  timeZone: "UTC", weekday: "long", day: "numeric", month: "long", year: "numeric"
+});
 
 export default function WeeklyManualsGradingView({
   seccion,
@@ -42,9 +25,15 @@ export default function WeeklyManualsGradingView({
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [loadError, setLoadError] = useState("");
+  const [saveError, setSaveError] = useState("");
+  const [deadlines, setDeadlines] = useState([]);
+  const [events, setEvents] = useState([]);
+  const [now, setNow] = useState(() => new Date());
+  const savedStudents = useRef([]);
 
   const currentUser = currentInstructor || api.auth.getCurrentInstructor();
-  const isTitular = useMemo(() => isInstructorTitular(currentUser, seccion), [currentUser, seccion]);
+  const canGradeManuals = canViewSection(currentUser, seccion);
 
   // Referencia estable de notify
   const notifyRef = useRef(notify);
@@ -57,26 +46,17 @@ export default function WeeklyManualsGradingView({
   const [estudiantes, setEstudiantes] = useState([]);
   const [semanasConfig, setSemanasConfig] = useState([]);
   const [temario, setTemario] = useState([]);
-  const [asignaciones, setAsignaciones] = useState([]);
-  const [configPuntajes, setConfigPuntajes] = useState(null);
 
-  // Selección de semana persistente por sección
-  const [selectedSemana, setSelectedSemana] = useState(() => {
-    try {
-      const saved = sessionStorage.getItem(`histolab_manuales_semana_${seccion?.id}`);
-      return saved ? Number(saved) : 1;
-    } catch {
-      return 1;
-    }
-  });
-
-  const handleSelectSemana = (num) => {
-    const n = Number(num);
-    setSelectedSemana(n);
-    hasInitializedWeekRef.current = true;
-    try {
-      sessionStorage.setItem(`histolab_manuales_semana_${seccion?.id}`, String(n));
-    } catch (_) {}
+  const [selectedSemana, setSelectedSemana] = useState(1);
+  const discardChanges = () => {
+    setEstudiantes(savedStudents.current);
+    setHasUnsavedChanges(false);
+    setSaveError("");
+  };
+  const handleSelectSemana = value => {
+    if (hasUnsavedChanges && !window.confirm("Hay notas sin guardar. ¿Quieres descartarlas y cambiar de semana?")) return;
+    discardChanges();
+    setSelectedSemana(Number(value));
   };
 
   const [searchTerm, setSearchTerm] = useState("");
@@ -87,15 +67,18 @@ export default function WeeklyManualsGradingView({
   const loadData = useCallback(async (isInitial = false) => {
     if (!seccion?.id) return;
     if (isInitial) setLoading(true);
+    setLoadError("");
 
     try {
-      const [resEst, resSemanas, resTemario, resAsig, resPuntajes] = await Promise.all([
+      const [resEst, resSchedule, resTemario] = await Promise.all([
         api.estudiantes.getBySeccion(seccion.id, carrera),
-        api.semanas.getConfig(carrera).catch(() => ({ data: [] })),
-        api.temario.getAll({ carrera }).catch(() => ({ data: [] })),
-        api.asignaciones.getBySeccion(seccion.id).catch(() => ({ data: [] })),
-        api.temario.getPuntajes(carrera).catch(() => ({ data: null }))
+        api.estudiantes.getManualSchedule(seccion.id),
+        api.temario.getAll({ carrera })
       ]);
+      const schedule = resSchedule.weeks || [];
+      setSemanasConfig(schedule);
+      setEvents(resSchedule.events || []);
+      setDeadlines(resSchedule.data || []);
 
       if (resEst?.data) {
         // Ordenar alfabéticamente por nombre_completo
@@ -103,41 +86,27 @@ export default function WeeklyManualsGradingView({
           (a.nombre_completo || "").localeCompare(b.nombre_completo || "")
         );
         setEstudiantes(sorted);
-      }
-
-      if (resSemanas?.data) {
-        setSemanasConfig(resSemanas.data);
+        savedStudents.current = sorted;
       }
 
       if (resTemario?.data) {
         setTemario(resTemario.data);
       }
 
-      if (resAsig?.data || Array.isArray(resAsig)) {
-        setAsignaciones(resAsig.data || resAsig);
-      }
-
-      if (resPuntajes?.data) {
-        setConfigPuntajes(resPuntajes.data);
-      }
-
-      // Solo elegir semana por defecto si no se había seleccionado ninguna previamente
       if (!hasInitializedWeekRef.current) {
-        const savedWeek = sessionStorage.getItem(`histolab_manuales_semana_${seccion?.id}`);
-        if (!savedWeek && resSemanas?.data && resSemanas.data.length > 0) {
-          const actual = resSemanas.data.find((s) => s.es_semana_actual);
-          if (actual && actual.numero_semana) {
-            handleSelectSemana(Number(actual.numero_semana));
-          } else {
-            const first = Number(resSemanas.data[0].numero_semana);
-            if (first) handleSelectSemana(first);
-          }
-        }
+        const openWeek = schedule.find(week =>
+          getManualsWindow(seccion, schedule, week.numero_semana, new Date(),
+            resSchedule.events || [], resSchedule.data || []).isOpen);
+        const current = getCurrentAcademicWeek(schedule);
+        const previous = schedule.filter(week => !week.es_examen && week.temas !== "EXAMEN" &&
+          Number(week.numero_semana) < Number(current?.numero_semana)).sort((a, b) => b.numero_semana - a.numero_semana)[0];
+        const initial = openWeek || previous || schedule.find(week => !week.es_examen && week.temas !== "EXAMEN");
+        if (initial) setSelectedSemana(Number(initial.numero_semana));
         hasInitializedWeekRef.current = true;
       }
     } catch (err) {
       console.error("Error al cargar notas de manuales:", err);
-      notifyRef.current("Error al cargar la información de estudiantes", "error");
+      setLoadError("No pudimos cargar los manuales y su programación.");
     } finally {
       setLoading(false);
     }
@@ -201,13 +170,7 @@ export default function WeeklyManualsGradingView({
       .sort((a, b) => a.numero_semana - b.numero_semana);
   }, [semanasConfig, temario]);
 
-  // Semanas filtradas por rol del usuario (el titular ve todas; los asignados solo sus semanas)
-  const availableWeeks = useMemo(() => {
-    if (isTitular) return allAvailableWeeks;
-    return allAvailableWeeks.filter((w) =>
-      isWeekAssignedToUser(asignaciones, SECTION_ROLES.MANUALES, w.numero_semana, currentUser, seccion)
-    );
-  }, [allAvailableWeeks, isTitular, asignaciones, currentUser, seccion]);
+  const availableWeeks = canGradeManuals ? allAvailableWeeks : [];
 
   // Si la semana seleccionada coincide con un examen o no está en las disponibles, ajustar
   useEffect(() => {
@@ -235,55 +198,30 @@ export default function WeeklyManualsGradingView({
       .sort((a, b) => (Number(a.numero_tema) || 0) - (Number(b.numero_tema) || 0));
   }, [temario, selectedSemana, currentWeekInfo.esExamen]);
 
-  // Docente asignado al rol de "Subir nota de manuales semanal" en esta semana
-  const assignedRecordForWeek = useMemo(() => {
-    const targetRef = `semana_${selectedSemana}`;
-    return (
-      asignaciones.find(
-        (a) =>
-          a.tipo_asignacion === "Subir nota de manuales semanal" &&
-          a.referencia_id === targetRef
-      ) || null
-    );
-  }, [asignaciones, selectedSemana]);
-
-  const assignedInstructorForWeek = assignedRecordForWeek?.instructor_nombre || null;
-
-  // 🛡️ REGLA ESTRICTA: El usuario solo puede editar la nota de manuales si le asignaron el rol en esta semana o es titular
-  const canEdit = useMemo(() => {
-    if (currentWeekInfo.esExamen) return false;
-    if (isTitular) return true;
-    if (!assignedRecordForWeek || !assignedRecordForWeek.instructor_id) {
-      return false;
-    }
-    return matchesInstructor(currentUser, assignedRecordForWeek.instructor_id, assignedRecordForWeek.instructor_nombre, seccion);
-  }, [assignedRecordForWeek, currentUser, seccion, isTitular, currentWeekInfo.esExamen]);
-
+  const manualWindow = getManualsWindow(seccion, semanasConfig, selectedSemana, now, events, deadlines);
+  const canEdit = canGradeManuals && manualWindow.isOpen;
+  useEffect(() => {
+    const delays = [manualWindow.opensAt, manualWindow.closesAt].filter(Boolean)
+      .map(value => Date.parse(value) - now.getTime() + 1).filter(value => value > 0);
+    const timer = setTimeout(() => setNow(new Date()), Math.min(60_000, ...delays));
+    const refresh = () => setNow(new Date());
+    window.addEventListener("focus", refresh);
+    return () => { clearTimeout(timer); window.removeEventListener("focus", refresh); };
+  }, [manualWindow.opensAt, manualWindow.closesAt, now]);
   // Helper para leer la nota de manual de un estudiante para un tema
   const getStudentManualGrade = (est, tema) => {
     if (!est) return "";
+    if (Object.hasOwn(est.notas || {}, `manual_${tema.id}`)) return est.notas[`manual_${tema.id}`] ?? "";
     const val = getCanonicalManualGrade(est.notas || {}, tema, est);
     if (val === undefined || val === null || val === "") return "";
     return val;
-  };
-
-  // Helper para recalcular el total de un estudiante al modificar una nota
-  const recalculateTotal = (est, updatedNotas) => {
-    const summary = calculateStudentAcademicSummary(
-      est,
-      configPuntajes,
-      temario,
-      semanasConfig,
-      updatedNotas
-    );
-    return summary.total;
   };
 
   // Manejar cambio en la calificación de un manual con soporte para hasta 3 decimales (Máx. 1.000 pt)
   const handleGradeChange = (numero_cuenta, tema, rawValue) => {
     if (!canEdit) {
       notifyRef.current(
-        `Solo ${assignedInstructorForWeek || "el docente asignado"} tiene permisos para editar manuales en la Semana ${selectedSemana}.`,
+        "Elige una semana de clase para registrar notas de manuales.",
         "warning"
       );
       return;
@@ -298,10 +236,10 @@ export default function WeeklyManualsGradingView({
         prev.map((est) => {
           if (est.numero_cuenta !== numero_cuenta) return est;
           const currentNotas = { ...(est.notas || {}) };
-          delete currentNotas[`manual_${tema.id}`];
+          currentNotas[`manual_${tema.id}`] = null;
           delete currentNotas[`manual_tema_${tema.numero_tema}`];
-          const nextTotal = recalculateTotal(est, currentNotas);
-          return { ...est, notas: currentNotas, total: nextTotal };
+
+          return { ...est, notas: currentNotas };
         })
       );
       setHasUnsavedChanges(true);
@@ -336,12 +274,10 @@ export default function WeeklyManualsGradingView({
           [keyId]: storedVal
         };
 
-        const nextTotal = recalculateTotal(est, updatedNotas);
 
         return {
           ...est,
-          notas: updatedNotas,
-          total: nextTotal
+          notas: updatedNotas
         };
       })
     );
@@ -381,12 +317,10 @@ export default function WeeklyManualsGradingView({
           [keyId]: roundedNum
         };
 
-        const nextTotal = recalculateTotal(est, updatedNotas);
 
         return {
           ...est,
-          notas: updatedNotas,
-          total: nextTotal
+          notas: updatedNotas
         };
       })
     );
@@ -409,16 +343,14 @@ export default function WeeklyManualsGradingView({
       prev.map((est) => {
         const updatedNotas = { ...(est.notas || {}) };
         weekTopics.forEach((t) => {
-          delete updatedNotas[`manual_${t.id}`];
+          updatedNotas[`manual_${t.id}`] = null;
           delete updatedNotas[`manual_tema_${t.numero_tema}`];
         });
 
-        const nextTotal = recalculateTotal(est, updatedNotas);
 
         return {
           ...est,
-          notas: updatedNotas,
-          total: nextTotal
+          notas: updatedNotas
         };
       })
     );
@@ -434,42 +366,32 @@ export default function WeeklyManualsGradingView({
       return;
     }
 
-    // 🔒 Validación Académica Estricta: Ninguna nota de manual puede superar 1 punto
-    for (const est of estudiantes) {
-      const notas = est.notas || {};
-      for (const [k, v] of Object.entries(notas)) {
-        const numVal = Number(v);
-        if (!isNaN(numVal) && (k.startsWith("manual_") || k.startsWith("Manual de ")) && numVal > 1) {
-          notifyRef.current(
-            `No se puede guardar: El estudiante "${est.nombre_completo || est.numero_cuenta}" tiene una nota de manual de ${numVal} pts. El valor máximo permitido es 1.000 punto.`,
-            "error"
-          );
-          return;
-        }
-      }
+    if (!getManualsWindow(seccion, semanasConfig, selectedSemana, new Date(), events, deadlines).isOpen) {
+      setNow(new Date());
+      return;
     }
-
+    if (saving || !estudiantes.length) return;
     setSaving(true);
+    setSaveError("");
     try {
-      const updates = estudiantes.map((est) => ({
-        numero_cuenta: est.numero_cuenta,
-        notas: est.notas || {},
-        asistencias: est.asistencias || {},
-        primer_examen: est.primer_examen ?? 0,
-        segundo_examen: est.segundo_examen ?? 0,
-        tercer_examen: est.tercer_examen ?? 0,
-        total: est.total ?? 0
-      }));
-
-      await api.estudiantes.saveBatch(seccion.id, updates, carrera);
+      const previous = new Map(savedStudents.current.map(student => [String(student.numero_cuenta), student]));
+      const updates = estudiantes.map(student => {
+        const saved = previous.get(String(student.numero_cuenta));
+        const manuales = weekTopics.flatMap(topic => {
+          const value = getStudentManualGrade(student, topic);
+          const oldValue = getStudentManualGrade(saved, topic);
+          if (value === oldValue) return [];
+          return [{ tema_id: topic.id, nota: value === "" ? null : Number(value) }];
+        });
+        return { numero_cuenta: student.numero_cuenta, manuales };
+      }).filter(student => student.manuales.length);
+      if (updates.length) await api.estudiantes.saveManualGrades(seccion.id, selectedSemana, updates);
+      savedStudents.current = estudiantes;
       setHasUnsavedChanges(false);
-      notifyRef.current("¡Notas de manuales guardadas con éxito!", "success");
-    } catch (err) {
-      console.error("Error al guardar notas de manuales:", err);
-      notifyRef.current(err.response?.data?.message || "Error al guardar las notas en el servidor", "error");
-    } finally {
-      setSaving(false);
-    }
+      notifyRef.current("Notas de manuales guardadas", "success");
+    } catch (error) {
+      setSaveError(error.message || "No pudimos guardar las notas.");
+    } finally { setSaving(false); }
   };
 
   // Estadísticas de la semana seleccionada
@@ -503,17 +425,6 @@ export default function WeeklyManualsGradingView({
     };
   }, [estudiantes, weekTopics]);
 
-  // Alumnos con notas de manual que exceden el límite de 1.000 punto
-  const invalidManualStudents = useMemo(() => {
-    return estudiantes.filter((est) => {
-      const notas = est.notas || {};
-      return Object.entries(notas).some(([k, v]) => {
-        const num = Number(v);
-        return !isNaN(num) && (k.startsWith("manual_") || k.startsWith("Manual de ")) && num > 1;
-      });
-    });
-  }, [estudiantes]);
-
   // Filtrado por búsqueda
   const filteredEstudiantes = useMemo(() => {
     if (!searchTerm.trim()) return estudiantes;
@@ -521,880 +432,104 @@ export default function WeeklyManualsGradingView({
     return estudiantes.filter(
       (e) =>
         (e.nombre_completo || "").toLowerCase().includes(s) ||
-        (e.numero_cuenta || "").toLowerCase().includes(s)
+        String(e.numero_cuenta || "").toLowerCase().includes(s)
     );
   }, [estudiantes, searchTerm]);
 
-  if (loading) {
-    return (
-      <div
-        className="glass-panel"
-        style={{
-          padding: "3.5rem",
-          background: "#ffffff",
-          borderRadius: "1rem",
-          border: "1px solid #e2e8f0",
-          textAlign: "center",
-          color: "#64748b",
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          gap: "1rem"
-        }}
-      >
-        <RefreshCw size={28} className="animate-spin" color="#2563eb" />
-        <span style={{ fontSize: "0.95rem", fontWeight: 700 }}>
-          Cargando manuales y calificaciones de la sección...
-        </span>
-      </div>
-    );
-  }
-
   return (
-    <div
-      className="glass-panel animate-fade-in"
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        gap: "1.5rem"
-      }}
-    >
-      {/* =================================================================== */}
-      {/* 1. CABECERA DEL MÓDULO                                             */}
-      {/* =================================================================== */}
-      <div
-        style={{
-          padding: "1.5rem 1.75rem",
-          background: "#ffffff",
-          borderRadius: "1.1rem",
-          border: "1px solid #e2e8f0",
-          boxShadow: "0 4px 15px -3px rgba(0, 0, 0, 0.04)",
-          display: "flex",
-          flexDirection: "column",
-          gap: "1.1rem"
-        }}
-      >
-        {/* Fila 1: Título, Sección, Botón Volver y Botón Guardar */}
-        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: "1rem" }}>
-          <div>
-            <div style={{ display: "flex", alignItems: "center", gap: "0.65rem", flexWrap: "wrap", marginBottom: "0.35rem" }}>
-              {!hideBackButton && (
-                <button
-                  onClick={onClose}
-                  style={{
-                    background: "#f1f5f9",
-                    border: "none",
-                    borderRadius: "0.5rem",
-                    padding: "0.4rem 0.65rem",
-                    cursor: "pointer",
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: "0.3rem",
-                    color: "#475569",
-                    fontSize: "0.8rem",
-                    fontWeight: 700,
-                    marginRight: "0.35rem"
-                  }}
-                  title="Volver a los módulos de la sección"
-                >
-                  <ArrowLeft size={15} />
-                  <span>Volver</span>
-                </button>
-              )}
-
-              <div
-                style={{
-                  width: "34px",
-                  height: "34px",
-                  borderRadius: "0.55rem",
-                  background: "linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)",
-                  color: "#ffffff",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center"
-                }}
-              >
-                <BookOpen size={20} />
-              </div>
-
-              <h2 style={{ fontSize: "1.35rem", fontWeight: 900, color: "#0f172a", margin: 0, letterSpacing: "-0.01em" }}>
-                Subir Nota de Manuales
-              </h2>
-
-              <span
-                style={{
-                  background: "linear-gradient(135deg, #0284c7 0%, #0369a1 100%)",
-                  color: "#ffffff",
-                  padding: "0.2rem 0.65rem",
-                  borderRadius: "0.45rem",
-                  fontSize: "0.75rem",
-                  fontWeight: 900,
-                  letterSpacing: "0.03em"
-                }}
-              >
-                {seccion?.codigo}
-              </span>
-
-              <span
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "0.3rem",
-                  background: "#f1f5f9",
-                  color: "#475569",
-                  padding: "0.2rem 0.6rem",
-                  borderRadius: "9999px",
-                  fontSize: "0.74rem",
-                  fontWeight: 700
-                }}
-              >
-                <Users size={12} />
-                <span>{estudiantes.length} Alumnos</span>
-              </span>
-            </div>
-
-            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap", fontSize: "0.82rem", color: "#64748b" }}>
-              <span>{carrera}</span>
-              <span>•</span>
-              <span>{seccion?.dia} {seccion?.hora_inicio} - {seccion?.hora_fin}</span>
-              {assignedInstructorForWeek && (
-                <>
-                  <span>•</span>
-                  <span style={{ color: "#2563eb", fontWeight: 700 }}>
-                    Docente asignado: {assignedInstructorForWeek}
-                  </span>
-                </>
-              )}
-            </div>
-          </div>
-
-          {/* Botones de Acción / Guardar */}
-          <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
-            {hasUnsavedChanges && (
-              <span
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "0.35rem",
-                  fontSize: "0.76rem",
-                  fontWeight: 800,
-                  color: "#d97706",
-                  background: "#fef3c7",
-                  border: "1px solid #fde68a",
-                  padding: "0.35rem 0.75rem",
-                  borderRadius: "9999px"
-                }}
-              >
-                <AlertCircle size={13} />
-                <span>Cambios sin guardar</span>
-              </span>
-            )}
-
-            <button
-              onClick={handleSaveAll}
-              disabled={saving || !canEdit}
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "0.5rem",
-                background: !canEdit
-                  ? "#94a3b8"
-                  : hasUnsavedChanges
-                  ? "linear-gradient(135deg, #10b981 0%, #059669 100%)"
-                  : "linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)",
-                color: "#ffffff",
-                border: "none",
-                padding: "0.6rem 1.25rem",
-                borderRadius: "0.65rem",
-                fontSize: "0.88rem",
-                fontWeight: 800,
-                cursor: (!canEdit || saving) ? "not-allowed" : "pointer",
-                boxShadow: canEdit
-                  ? (hasUnsavedChanges ? "0 4px 14px rgba(16, 185, 129, 0.3)" : "0 4px 14px rgba(37, 99, 235, 0.25)")
-                  : "none",
-                opacity: (!canEdit || saving) ? 0.7 : 1,
-                transition: "all 0.2s ease"
-              }}
-              title={!canEdit ? "No tienes permisos de edición para esta semana" : "Guardar calificaciones"}
-            >
-              {saving ? (
-                <>
-                  <RefreshCw size={15} className="animate-spin" />
-                  <span>Guardando...</span>
-                </>
-              ) : !canEdit ? (
-                <>
-                  <Lock size={15} />
-                  <span>Solo Lectura</span>
-                </>
-              ) : (
-                <>
-                  <Save size={15} />
-                  <span>Guardar Notas de Manuales</span>
-                </>
-              )}
-            </button>
-          </div>
+    <section className="user-directory weekly-manuals" aria-labelledby="weekly-manuals-title">
+      {!hideBackButton && <button type="button" className="user-button user-button--back" onClick={onClose}><ArrowLeft size={17} aria-hidden="true" /> Volver a módulos</button>}
+      <header className="user-directory__hero">
+        <div>
+          <p className="user-directory__eyebrow"><BookOpen size={17} aria-hidden="true" /> Sección {displaySectionCode(seccion?.codigo)} · {carrera}</p>
+          <h2 id="weekly-manuals-title">Subir nota de manuales</h2>
+          <p>Registra las notas de cada tema durante su plazo de carga.</p>
         </div>
-
-        {availableWeeks.length === 0 ? (
-          <div
-            style={{
-              background: "#ffffff",
-              border: "1.5px dashed #cbd5e1",
-              borderRadius: "1rem",
-              padding: "3.5rem 2rem",
-              textAlign: "center",
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              gap: "1rem"
-            }}
-          >
-            <div
-              style={{
-                width: "56px",
-                height: "56px",
-                borderRadius: "50%",
-                background: "#f8fafc",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                color: "#64748b",
-                border: "1px solid #e2e8f0"
-              }}
-            >
-              <HelpCircle size={28} />
+      </header>
+      {loading ? <p className="user-directory__state" role="status">Cargando manuales…</p> : loadError ? (
+        <div className="user-directory__state" role="alert"><p>{loadError}</p><button type="button" className="user-button" onClick={() => loadData(true)}>Reintentar</button></div>
+      ) : !availableWeeks.length ? <p className="user-directory__state">No hay semanas de clase con manuales disponibles.</p> : (
+        <>
+          <div className="weekly-manuals__controls">
+            <div className="weekly-manuals__week">
+              <label className="user-field">Semana del manual
+                <select aria-label="Semana del manual" value={selectedSemana} disabled={saving} onChange={event => handleSelectSemana(event.target.value)}>
+                  {availableWeeks.map(week => <option key={week.numero_semana} value={week.numero_semana}>{getWeekDisplayName(week)} · {week.parcial}</option>)}
+                </select>
+              </label>
+              <p><Users size={16} aria-hidden="true" /> Todos los instructores de la sección</p>
+              <p>Calificación máxima por manual <strong>1.000 punto</strong></p>
             </div>
-            <h3 style={{ margin: 0, fontSize: "1.2rem", fontWeight: 800, color: "#1e293b" }}>
-              No tienes semanas asignadas para calificar manuales
-            </h3>
-            <p style={{ margin: 0, fontSize: "0.88rem", color: "#64748b", maxWidth: "480px", lineHeight: 1.5 }}>
-              En esta sección no tienes asignado el rol oficial de <strong>Subir nota de manuales semanal</strong> en ninguna semana. Si requieres acceso para ingresar notas, contacta al instructor titular ({seccion?.coordinador || "Coordinador de Sección"}).
-            </p>
-          </div>
-        ) : (
-          <>
-        {/* =================================================================== */}
-        {/* BANNER DE REGLA Y PERMISO DE ASIGNACIÓN                             */}
-        {/* =================================================================== */}
-        {currentWeekInfo.esExamen ? (
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "0.55rem",
-              background: "#eff6ff",
-              border: "1.5px solid #bfdbfe",
-              borderRadius: "0.75rem",
-              padding: "0.65rem 1rem",
-              color: "#1e40af",
-              fontSize: "0.82rem",
-              fontWeight: 700
-            }}
-          >
-            <Info size={18} color="#2563eb" style={{ flexShrink: 0 }} />
-            <span>
-              <strong>Semana de Examen Parcial:</strong> En las semanas de examen no hay manual programado para calificar.
-            </span>
-          </div>
-        ) : isTitular ? (
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "0.55rem",
-              background: "#f0fdf4",
-              border: "1.5px solid #86efac",
-              borderRadius: "0.75rem",
-              padding: "0.65rem 1rem",
-              color: "#166534",
-              fontSize: "0.82rem",
-              fontWeight: 700
-            }}
-          >
-            <ShieldCheck size={18} color="#16a34a" style={{ flexShrink: 0 }} />
-            <span>
-              Tienes acceso y autorización total como <strong>Instructor Titular</strong> de la sección. {assignedInstructorForWeek ? `Docente asignado a esta semana: ${assignedInstructorForWeek}.` : "Esta semana no tiene docente asignado."}
-            </span>
-          </div>
-        ) : canEdit ? (
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "0.55rem",
-              background: "#f0fdf4",
-              border: "1.5px solid #86efac",
-              borderRadius: "0.75rem",
-              padding: "0.65rem 1rem",
-              color: "#166534",
-              fontSize: "0.82rem",
-              fontWeight: 700
-            }}
-          >
-            <ShieldCheck size={18} color="#16a34a" style={{ flexShrink: 0 }} />
-            <span>
-              Tienes asignado el rol oficial de <strong>Subir nota de manuales semanal</strong> en la <strong>Semana {selectedSemana}</strong>. Puedes ingresar y modificar calificaciones.
-            </span>
-          </div>
-        ) : (
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "0.55rem",
-              background: "#fffbeb",
-              border: "1.5px solid #fde68a",
-              borderRadius: "0.75rem",
-              padding: "0.65rem 1rem",
-              color: "#92400e",
-              fontSize: "0.82rem",
-              fontWeight: 700
-            }}
-          >
-            <ShieldAlert size={18} color="#d97706" style={{ flexShrink: 0 }} />
-            <span>
-              <strong>Modo de Solo Lectura:</strong> Para la <strong>Semana {selectedSemana}</strong>, la subida de manuales está asignada a <strong>{assignedInstructorForWeek || "ningún docente (sin asignar)"}</strong>. Solo la persona asignada tiene autorización para calificar.
-            </span>
-          </div>
-        )}
-
-        {/* =================================================================== */}
-        {/* SELECTOR DE SEMANA Y TEMAS CONFIGURADOS                             */}
-        {/* =================================================================== */}
-        <div
-          style={{
-            background: "#f0fdf4",
-            border: "1.5px solid #bbf7d0",
-            borderRadius: "0.85rem",
-            padding: "0.85rem 1.15rem",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            flexWrap: "wrap",
-            gap: "1rem"
-          }}
-        >
-          {/* Selector de Semana */}
-          <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}>
-            <span style={{ fontSize: "0.82rem", fontWeight: 800, color: "#166534", textTransform: "uppercase", letterSpacing: "0.02em" }}>
-              Semana a Calificar:
-            </span>
-
-            <select
-              value={selectedSemana}
-              onChange={(e) => handleSelectSemana(Number(e.target.value))}
-              style={{
-                padding: "0.45rem 0.85rem",
-                borderRadius: "0.55rem",
-                border: "1.5px solid #16a34a",
-                background: "#ffffff",
-                color: "#166534",
-                fontSize: "0.88rem",
-                fontWeight: 800,
-                outline: "none",
-                cursor: "pointer"
-              }}
-            >
-              {availableWeeks.map((w) => (
-                <option key={w.numero_semana} value={w.numero_semana}>
-                  {getWeekDisplayName(w)}
-                </option>
-              ))}
-            </select>
-
-            <span
-              style={{
-                background: currentWeekInfo.esExamen ? "#fef3c7" : "#dcfce7",
-                color: currentWeekInfo.esExamen ? "#b45309" : "#15803d",
-                padding: "0.2rem 0.6rem",
-                borderRadius: "9999px",
-                fontSize: "0.74rem",
-                fontWeight: 800
-              }}
-            >
-              {getWeekDisplayName(currentWeekInfo)}
-            </span>
-
-            {assignedInstructorForWeek && (
-              <div
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "0.35rem",
-                  fontSize: "0.75rem",
-                  fontWeight: 800,
-                  padding: "0.2rem 0.65rem",
-                  borderRadius: "9999px",
-                  background: "#eff6ff",
-                  color: "#1e40af",
-                  border: "1px solid #bfdbfe"
-                }}
-              >
-                <User size={13} color="#2563eb" />
-                <span>Docente asignado: {assignedInstructorForWeek}</span>
-              </div>
-            )}
-
-            {/* Badges de Temas programados en esta semana */}
-            <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", flexWrap: "wrap" }}>
-              {weekTopics.length > 0 ? (
-                weekTopics.map((t) => (
-                  <span
-                    key={t.id}
-                    style={{
-                      background: "#ffffff",
-                      border: "1px solid #86efac",
-                      color: "#166534",
-                      padding: "0.2rem 0.55rem",
-                      borderRadius: "0.45rem",
-                      fontSize: "0.74rem",
-                      fontWeight: 700,
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: "0.3rem"
-                    }}
-                  >
-                    <BookOpen size={11} color="#16a34a" />
-                    <span>Tema {t.numero_tema}: {t.titulo}</span>
-                  </span>
-                ))
-              ) : !currentWeekInfo.esExamen ? (
-                <span style={{ fontSize: "0.74rem", color: "#64748b", fontStyle: "italic" }}>
-                  (No hay temas con manual evaluable en el temario para esta semana)
-                </span>
-              ) : null}
+            <div className="weekly-manuals__window" data-open={canEdit} role="status">
+              <strong><Clock size={17} aria-hidden="true" /> {canEdit ? "Carga habilitada" : "Carga cerrada"}</strong>
+              <p>{manualWindow.reason}</p>
+              {manualWindow.isSpecial && manualWindow.date ? (
+                <p className="weekly-manuals__date">{dateFormatter.format(new Date(manualWindow.date + "T00:00:00Z"))} · Todo el día</p>
+              ) : manualWindow.opensAt && (
+                <dl>
+                  <div><dt>Apertura</dt><dd>{dateTimeFormatter.format(new Date(manualWindow.opensAt))}</dd></div>
+                  <div><dt>Cierre</dt><dd>{dateTimeFormatter.format(new Date(manualWindow.closesAt))}</dd></div>
+                </dl>
+              )}
+              <small>{manualWindow.isSpecial ? "Fecha definida por el titular · hora de Honduras"
+                : `Siguiente práctica${manualWindow.isReplacement ? " reprogramada" : ""} · margen de 10 minutos · hora de Honduras`}</small>
             </div>
           </div>
-
-          {/* Estadísticas de la semana */}
-          {weekTopics.length > 0 && (
-            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "0.35rem", background: "#ffffff", border: "1px solid #cbd5e1", padding: "0.3rem 0.65rem", borderRadius: "0.5rem", fontSize: "0.78rem" }}>
-                <span style={{ color: "#475569", fontWeight: 800 }}>Temas: {weekTopics.length}</span>
-              </div>
-
-              <div style={{ display: "flex", alignItems: "center", gap: "0.35rem", background: "#ffffff", border: "1px solid #bbf7d0", padding: "0.3rem 0.65rem", borderRadius: "0.5rem", fontSize: "0.78rem" }}>
-                <div style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#16a34a" }} />
-                <span style={{ color: "#166534", fontWeight: 800 }}>Completos: {stats.gradedCount}</span>
-              </div>
-
-              <div style={{ display: "flex", alignItems: "center", gap: "0.35rem", background: "#ffffff", border: "1px solid #fed7aa", padding: "0.3rem 0.65rem", borderRadius: "0.5rem", fontSize: "0.78rem" }}>
-                <div style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#f97316" }} />
-                <span style={{ color: "#c2410c", fontWeight: 800 }}>Pendientes: {stats.pendingCount}</span>
-              </div>
-
-              <div style={{ display: "flex", alignItems: "center", gap: "0.35rem", background: "#ffffff", border: "1px solid #bfdbfe", padding: "0.3rem 0.65rem", borderRadius: "0.5rem", fontSize: "0.78rem" }}>
-                <span style={{ color: "#1d4ed8", fontWeight: 800 }}>Promedio: {stats.average} pts</span>
-              </div>
-            </div>
+          {manualWindow.isSpecial && (
+            <p className="weekly-manuals__special">El día de carga se define en <strong>Proporcionar asignaciones</strong>, dentro de la semana previa al examen.</p>
           )}
-        </div>
-
-        {/* Fila 3: Acciones masivas por tema y Barra de Búsqueda */}
-        {weekTopics.length > 0 && (
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "0.75rem", paddingTop: "0.25rem" }}>
-            {/* Acciones Rápidas */}
-            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
-              {weekTopics.map((t) => (
-                <button
-                  key={t.id}
-                  onClick={() => handleBatchGradeTopic(t)}
-                  disabled={!canEdit}
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: "0.35rem",
-                    background: canEdit ? "#eff6ff" : "#f1f5f9",
-                    border: canEdit ? "1.5px solid #bfdbfe" : "1px solid #cbd5e1",
-                    color: canEdit ? "#1d4ed8" : "#94a3b8",
-                    padding: "0.4rem 0.75rem",
-                    borderRadius: "0.55rem",
-                    fontSize: "0.78rem",
-                    fontWeight: 800,
-                    cursor: canEdit ? "pointer" : "not-allowed",
-                    opacity: canEdit ? 1 : 0.6,
-                    transition: "all 0.15s ease"
-                  }}
-                  title={!canEdit ? "Solo lectura" : `Asignar nota a todos en Tema ${t.numero_tema}`}
-                >
-                  <CheckCheck size={14} />
-                  <span>Asignar a todos: Tema {t.numero_tema}</span>
-                </button>
-              ))}
-
-              <button
-                onClick={handleClearWeekManuals}
-                disabled={!canEdit}
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "0.35rem",
-                  background: "#f8fafc",
-                  border: "1px solid #cbd5e1",
-                  color: canEdit ? "#475569" : "#94a3b8",
-                  padding: "0.4rem 0.75rem",
-                  borderRadius: "0.55rem",
-                  fontSize: "0.78rem",
-                  fontWeight: 700,
-                  cursor: canEdit ? "pointer" : "not-allowed",
-                  opacity: canEdit ? 1 : 0.6,
-                  transition: "all 0.15s ease"
-                }}
-                title={!canEdit ? "Solo lectura" : "Limpiar calificaciones de manuales de esta semana"}
-              >
-                <span>Limpiar Semana</span>
-              </button>
+          <dl className="weekly-manuals__stats" aria-label="Resumen de manuales">
+            {[["Estudiantes", estudiantes.length], ["Completos", stats.gradedCount], ["Pendientes", stats.pendingCount], ["Promedio", stats.average]].map(([label,value])=>(
+              <div key={label}><dt>{label}</dt><dd>{value}</dd></div>
+            ))}
+          </dl>
+          <section className="user-directory__results" aria-labelledby="manuals-students-title">
+            <div className="user-directory__toolbar">
+              <div><h3 id="manuals-students-title">Notas por estudiante</h3><p>{filteredEstudiantes.length} de {estudiantes.length} estudiantes · {weekTopics.length} manuales</p></div>
+              <label className="user-directory__search"><Search size={17} aria-hidden="true" />
+                <input type="search" aria-label="Buscar estudiante" placeholder="Nombre o cuenta" value={searchTerm} onChange={event => setSearchTerm(event.target.value)} />
+              </label>
             </div>
-
-            {/* Barra de Búsqueda */}
-            <div style={{ position: "relative", width: "100%", maxWidth: "300px" }}>
-              <Search size={14} color="#94a3b8" style={{ position: "absolute", left: "0.75rem", top: "50%", transform: "translateY(-50%)" }} />
-              <input
-                type="text"
-                placeholder="Buscar alumno por nombre o cuenta..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                style={{
-                  width: "100%",
-                  padding: "0.45rem 0.75rem 0.45rem 2rem",
-                  borderRadius: "0.5rem",
-                  border: "1px solid #cbd5e1",
-                  fontSize: "0.82rem",
-                  outline: "none",
-                  background: "#f8fafc"
-                }}
-              />
-            </div>
-          </div>
-        )}
-        </>
-        )}
-      </div>
-
-      {/* =================================================================== */}
-      {/* 2. LISTA DE ALUMNOS CON LAS CASILLAS DE MANUAL POR TEMA             */}
-      {/* =================================================================== */}
-      {availableWeeks.length > 0 && (
-      <div
-        style={{
-          background: "#ffffff",
-          borderRadius: "1.1rem",
-          border: "1px solid #e2e8f0",
-          boxShadow: "0 4px 15px -3px rgba(0, 0, 0, 0.04)",
-          padding: "1.25rem 1.5rem",
-          display: "flex",
-          flexDirection: "column",
-          gap: "0.85rem"
-        }}
-      >
-        {currentWeekInfo.esExamen ? (
-          <div
-            style={{
-              padding: "3rem",
-              textAlign: "center",
-              background: "#f8fafc",
-              borderRadius: "0.65rem",
-              border: "1.5px dashed #cbd5e1",
-              color: "#64748b",
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              gap: "0.75rem"
-            }}
-          >
-            <BookOpen size={36} color="#94a3b8" />
-            <strong style={{ fontSize: "1rem", color: "#334155" }}>
-              Semana {selectedSemana} es Semana de Examen Parcial
-            </strong>
-            <span style={{ fontSize: "0.85rem", maxWidth: "450px" }}>
-              En las semanas de exámenes parciales no se programan ni evalúan manuales. Para calificar el examen parcial, utiliza el módulo correspondiente.
-            </span>
-          </div>
-        ) : weekTopics.length === 0 ? (
-          <div
-            style={{
-              padding: "3rem",
-              textAlign: "center",
-              background: "#f8fafc",
-              borderRadius: "0.65rem",
-              border: "1.5px dashed #cbd5e1",
-              color: "#64748b",
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              gap: "0.75rem"
-            }}
-          >
-            <BookOpen size={36} color="#94a3b8" />
-            <strong style={{ fontSize: "1rem", color: "#334155" }}>
-              Sin manuales en la Semana {selectedSemana}
-            </strong>
-            <span style={{ fontSize: "0.85rem", maxWidth: "450px" }}>
-              No hay temas con manual evaluable asignados a esta semana en el temario de {carrera}. Puedes agregarlos desde el módulo de Temario de la carrera.
-            </span>
-          </div>
-        ) : (
-          <>
-            {/* ⚠️ ALERTA: Si hay notas inválidas en la sección */}
-            {invalidManualStudents.length > 0 && (
-              <div
-                style={{
-                  background: "#fef2f2",
-                  border: "1.5px solid #f87171",
-                  borderRadius: "0.75rem",
-                  padding: "0.85rem 1.25rem",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "0.85rem",
-                  color: "#991b1b",
-                  boxShadow: "0 2px 8px rgba(239, 68, 68, 0.08)"
-                }}
-              >
-                <AlertCircle size={22} color="#dc2626" style={{ flexShrink: 0 }} />
-                <div style={{ fontSize: "0.84rem", fontWeight: 700, lineHeight: 1.45 }}>
-                  <strong style={{ color: "#b91c1c", fontSize: "0.88rem" }}>
-                    ⚠️ Calificaciones fuera de límite detectadas:
-                  </strong>{" "}
-                  Las notas de manuales <strong>no pueden superar 1.000 punto</strong>. Se encontraron valores superiores al límite (por ejemplo en{" "}
-                  <strong>{invalidManualStudents[0].nombre_completo || "un alumno"}</strong>). Debes corregir las casillas con etiqueta roja a un valor entre <strong>0.000 y 1.000</strong> antes de poder guardar los cambios.
-                </div>
+            {weekTopics.length > 0 && (
+              <div className="weekly-manuals__bulk">
+                {weekTopics.map(topic=><button type="button" className="user-button" key={topic.id} disabled={!canEdit || saving || !estudiantes.length} onClick={()=>handleBatchGradeTopic(topic)}>Asignar nota a todos · {topic.titulo}</button>)}
+                <button type="button" className="user-button user-button--danger" disabled={!canEdit || saving || !estudiantes.length} onClick={handleClearWeekManuals}>Limpiar notas de la semana</button>
               </div>
             )}
-
-            {/* Cabecera de la tabla */}
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: `50px 1.4fr repeat(${weekTopics.length}, minmax(140px, 1fr))`,
-                gap: "0.75rem",
-                padding: "0.65rem 0.85rem",
-                background: "#f8fafc",
-                borderRadius: "0.65rem",
-                border: "1px solid #e2e8f0",
-                fontSize: "0.75rem",
-                fontWeight: 800,
-                color: "#475569",
-                textTransform: "uppercase",
-                letterSpacing: "0.03em",
-                alignItems: "center"
-              }}
-            >
-              <span>#</span>
-              <span>Alumno / N° de Cuenta</span>
-
-              {/* Una columna por cada tema de la semana */}
-              {weekTopics.map((tema) => (
-                <div key={tema.id} style={{ textAlign: "center" }}>
-                  <div style={{ color: "#1d4ed8", fontWeight: 900, display: "flex", alignItems: "center", justifyContent: "center", gap: "0.35rem" }}>
-                    <span>Manual Tema {tema.numero_tema}</span>
-                    <span style={{ fontSize: "0.66rem", fontWeight: 800, background: "#dbeafe", color: "#1e40af", padding: "0.1rem 0.4rem", borderRadius: "9999px" }}>
-                      Máx. 1.000 pt
-                    </span>
-                  </div>
-                  <div style={{ fontSize: "0.68rem", color: "#64748b", fontWeight: 600, textTransform: "none", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={tema.titulo}>
-                    {tema.titulo}
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            {/* Listado de alumnos */}
-            {filteredEstudiantes.length === 0 ? (
-              <div
-                style={{
-                  padding: "2.5rem",
-                  textAlign: "center",
-                  background: "#f8fafc",
-                  borderRadius: "0.65rem",
-                  border: "1.5px dashed #cbd5e1",
-                  color: "#64748b",
-                  fontSize: "0.85rem"
-                }}
-              >
-                {searchTerm ? "No se encontraron alumnos con ese criterio de búsqueda." : "No hay alumnos matriculados en esta sección."}
-              </div>
+            {!weekTopics.length ? <p className="user-directory__state">Esta semana no tiene temas con manual evaluable.</p> : !filteredEstudiantes.length ? (
+              <p className="user-directory__state">{estudiantes.length ? "Ningún estudiante coincide con la búsqueda." : "Aún no hay estudiantes matriculados."}</p>
             ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
-                {filteredEstudiantes.map((est, index) => {
-                  return (
-                    <div
-                      key={est.numero_cuenta || est.id || index}
-                      style={{
-                        display: "grid",
-                        gridTemplateColumns: `50px 1.4fr repeat(${weekTopics.length}, minmax(140px, 1fr))`,
-                        gap: "0.75rem",
-                        alignItems: "center",
-                        padding: "0.75rem 0.85rem",
-                        borderRadius: "0.65rem",
-                        border: "1px solid #e2e8f0",
-                        background: "#ffffff",
-                        transition: "all 0.15s ease"
-                      }}
-                    >
-                      {/* Número correlativo */}
-                      <span style={{ fontSize: "0.8rem", fontWeight: 800, color: "#94a3b8" }}>
-                        {String(index + 1).padStart(2, "0")}
-                      </span>
-
-                      {/* Nombre Completo y Cuenta */}
-                      <div style={{ display: "flex", flexDirection: "column", gap: "0.15rem", paddingRight: "0.5rem" }}>
-                        <strong style={{ fontSize: "0.92rem", color: "#0f172a", lineHeight: 1.25 }}>
-                          {est.nombre_completo || "Sin Nombre Registrado"}
-                        </strong>
-                        <span style={{ fontSize: "0.74rem", color: "#64748b", fontFamily: "monospace" }}>
-                          Cuenta: {est.numero_cuenta || "Sin cuenta"}
-                        </span>
-                      </div>
-
-                      {/* Casilla de calificación para cada tema */}
-                      {weekTopics.map((tema) => {
-                        const gradeVal = getStudentManualGrade(est, tema);
-
-                        return (
-                          <div key={tema.id} style={{ display: "flex", justifyContent: "center" }}>
-                            <div
-                              style={{
-                                position: "relative",
-                                width: "100%",
-                                maxWidth: "140px"
-                              }}
-                            >
-                              <input
-                                type="text"
-                                inputMode="decimal"
-                                value={gradeVal}
-                                onChange={(e) => handleGradeChange(est.numero_cuenta, tema, e.target.value)}
-                                onBlur={() => {
-                                  if (typeof gradeVal === "string" && gradeVal.endsWith(".")) {
-                                    handleGradeChange(est.numero_cuenta, tema, gradeVal.slice(0, -1));
-                                  }
-                                }}
-                                disabled={!canEdit}
-                                placeholder="0.000"
-                                style={{
-                                  width: "100%",
-                                  textAlign: "center",
-                                  padding: "0.5rem 0.6rem",
-                                  borderRadius: "0.55rem",
-                                  border:
-                                    gradeVal !== "" && Number(gradeVal) > 1
-                                      ? "2px solid #ef4444"
-                                      : gradeVal !== ""
-                                      ? "2px solid #3b82f6"
-                                      : "1.5px solid #cbd5e1",
-                                  background:
-                                    !canEdit
-                                      ? "#f1f5f9"
-                                      : gradeVal !== "" && Number(gradeVal) > 1
-                                      ? "#fef2f2"
-                                      : gradeVal !== ""
-                                      ? "#eff6ff"
-                                      : "#ffffff",
-                                  color:
-                                    !canEdit
-                                      ? "#94a3b8"
-                                      : gradeVal !== "" && Number(gradeVal) > 1
-                                      ? "#b91c1c"
-                                      : "#1e3a8a",
-                                  fontSize: "0.92rem",
-                                  fontWeight: 800,
-                                  outline: "none",
-                                  cursor: canEdit ? "text" : "not-allowed",
-                                  transition: "all 0.15s ease"
-                                }}
-                                title={
-                                  !canEdit
-                                    ? `Solo lectura. Docente asignado: ${assignedInstructorForWeek || "ninguno"}`
-                                    : gradeVal !== "" && Number(gradeVal) > 1
-                                    ? `⚠️ Error: La nota máxima es 1.000 punto (ingresaste: ${gradeVal})`
-                                    : `Calificación Manual: ${tema.titulo}`
-                                }
-                              />
-
-                              {/* 🏷️ ETIQUETA CLARA DE ERROR CUANDO SE EXCEDE EL LÍMITE */}
-                              {gradeVal !== "" && Number(gradeVal) > 1 && (
-                                <div
-                                  style={{
-                                    marginTop: "0.35rem",
-                                    padding: "0.22rem 0.45rem",
-                                    background: "#fee2e2",
-                                    border: "1.5px solid #f87171",
-                                    borderRadius: "0.45rem",
-                                    fontSize: "0.72rem",
-                                    fontWeight: 800,
-                                    color: "#b91c1c",
-                                    textAlign: "center",
-                                    lineHeight: 1.25,
-                                    display: "flex",
-                                    alignItems: "center",
-                                    justifyContent: "center",
-                                    gap: "0.25rem"
-                                  }}
-                                >
-                                  <span>⚠️ Máx 1.000 pt (ingresaste: {gradeVal})</span>
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })}
+              <ul className="weekly-manuals__students">
+                {filteredEstudiantes.map(student=>(
+                  <li className="weekly-manuals__student" key={student.numero_cuenta}>
+                    <div><h4>{student.nombre_completo || "Sin nombre registrado"}</h4><p>Cuenta {student.numero_cuenta}</p></div>
+                    <div className="weekly-manuals__grades">
+                      {weekTopics.map(topic=>(
+                        <label className="user-field" key={topic.id}>
+                          {topic.titulo}
+                          <input type="text" inputMode="decimal" value={getStudentManualGrade(student, topic)}
+                            disabled={!canEdit || saving} placeholder="Sin nota" aria-label={`${topic.titulo} de ${student.nombre_completo || student.numero_cuenta}`}
+                            onChange={event=>handleGradeChange(student.numero_cuenta,topic,event.target.value)} />
+                          <small>Máximo 1.000 punto</small>
+                        </label>
+                      ))}
                     </div>
-                  );
-                })}
-              </div>
+                  </li>
+                ))}
+              </ul>
             )}
-
-            {/* Botón inferior de guardar */}
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "0.75rem", paddingTop: "0.75rem" }}>
-              <button
-                onClick={handleSaveAll}
-                disabled={saving || !canEdit}
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "0.5rem",
-                  background: !canEdit
-                    ? "#94a3b8"
-                    : hasUnsavedChanges
-                    ? "linear-gradient(135deg, #10b981 0%, #059669 100%)"
-                    : "linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)",
-                  color: "#ffffff",
-                  border: "none",
-                  padding: "0.65rem 1.5rem",
-                  borderRadius: "0.65rem",
-                  fontSize: "0.88rem",
-                  fontWeight: 800,
-                  cursor: (!canEdit || saving) ? "not-allowed" : "pointer",
-                  boxShadow: canEdit ? "0 4px 14px rgba(37, 99, 235, 0.25)" : "none",
-                  opacity: (!canEdit || saving) ? 0.7 : 1,
-                  transition: "all 0.2s ease"
-                }}
-                title={!canEdit ? "Solo lectura" : "Guardar notas de manuales"}
-              >
-                {saving ? (
-                  <>
-                    <RefreshCw size={15} className="animate-spin" />
-                    <span>Guardando notas...</span>
-                  </>
-                ) : !canEdit ? (
-                  <>
-                    <Lock size={15} />
-                    <span>Solo Lectura (Semana {selectedSemana})</span>
-                  </>
-                ) : (
-                  <>
-                    <Save size={15} />
-                    <span>Guardar Notas de Manuales (Semana {selectedSemana})</span>
-                  </>
-                )}
-              </button>
+          </section>
+          <footer className="weekly-manuals__save">
+            {saveError && <p className="user-dialog__error" role="alert">{saveError}</p>}
+            <div><p role="status">{hasUnsavedChanges ? "Cambios sin guardar" : "Sin cambios pendientes"}</p>
+              <div>
+                {hasUnsavedChanges && <button type="button" className="user-button" disabled={saving} onClick={discardChanges}>Descartar cambios</button>}
+                <button type="button" className="user-button user-button--primary" disabled={!canEdit || saving || !hasUnsavedChanges} onClick={handleSaveAll}><Save size={17} aria-hidden="true" /> {saving ? "Guardando…" : "Guardar manuales"}</button>
+              </div>
             </div>
-          </>
-        )}
-      </div>
+          </footer>
+        </>
       )}
-    </div>
+    </section>
   );
 }

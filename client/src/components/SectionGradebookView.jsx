@@ -936,7 +936,7 @@ export default function SectionGradebookView({
               </div>
               <div style={{ width: "1px", height: "14px", background: "#cbd5e1" }} />
               <div>
-                <strong>Instructor Titular:</strong> {seccion?.coordinador || "Sin asignar"}
+                <strong>Titular de sección:</strong> {seccion?.coordinador || "Sin asignar"}
               </div>
             </div>
           </div>
@@ -1053,7 +1053,7 @@ export default function SectionGradebookView({
                 { id: "TODAS", label: "Todas las Columnas", icon: FileSpreadsheet },
                 { id: "EXAMENES", label: `Exámenes (${currentParcialConfig.examenes.length})`, icon: Award },
                 { id: "MANUALES", label: `Temas/Manuales (${currentParcialConfig.temas.length})`, icon: BookOpen },
-                { id: "EXAMENCITOS", label: `Pruebas (${currentParcialConfig.semanas.length})`, icon: GraduationCap }
+                { id: "EXAMENCITOS", label: `Pruebas (${currentParcialConfig.semanasPruebas.length})`, icon: GraduationCap }
               ].map((cat) => {
                 const Icon = cat.icon;
                 const isSel = activeCategory === cat.id;
@@ -1438,7 +1438,7 @@ export default function SectionGradebookView({
 
                   {/* Examencitos según las semanas de la carrera (excluyendo semanas de examen) */}
                   {(activeCategory === "TODAS" || activeCategory === "EXAMENCITOS") &&
-                    (currentParcialConfig.semanasPruebas || currentParcialConfig.semanas).map((sem) => {
+                    currentParcialConfig.semanasPruebas.map((sem) => {
                       const fullTitle = `Prueba - ${semanasTemasMap[sem] || `Semana ${sem}`}`;
                       return (
                         <th
@@ -1721,7 +1721,7 @@ export default function SectionGradebookView({
 
                       {/* Pruebas semanales (excluyendo semanas de examen) */}
                       {(activeCategory === "TODAS" || activeCategory === "EXAMENCITOS") &&
-                        (currentParcialConfig.semanasPruebas || currentParcialConfig.semanas).map((sem) => {
+                        currentParcialConfig.semanasPruebas.map((sem) => {
                           const key = `prueba_${sem}`;
                           const gradeVal = getStudentGrade(
                             est,
