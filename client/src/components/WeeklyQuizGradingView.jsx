@@ -1702,7 +1702,7 @@ export default function WeeklyQuizGradingView({
                             }}
                           >
                             <div style={{ fontSize: "0.82rem", fontWeight: 800, color: "#334155", marginBottom: "0.5rem" }}>
-                              {item.instruccion || (item.tipo === "texto_corto" ? "Respuesta directa:" : "Listado numerado:")}
+                              {item.instruccion || (item.tipo === "texto_corto" ? "Respuesta directa:" : "Numeración:")}
                             </div>
 
                             {item.tipo === "texto_corto" ? (

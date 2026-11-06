@@ -1,0 +1,18 @@
+.quiz-response { display: grid; gap: .6rem; min-width: 0; border: 0; padding: 0; margin: 0; color: #224358; }
+.quiz-response :is(input[type="text"], textarea, select) { box-sizing: border-box; width: 100%; min-width: 0; min-height: 46px; padding: .7rem .8rem; border: 1px solid #afc5d5; border-radius: .6rem; background: #fff; color: #173c54; font: inherit; font-size: 1rem; font-weight: 400; }
+.quiz-response textarea { resize: vertical; line-height: 1.5; }
+.quiz-response__choice { display: flex; align-items: center; gap: .7rem; min-height: 48px; padding: .7rem; border: 1px solid #b8cbd8; background: #fff; border-radius: .65rem; cursor: pointer; overflow-wrap: anywhere; }
+.quiz-response__choice[data-selected="true"] { border-color: #207c9f; background: #eaf5fa; box-shadow: inset 0 0 0 1px #207c9f; }
+.quiz-response__choice input[type="radio"] { min-height: 20px; height: 20px; width: 20px; min-width: 20px; margin: 0; accent-color: #096b8d; flex: none; }
+.quiz-response__choice span { font-size: .95rem; line-height: 1.5; }
+.quiz-response__choice b { margin-right: .4rem; }
+.quiz-response small { font-size: .8rem; color: #537084; }
+.quiz-response__pair { display: grid; gap: .45rem; padding: .75rem; background: #f3f8fb; border: 1px solid #c0d4e0; border-radius: .65rem; min-width: 0; }
+.quiz-response__pair > span { font-size: .95rem; overflow-wrap: anywhere; }
+.quiz-response--list > label { display: flex; align-items: center; gap: .6rem; min-width: 0; }
+.quiz-response :is(input, textarea, select):focus-visible { outline: 3px solid #82b7cd; outline-offset: 2px; }
+.quiz-response :disabled { opacity: .7; cursor: not-allowed; }
+.quiz-response__sr { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; }
+@media(min-width: 700px) { .quiz-response__pair { grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); align-items: center; } }
+.quiz-response--completion > p { margin: 0; font-size: 1rem; line-height: 3.4; white-space: pre-wrap; overflow-wrap: anywhere; }
+.quiz-response--completion input[type="text"] { display: inline-block; width: min(100%, 12rem); max-width: 100%; min-height: 44px; margin: .25rem .35rem; vertical-align: middle; border: 0; border-bottom: 2px solid #3f87a6; border-radius: .4rem .4rem 0 0; background: #eef7fb; }

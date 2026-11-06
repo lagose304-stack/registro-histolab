@@ -93,7 +93,7 @@ async function fetchSessionFromSupabase(seccion_id, semana) {
 /**
  * Sincronización atómica con Supabase y respaldo de estado de habilitación en pruebas_semanales
  */
-async function syncLiveSessionToSupabase(session) {
+async function syncLiveSessionToSupabase(session, { expiration = false, resetStudents = false } = {}) {
   if (!isSupabaseConfigured || !supabase || !session?.seccion_id) return;
   try {
     const secClean = String(session.seccion_id).trim();
@@ -108,19 +108,27 @@ async function syncLiveSessionToSupabase(session) {
       pregunta_actual_idx: session.pregunta_actual_idx ?? 0,
       duracion_segundos: session.duracion_segundos ?? 90,
       pregunta_inicio_timestamp: session.pregunta_inicio_timestamp || null,
-      alumnos_conectados: session.alumnos_conectados || {},
-      respuestas_globales: session.respuestas_globales || {},
       updated_at: new Date().toISOString()
     };
-
-    // 1. Guardar en la tabla de sesiones en tiempo real
-    const { error: liveErr } = await supabase
-      .from("sesiones_pruebas_en_vivo")
-      .upsert(payload, { onConflict: "seccion_id,numero_semana" });
-
-    if (liveErr) {
-      console.warn("Aviso al sincronizar sesión en vivo con Supabase:", liveErr.message);
+    if (resetStudents) {
+      payload.alumnos_conectados = {};
+      payload.respuestas_globales = {};
     }
+
+    // El control docente no sobrescribe respuestas. Un vencimiento atrasado
+    // tampoco puede cerrar la pregunta que el docente acaba de iniciar.
+    let write = supabase.from("sesiones_pruebas_en_vivo");
+    write = expiration ? write.update(payload)
+      .eq("seccion_id", secClean).eq("numero_semana", semNum)
+      .eq("estado", "en_pregunta")
+      .eq("pregunta_actual_idx", session.pregunta_actual_idx)
+      .eq("pregunta_inicio_timestamp", session.pregunta_inicio_timestamp)
+      .eq("duracion_segundos", session.duracion_segundos)
+      : write.upsert(payload, { onConflict: "seccion_id,numero_semana" });
+    const { data: persisted, error: liveErr } = await write.select("seccion_id");
+
+    if (liveErr) throw liveErr;
+    if (!persisted?.length || expiration) return;
 
     // 2. Mantener sincronizado el flag habilitada_en_vivo en pruebas_semanales
     try {
@@ -136,7 +144,37 @@ async function syncLiveSessionToSupabase(session) {
     } catch (_) {}
   } catch (err) {
     console.warn("Aviso al ejecutar syncLiveSessionToSupabase:", err.message);
+    throw err;
   }
+}
+
+// Los latidos solo guardan presencia y respuestas. La comparación de versión
+// evita perder los cambios de otro alumno o de un comando docente concurrente.
+async function persistStudentHeartbeat(session, account) {
+  if (!isSupabaseConfigured || !supabase) return;
+  const presence = session.alumnos_conectados[account];
+  const answers = session.respuestas_globales?.[account];
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const { data, error } = await supabase.from("sesiones_pruebas_en_vivo")
+      .select("alumnos_conectados,respuestas_globales,updated_at")
+      .eq("seccion_id", session.seccion_id).eq("numero_semana", session.numero_semana).maybeSingle();
+    if (error) throw error;
+    if (!data) return;
+    const previous = data.alumnos_conectados?.[account];
+    // Un latido que llegó tarde no debe reemplazar respuestas más recientes.
+    if (previous?.ultimo_ping > presence.ultimo_ping) return;
+    const previousVersion = new Date(data.updated_at).getTime();
+    const { data: saved, error: writeError } = await supabase.from("sesiones_pruebas_en_vivo")
+      .update({
+        alumnos_conectados: { ...data.alumnos_conectados, [account]: presence },
+        respuestas_globales: { ...data.respuestas_globales, ...(answers ? { [account]: { ...data.respuestas_globales?.[account], ...answers } } : {}) },
+        updated_at: new Date(Math.max(Date.now(), previousVersion + 1)).toISOString()
+      }).eq("seccion_id", session.seccion_id).eq("numero_semana", session.numero_semana)
+      .eq("updated_at", data.updated_at).select("seccion_id");
+    if (writeError) throw writeError;
+    if (saved?.length) return;
+  }
+  throw new Error("No se pudo guardar el latido por cambios concurrentes. Se reintentará en el siguiente latido.");
 }
 
 /**
@@ -212,7 +250,7 @@ export const getLiveQuizState = async (req, res) => {
         session.estado = "esperando_siguiente";
         session.ultima_actualizacion = now;
         savePersistentLiveSessions(liveSessions);
-        await syncLiveSessionToSupabase(session);
+        await syncLiveSessionToSupabase(session, { expiration: true });
       }
     }
 
@@ -459,7 +497,7 @@ export const controlLiveQuiz = async (req, res) => {
     savePersistentLiveSessions(liveSessions);
 
     // Esperar explícitamente a que Supabase confirme para garantizar consistencia entre instancias
-    await syncLiveSessionToSupabase(session);
+    await syncLiveSessionToSupabase(session, { resetStudents: ["deshabilitar", "reiniciar"].includes(accion) });
 
     const elapsed = session.pregunta_inicio_timestamp ? Math.floor((now - session.pregunta_inicio_timestamp) / 1000) : 0;
     const remaining = Math.max(0, session.duracion_segundos - elapsed);
@@ -549,7 +587,7 @@ export const heartbeatLiveQuiz = async (req, res) => {
     savePersistentLiveSessions(liveSessions);
 
     // Sincronizar en segundo plano sin bloquear el latido del estudiante (latencia ultra baja <5ms)
-    syncLiveSessionToSupabase(session).catch((err) => {
+    persistStudentHeartbeat(session, cleanAccount).catch((err) => {
       console.warn("Aviso en syncLiveSessionToSupabase background:", err?.message);
     });
 

@@ -127,7 +127,8 @@ export const getSecciones = async (req, res) => {
         }
         return res.json({ success: true, data: filtered });
       } else if (error) {
-        console.warn("Aviso en consulta de secciones Supabase (usando memoria si la tabla no existe aún):", error.message);
+        console.error("Error al consultar secciones en Supabase:", error.message);
+        return res.status(503).json({success:false,message:"No pudimos consultar las secciones guardadas. Reintenta en un momento."});
       }
     }
 
@@ -171,7 +172,9 @@ export const getSeccionById = async (req, res) => {
         .eq("id", id)
         .maybeSingle();
 
-      if (!error && data) {
+      if (error) return res.status(503).json({success:false,message:"No pudimos consultar la sección guardada. Reintenta en un momento."});
+      if (!data) return res.status(404).json({success:false,message:"Sección no encontrada."});
+      if (data) {
         if (!canViewSection(req.instructor, data)) {
           return res.status(404).json({ success: false, message: "Sección no encontrada." });
         }
@@ -367,8 +370,10 @@ export const createSeccion = async (req, res) => {
       } else if (error?.code === "23505") {
         return res.status(409).json({ success: false, message: `Ya existe una sección con el código ${newSectionData.codigo}.` });
       } else if (error) {
-        console.warn("Aviso al insertar sección en Supabase (guardando en respaldo):", error.message);
+        console.error("Error al insertar sección en Supabase:", error.message);
+        return res.status(503).json({ success: false, message: "No se pudo guardar la sección en la base de datos. Revisa los datos e intenta nuevamente." });
       }
+      return res.status(503).json({ success: false, message: "La base de datos no confirmó la creación de la sección. Intenta nuevamente." });
     }
 
     // Guardar en memoria de respaldo

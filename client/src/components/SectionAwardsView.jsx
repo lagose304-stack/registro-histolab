@@ -1,32 +1,13 @@
 import React, { useState, useEffect, useMemo, useCallback } from "react";
-import {
-  Trophy,
-  Award,
-  Crown,
-  Star,
-  ArrowLeft,
-  Download,
-  RefreshCw,
-  Search,
-  Sparkles,
-  Filter,
-  CheckCircle2,
-  BookOpen,
-  FileText,
-  TrendingUp,
-  Info,
-  Medal,
-  ChevronDown,
-  ChevronUp
-} from "lucide-react";
+import { Trophy, Crown, Star, ArrowLeft, Download, RefreshCw, Search, BookOpen, FileText, Medal, ChevronDown, LayoutGrid, List, Users, Info, AlertCircle } from "lucide-react";
+import "./SectionAwardsView.css";
 import { api } from "../services/api";
 import {
   getRegularWeeks,
   getExamWeeks,
   getCanonicalManualGrade,
   getCanonicalExamGrade,
-  getCanonicalQuizGrade,
-  getManualDisplayName
+  getCanonicalQuizGrade
 } from "../utils/academicEngine";
 
 export default function SectionAwardsView({ seccion, currentInstructor, hideBackButton = false, onClose, notify }) {
@@ -35,13 +16,13 @@ export default function SectionAwardsView({ seccion, currentInstructor, hideBack
   const [estudiantes, setEstudiantes] = useState([]);
   const [semanasConfig, setSemanasConfig] = useState([]);
   const [temario, setTemario] = useState([]);
-  const [configPuntajes, setConfigPuntajes] = useState({});
+  const [loadError, setLoadError] = useState("");
   const [allEntregas, setAllEntregas] = useState([]);
   
   // Filtros
   const [searchTerm, setSearchTerm] = useState("");
   const [filterType, setFilterType] = useState("todos"); // 'todos', 'top3', 'con_bonus'
-  const [showDetailColumns, setShowDetailColumns] = useState(true);
+  const [viewMode, setViewMode] = useState("list");
 
   const carrera = seccion?.carrera || "Medicina";
 
@@ -52,38 +33,17 @@ export default function SectionAwardsView({ seccion, currentInstructor, hideBack
     else setLoading(true);
 
     try {
-      const [resEst, resSemanas, resTemas, resPuntajes, resEntregas] = await Promise.all([
-        api.estudiantes?.getBySeccion
-          ? api.estudiantes.getBySeccion(seccion.id, carrera).catch((err) => {
-              console.warn("Aviso al cargar estudiantes:", err);
-              return { data: [] };
-            })
-          : Promise.resolve({ data: [] }),
-        api.semanas?.getConfig
-          ? api.semanas.getConfig(carrera).catch((err) => {
-              console.warn("Aviso al cargar semanas:", err);
-              return { data: [] };
-            })
-          : Promise.resolve({ data: [] }),
-        api.temario?.getAll
-          ? api.temario.getAll({ carrera }).catch((err) => {
-              console.warn("Aviso al cargar temario:", err);
-              return { data: [] };
-            })
-          : Promise.resolve({ data: [] }),
-        api.temario?.getPuntajes
-          ? api.temario.getPuntajes(carrera).catch((err) => {
-              console.warn("Aviso al cargar puntajes:", err);
-              return { data: null };
-            })
-          : Promise.resolve({ data: null }),
-        api.pruebas?.getAllEntregas
-          ? api.pruebas.getAllEntregas(seccion.id).catch((err) => {
-              console.warn("Aviso al cargar entregas:", err);
-              return { data: [] };
-            })
-          : Promise.resolve({ data: [] })
+      setLoadError("");
+      const results = await Promise.all([
+        api.estudiantes.getBySeccion(seccion.id, carrera),
+        api.semanas.getConfig(carrera),
+        api.temario.getAll({ carrera }),
+        api.pruebas.getAllEntregas(seccion.id)
       ]);
+      if (results.some(result => result?.success === false)) {
+        throw new Error("No se pudieron cargar todos los datos de premios.");
+      }
+      const [resEst, resSemanas, resTemas, resEntregas] = results;
 
       setEstudiantes(Array.isArray(resEst?.data) ? resEst.data : []);
 
@@ -108,16 +68,15 @@ export default function SectionAwardsView({ seccion, currentInstructor, hideBack
         setTemario([]);
       }
 
-      setConfigPuntajes(resPuntajes?.data || {});
       setAllEntregas(Array.isArray(resEntregas?.data) ? resEntregas.data : []);
     } catch (err) {
       console.error("Error al cargar datos para Premios de la Sección:", err);
-      if (notify) notify("Error al cargar los datos de calificaciones para premios.", "error");
+      setLoadError("No pudimos actualizar la clasificación completa. Intenta cargar los datos nuevamente.");
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [seccion?.id, carrera, notify]);
+  }, [seccion?.id, carrera]);
 
   useEffect(() => {
     loadData();
@@ -390,1022 +349,96 @@ export default function SectionAwardsView({ seccion, currentInstructor, hideBack
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
 
     if (notify) notify("¡Archivo CSV descargado con éxito!", "success");
   };
 
+  const points = value => value.toFixed(3);
+  const bonusCount = studentsRanking.filter(student => student.bonusExtraTotal > 0).length;
+  const sectionName = seccion?.codigo || seccion?.nombre_seccion || "Sección";
+  const resetFilters = () => { setSearchTerm(""); setFilterType("todos"); };
+
+  const renderBreakdown = student => (
+    <details className="section-awards__detail">
+      <summary>Ver desglose de calificaciones <ChevronDown size={16} aria-hidden="true" /></summary>
+      <div className="section-awards__breakdown">
+        {[
+          { title: "Pruebas semanales", icon: FileText, items: student.pruebasDesglose.map(p => ({ name: p.nombre.toLowerCase().startsWith("semana") ? p.nombre : `Semana ${p.semana} · ${p.nombre}`, value: p.notaReal, bonus: p.tieneBonus })) },
+          { title: "Manuales", icon: BookOpen, items: student.manualesDesglose.map(m => ({ name: m.titulo || `Manual ${m.numero}`, value: m.nota })) },
+          { title: "Exámenes parciales", icon: Medal, items: student.examenesDesglose.map(e => ({ name: e.parcial, value: e.nota })) }
+        ].map(group => (
+          <section key={group.title}>
+            <h4><group.icon size={16} aria-hidden="true" />{group.title}</h4>
+            {group.items.length ? <dl>{group.items.map((item, index) => <div key={index}><dt>{item.name}</dt><dd>{item.bonus && <Star size={13} aria-label="Incluye bonus" />}{item.value === null ? <span className="section-awards__missing">Sin nota</span> : points(item.value)}</dd></div>)}</dl> : <p>No hay evaluaciones configuradas.</p>}
+          </section>
+        ))}
+      </div>
+    </details>
+  );
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "1.75rem", paddingBottom: "3rem" }}>
-      {/* 1. Header principal en Modo Claro / Glass Panel */}
-      <div
-        className="glass-panel"
-        style={{
-          background: "#ffffff",
-          borderRadius: "1.25rem",
-          padding: "1.75rem 2rem",
-          border: "1.5px solid #e2e8f0",
-          boxShadow: "0 10px 30px -5px rgba(0, 0, 0, 0.05)",
-          position: "relative",
-          overflow: "hidden"
-        }}
-      >
-        <div
-          style={{
-            position: "absolute",
-            right: "-20px",
-            top: "-20px",
-            opacity: 0.04,
-            color: "#d97706",
-            pointerEvents: "none"
-          }}
-        >
-          <Trophy size={260} strokeWidth={1.2} />
+    <section className="section-awards" aria-labelledby="section-awards-title" aria-busy={loading || refreshing}>
+      <header className="section-awards__hero">
+        {!hideBackButton && <button type="button" className="section-awards__button" onClick={onClose}><ArrowLeft size={17} aria-hidden="true" />Volver a Módulos de la Sección</button>}
+        <div className="section-awards__hero-content">
+          <div className="section-awards__heading">
+            <span className="section-awards__hero-icon"><Trophy size={27} aria-hidden="true" /></span>
+            <div><p className="section-awards__eyebrow">Cuadro de honor · {sectionName}</p><h2 id="section-awards-title">Premios de la Sección</h2><p>{carrera} · Reconoce el esfuerzo y el desempeño de tu grupo.</p></div>
+          </div>
+          <div className="section-awards__actions">
+            <button type="button" className="section-awards__button" onClick={() => loadData(true)} disabled={loading || refreshing}><RefreshCw size={17} aria-hidden="true" />{refreshing ? "Actualizando…" : "Actualizar"}</button>
+            <button type="button" className="section-awards__button section-awards__button--gold" onClick={handleExportCSV} disabled={loading || refreshing || !!loadError || !studentsRanking.length}><Download size={17} aria-hidden="true" />Descargar CSV</button>
+          </div>
         </div>
+      </header>
 
-        <div style={{ position: "relative", zIndex: 1 }}>
-          {!hideBackButton && (
-            <button
-              type="button"
-              onClick={onClose}
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "0.45rem",
-                padding: "0.45rem 0.95rem",
-                borderRadius: "0.55rem",
-                background: "#f8fafc",
-                color: "#334155",
-                border: "1px solid #cbd5e1",
-                fontSize: "0.82rem",
-                fontWeight: 700,
-                cursor: "pointer",
-                marginBottom: "1.25rem",
-                transition: "all 0.15s ease",
-                boxShadow: "0 1px 3px rgba(0, 0, 0, 0.03)"
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.background = "#f1f5f9";
-                e.currentTarget.style.color = "#0f172a";
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = "#f8fafc";
-                e.currentTarget.style.color = "#334155";
-              }}
-            >
-              <ArrowLeft size={16} />
-              <span>Volver a la Sección</span>
-            </button>
-          )}
+      {loadError && <div className="section-awards__error" role="alert"><AlertCircle size={21} aria-hidden="true" /><div><strong>No se pudo cargar la clasificación</strong><p>{loadError}</p></div><button type="button" className="section-awards__button" onClick={() => loadData(estudiantes.length > 0)} disabled={loading || refreshing}>Reintentar</button></div>}
 
-          <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: "1.25rem" }}>
-            <div>
-              <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", marginBottom: "0.4rem", flexWrap: "wrap" }}>
-                <span
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: "0.35rem",
-                    padding: "0.25rem 0.75rem",
-                    borderRadius: "9999px",
-                    background: "#fef3c7",
-                    color: "#92400e",
-                    border: "1px solid #fde68a",
-                    fontSize: "0.76rem",
-                    fontWeight: 800,
-                    textTransform: "uppercase"
-                  }}
-                >
-                  <Sparkles size={13} color="#d97706" />
-                  Cuadro de Honor y Premiación
-                </span>
-                <span style={{ fontSize: "0.82rem", color: "#64748b", fontWeight: 700 }}>
-                  Sección: <strong style={{ color: "#0284c7" }}>{seccion?.nombre_seccion || "Sección"}</strong>
-                </span>
-                <span style={{ fontSize: "0.82rem", color: "#cbd5e1" }}>•</span>
-                <span
-                  style={{
-                    background: "linear-gradient(135deg, #10b981 0%, #059669 100%)",
-                    color: "#ffffff",
-                    fontWeight: 900,
-                    fontSize: "0.74rem",
-                    padding: "0.15rem 0.6rem",
-                    borderRadius: "9999px",
-                    textTransform: "uppercase"
-                  }}
-                >
-                  {carrera}
-                </span>
-              </div>
+      {loading ? <div className="section-awards__loading" role="status"><span className="section-awards__sr-only">Cargando premios de la sección…</span><div className="section-awards__skeleton-stats" aria-hidden="true">{[1,2,3].map(i => <div key={i} />)}</div><div className="section-awards__skeleton-podium" aria-hidden="true">{[1,2,3].map(i => <div key={i} />)}</div></div> : !loadError && <>
+        <dl className="section-awards__stats">
+          <div><Users size={20} aria-hidden="true" /><dt>Estudiantes</dt><dd>{studentsRanking.length}</dd></div>
+          <div><Trophy size={20} aria-hidden="true" /><dt>Mayor puntaje</dt><dd>{studentsRanking.length ? points(studentsRanking[0].grandTotalPremios) : "—"}<small> pts</small></dd></div>
+          <div><Star size={20} aria-hidden="true" /><dt>Con bonus extra</dt><dd>{bonusCount}<small> {bonusCount === 1 ? "estudiante" : "estudiantes"}</small></dd></div>
+        </dl>
 
-              <h1 style={{ margin: "0 0 0.5rem", fontSize: "1.85rem", fontWeight: 900, letterSpacing: "-0.02em", color: "#0f172a", display: "flex", alignItems: "center", gap: "0.75rem" }}>
-                <div
-                  style={{
-                    width: "44px",
-                    height: "44px",
-                    borderRadius: "0.75rem",
-                    background: "linear-gradient(135deg, #f59e0b 0%, #d97706 100%)",
-                    color: "#ffffff",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    boxShadow: "0 4px 12px rgba(245, 158, 11, 0.35)",
-                    flexShrink: 0
-                  }}
-                >
-                  <Trophy size={24} />
-                </div>
-                <span>Premios de la Sección</span>
-              </h1>
+        <details className="section-awards__method">
+          <summary><span><Info size={18} aria-hidden="true" />¿Cómo se calcula la clasificación?</span><ChevronDown size={17} aria-hidden="true" /></summary>
+          <div><p>Se suman <strong>pruebas con bonus + manuales + exámenes parciales</strong>, sin conversión a puntos oro. El bonus ya está incluido en las pruebas; no se suma dos veces.</p><ul><li>Pruebas: nota real, hasta 6 puntos por semana. El registro oficial conserva su límite de 5 puntos.</li><li>Manuales: suma de las notas individuales, sobre 1 punto cada uno.</li><li>Exámenes: suma directa de las calificaciones de los parciales.</li></ul><p>En caso de empate: mayor puntaje en pruebas, luego en exámenes y, por último, orden alfabético. Las evaluaciones sin nota no suman puntos.</p></div>
+        </details>
 
-              <p style={{ margin: 0, fontSize: "0.92rem", color: "#475569", maxWidth: "800px", lineHeight: 1.55 }}>
-                Listado paralelo con bonificaciones completas de pruebas semanales (hasta 6 pts), manuales individuales (1 pt) y exámenes parciales sumados directamente sin convertir a Puntos Oro para seleccionar a los 3 mejores lugares.
-              </p>
+        {studentsRanking.length > 0 ? <>
+          <section aria-labelledby="awards-podium-title">
+            <div className="section-awards__section-heading"><div><p className="section-awards__eyebrow">Los primeros lugares</p><h3 id="awards-podium-title"><Crown size={21} aria-hidden="true" />Podio de la sección</h3></div><span>Según las notas registradas</span></div>
+            <ol className="section-awards__podium">
+              {top3Winners.map(student => <li key={student.id || student.cuenta} data-place={student.posicion}>
+                <div className="section-awards__podium-top"><span className="section-awards__medal">{student.posicion === 1 ? <Crown size={24} aria-hidden="true" /> : <Medal size={24} aria-hidden="true" />}</span><span>{student.posicion}º lugar</span></div>
+                <h4>{student.nombre}</h4><p className="section-awards__account">Cuenta: {student.cuenta}</p>
+                <div className="section-awards__podium-score"><strong>{points(student.grandTotalPremios)}</strong><span>puntos para premios</span></div>
+                <dl className="section-awards__podium-totals"><div><dt>Pruebas</dt><dd>{points(student.totalPruebasBonus)}</dd></div><div><dt>Manuales</dt><dd>{points(student.totalManuales)}</dd></div><div><dt>Exámenes</dt><dd>{points(student.totalExamenes)}</dd></div></dl>
+                {student.bonusExtraTotal > 0 && <span className="section-awards__bonus"><Star size={13} aria-hidden="true" />{points(student.bonusExtraTotal)} de bonus incluidos</span>}
+              </li>)}
+            </ol>
+          </section>
+
+          <section className="section-awards__directory" aria-labelledby="awards-ranking-title">
+            <div className="section-awards__section-heading"><div><p className="section-awards__eyebrow">Todos los resultados</p><h3 id="awards-ranking-title">Clasificación general</h3></div><div className="section-awards__view" role="group" aria-label="Visualización de la clasificación"><button type="button" aria-pressed={viewMode === "list"} onClick={() => setViewMode("list")}><List size={17} aria-hidden="true" />Listado</button><button type="button" aria-pressed={viewMode === "cards"} onClick={() => setViewMode("cards")}><LayoutGrid size={17} aria-hidden="true" />Tarjetas</button></div></div>
+            <div className="section-awards__filters">
+              <label className="section-awards__search"><span>Buscar estudiante</span><div><Search size={18} aria-hidden="true" /><input type="search" placeholder="Nombre o número de cuenta" value={searchTerm} onChange={event => setSearchTerm(event.target.value)} /></div></label>
+              <div className="section-awards__filter-options" role="group" aria-label="Filtrar clasificación">{[["todos", "Todos", studentsRanking.length], ["top3", "Podio", top3Winners.length], ["con_bonus", "Con bonus", bonusCount]].map(([value,label,count]) => <button type="button" key={value} aria-pressed={filterType === value} onClick={() => setFilterType(value)}>{label}<span>{count}</span></button>)}</div>
             </div>
-
-            <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}>
-              <button
-                type="button"
-                onClick={() => loadData(true)}
-                disabled={loading || refreshing}
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "0.45rem",
-                  padding: "0.65rem 1.15rem",
-                  borderRadius: "0.65rem",
-                  background: "#ffffff",
-                  color: "#334155",
-                  border: "1px solid #cbd5e1",
-                  fontSize: "0.84rem",
-                  fontWeight: 700,
-                  cursor: refreshing ? "not-allowed" : "pointer",
-                  boxShadow: "0 1px 3px rgba(0, 0, 0, 0.05)",
-                  transition: "all 0.15s ease"
-                }}
-                onMouseEnter={(e) => {
-                  if (!refreshing) e.currentTarget.style.background = "#f8fafc";
-                }}
-                onMouseLeave={(e) => {
-                  if (!refreshing) e.currentTarget.style.background = "#ffffff";
-                }}
-              >
-                <RefreshCw size={15} className={refreshing ? "animate-spin" : ""} color="#64748b" />
-                <span>Actualizar</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={handleExportCSV}
-                disabled={loading || studentsRanking.length === 0}
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "0.5rem",
-                  padding: "0.65rem 1.25rem",
-                  borderRadius: "0.65rem",
-                  background: "linear-gradient(135deg, #f59e0b 0%, #d97706 100%)",
-                  color: "#ffffff",
-                  border: "none",
-                  fontSize: "0.86rem",
-                  fontWeight: 800,
-                  cursor: studentsRanking.length === 0 ? "not-allowed" : "pointer",
-                  boxShadow: "0 4px 12px rgba(245, 158, 11, 0.35)",
-                  transition: "all 0.15s ease"
-                }}
-                onMouseEnter={(e) => {
-                  if (studentsRanking.length > 0) e.currentTarget.style.filter = "brightness(1.06)";
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.filter = "none";
-                }}
-              >
-                <Download size={16} />
-                <span>Exportar Ranking a CSV</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* 2. Banner de Reglas y Explicación del Cálculo Paralelo */}
-      <div
-        style={{
-          background: "#fffbeb",
-          border: "1.5px solid #fde68a",
-          borderRadius: "1rem",
-          padding: "1.2rem 1.5rem",
-          display: "flex",
-          alignItems: "flex-start",
-          gap: "1rem"
-        }}
-      >
-        <div
-          style={{
-            width: "36px",
-            height: "36px",
-            borderRadius: "50%",
-            background: "#fef3c7",
-            color: "#d97706",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            flexShrink: 0
-          }}
-        >
-          <Info size={20} />
-        </div>
-        <div style={{ fontSize: "0.86rem", color: "#92400e", lineHeight: 1.5 }}>
-          <strong style={{ fontSize: "0.92rem", display: "block", marginBottom: "0.25rem", color: "#78350f" }}>
-            📐 Metodología del Ranking Especial de Premios:
-          </strong>
-          <div>
-            1. <strong>Pruebas Semanales con Bonus:</strong> En este cuadro se suma la calificación real obtenida por el alumno (hasta 6.000 pts si acertó la pregunta bonus). En el registro de notas oficial se mantiene el tope normativo de 5.000 pts.
-          </div>
-          <div>
-            2. <strong>Manuales Individuales:</strong> Se suman directamente sus notas sobre 1.000 pt cada uno sin conversión a factores de puntos oro.
-          </div>
-          <div>
-            3. <strong>Exámenes Parciales:</strong> Se añade la sumatoria directa de los exámenes parciales rendidos.
-          </div>
-          <div style={{ marginTop: "0.35rem", fontWeight: 800, color: "#b45309" }}>
-            Fórmula: Gran Total Premios = Σ Pruebas (con Bonus) + Σ Manuales Individuales + Σ Exámenes Parciales
-          </div>
-        </div>
-      </div>
-
-      {/* 3. Podio de los 3 Mejores Estudiantes (Top 3) */}
-      <div>
-        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "1rem" }}>
-          <Crown size={22} color="#f59e0b" />
-          <h2 style={{ fontSize: "1.25rem", fontWeight: 900, color: "#0f172a", margin: 0 }}>
-            Podio de Premiación (Top 3 de la Sección)
-          </h2>
-        </div>
-
-        {top3Winners.length === 0 ? (
-          <div
-            style={{
-              background: "#ffffff",
-              padding: "2.5rem",
-              borderRadius: "1rem",
-              border: "1px dashed #cbd5e1",
-              textAlign: "center",
-              color: "#64748b"
-            }}
-          >
-            No hay calificaciones registradas para ordenar el podio de esta sección.
-          </div>
-        ) : (
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
-              gap: "1.25rem"
-            }}
-          >
-            {/* Medalla de Oro: 1º Lugar */}
-            {top3Winners[0] && (
-              <div
-                style={{
-                  background: "linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%)",
-                  border: "2px solid #f59e0b",
-                  borderRadius: "1.15rem",
-                  padding: "1.6rem",
-                  boxShadow: "0 10px 25px -5px rgba(245, 158, 11, 0.25)",
-                  display: "flex",
-                  flexDirection: "column",
-                  justifyContent: "space-between",
-                  position: "relative",
-                  overflow: "hidden"
-                }}
-              >
-                <div style={{ position: "absolute", top: "1rem", right: "1rem" }}>
-                  <span
-                    style={{
-                      background: "#f59e0b",
-                      color: "#ffffff",
-                      fontSize: "0.78rem",
-                      fontWeight: 900,
-                      padding: "0.3rem 0.75rem",
-                      borderRadius: "9999px",
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: "0.3rem",
-                      boxShadow: "0 2px 8px rgba(245, 158, 11, 0.4)"
-                    }}
-                  >
-                    🥇 1º LUGAR
-                  </span>
-                </div>
-
-                <div>
-                  <div
-                    style={{
-                      width: "48px",
-                      height: "48px",
-                      borderRadius: "50%",
-                      background: "#fbbf24",
-                      color: "#78350f",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      marginBottom: "1rem"
-                    }}
-                  >
-                    <Crown size={28} />
-                  </div>
-
-                  <h3 style={{ margin: "0 0 0.25rem", fontSize: "1.25rem", fontWeight: 900, color: "#78350f" }}>
-                    {top3Winners[0].nombre}
-                  </h3>
-                  <div style={{ fontSize: "0.85rem", color: "#b45309", fontWeight: 700, marginBottom: "1rem" }}>
-                    Cuenta: {top3Winners[0].cuenta}
-                  </div>
-                </div>
-
-                <div style={{ borderTop: "1.5px dashed #fde68a", paddingTop: "1rem" }}>
-                  <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: "0.5rem" }}>
-                    <span style={{ fontSize: "0.82rem", fontWeight: 800, color: "#92400e" }}>Puntaje Total Premios:</span>
-                    <strong style={{ fontSize: "1.55rem", fontWeight: 900, color: "#78350f" }}>
-                      {top3Winners[0].grandTotalPremios.toFixed(3)} pts
-                    </strong>
-                  </div>
-
-                  <div style={{ display: "flex", flexDirection: "column", gap: "0.35rem", fontSize: "0.78rem", color: "#92400e" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between" }}>
-                      <span>Pruebas con Bonus:</span>
-                      <strong>{top3Winners[0].totalPruebasBonus.toFixed(3)} pts</strong>
-                    </div>
-                    {top3Winners[0].bonusExtraTotal > 0 && (
-                      <div style={{ display: "flex", justifyContent: "space-between", color: "#b45309", fontWeight: 800 }}>
-                        <span>⭐ Bonus extra sumado:</span>
-                        <span>+{top3Winners[0].bonusExtraTotal.toFixed(3)} pts</span>
-                      </div>
-                    )}
-                    <div style={{ display: "flex", justifyContent: "space-between" }}>
-                      <span>Manuales individuales:</span>
-                      <strong>{top3Winners[0].totalManuales.toFixed(3)} pts</strong>
-                    </div>
-                    <div style={{ display: "flex", justifyContent: "space-between" }}>
-                      <span>Exámenes parciales:</span>
-                      <strong>{top3Winners[0].totalExamenes.toFixed(3)} pts</strong>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Medalla de Plata: 2º Lugar */}
-            {top3Winners[1] && (
-              <div
-                style={{
-                  background: "linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%)",
-                  border: "2px solid #94a3b8",
-                  borderRadius: "1.15rem",
-                  padding: "1.6rem",
-                  boxShadow: "0 10px 25px -5px rgba(148, 163, 184, 0.2)",
-                  display: "flex",
-                  flexDirection: "column",
-                  justifyContent: "space-between",
-                  position: "relative",
-                  overflow: "hidden"
-                }}
-              >
-                <div style={{ position: "absolute", top: "1rem", right: "1rem" }}>
-                  <span
-                    style={{
-                      background: "#64748b",
-                      color: "#ffffff",
-                      fontSize: "0.78rem",
-                      fontWeight: 900,
-                      padding: "0.3rem 0.75rem",
-                      borderRadius: "9999px",
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: "0.3rem"
-                    }}
-                  >
-                    🥈 2º LUGAR
-                  </span>
-                </div>
-
-                <div>
-                  <div
-                    style={{
-                      width: "48px",
-                      height: "48px",
-                      borderRadius: "50%",
-                      background: "#cbd5e1",
-                      color: "#334155",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      marginBottom: "1rem"
-                    }}
-                  >
-                    <Medal size={26} />
-                  </div>
-
-                  <h3 style={{ margin: "0 0 0.25rem", fontSize: "1.25rem", fontWeight: 900, color: "#1e293b" }}>
-                    {top3Winners[1].nombre}
-                  </h3>
-                  <div style={{ fontSize: "0.85rem", color: "#64748b", fontWeight: 700, marginBottom: "1rem" }}>
-                    Cuenta: {top3Winners[1].cuenta}
-                  </div>
-                </div>
-
-                <div style={{ borderTop: "1.5px dashed #cbd5e1", paddingTop: "1rem" }}>
-                  <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: "0.5rem" }}>
-                    <span style={{ fontSize: "0.82rem", fontWeight: 800, color: "#475569" }}>Puntaje Total Premios:</span>
-                    <strong style={{ fontSize: "1.55rem", fontWeight: 900, color: "#1e293b" }}>
-                      {top3Winners[1].grandTotalPremios.toFixed(3)} pts
-                    </strong>
-                  </div>
-
-                  <div style={{ display: "flex", flexDirection: "column", gap: "0.35rem", fontSize: "0.78rem", color: "#475569" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between" }}>
-                      <span>Pruebas con Bonus:</span>
-                      <strong>{top3Winners[1].totalPruebasBonus.toFixed(3)} pts</strong>
-                    </div>
-                    {top3Winners[1].bonusExtraTotal > 0 && (
-                      <div style={{ display: "flex", justifyContent: "space-between", color: "#0284c7", fontWeight: 800 }}>
-                        <span>⭐ Bonus extra sumado:</span>
-                        <span>+{top3Winners[1].bonusExtraTotal.toFixed(3)} pts</span>
-                      </div>
-                    )}
-                    <div style={{ display: "flex", justifyContent: "space-between" }}>
-                      <span>Manuales individuales:</span>
-                      <strong>{top3Winners[1].totalManuales.toFixed(3)} pts</strong>
-                    </div>
-                    <div style={{ display: "flex", justifyContent: "space-between" }}>
-                      <span>Exámenes parciales:</span>
-                      <strong>{top3Winners[1].totalExamenes.toFixed(3)} pts</strong>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Medalla de Bronce: 3º Lugar */}
-            {top3Winners[2] && (
-              <div
-                style={{
-                  background: "linear-gradient(135deg, #fff7ed 0%, #ffedd5 100%)",
-                  border: "2px solid #ea580c",
-                  borderRadius: "1.15rem",
-                  padding: "1.6rem",
-                  boxShadow: "0 10px 25px -5px rgba(234, 88, 12, 0.18)",
-                  display: "flex",
-                  flexDirection: "column",
-                  justifyContent: "space-between",
-                  position: "relative",
-                  overflow: "hidden"
-                }}
-              >
-                <div style={{ position: "absolute", top: "1rem", right: "1rem" }}>
-                  <span
-                    style={{
-                      background: "#c2410c",
-                      color: "#ffffff",
-                      fontSize: "0.78rem",
-                      fontWeight: 900,
-                      padding: "0.3rem 0.75rem",
-                      borderRadius: "9999px",
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: "0.3rem"
-                    }}
-                  >
-                    🥉 3º LUGAR
-                  </span>
-                </div>
-
-                <div>
-                  <div
-                    style={{
-                      width: "48px",
-                      height: "48px",
-                      borderRadius: "50%",
-                      background: "#fdba74",
-                      color: "#7c2d12",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      marginBottom: "1rem"
-                    }}
-                  >
-                    <Award size={26} />
-                  </div>
-
-                  <h3 style={{ margin: "0 0 0.25rem", fontSize: "1.25rem", fontWeight: 900, color: "#7c2d12" }}>
-                    {top3Winners[2].nombre}
-                  </h3>
-                  <div style={{ fontSize: "0.85rem", color: "#c2410c", fontWeight: 700, marginBottom: "1rem" }}>
-                    Cuenta: {top3Winners[2].cuenta}
-                  </div>
-                </div>
-
-                <div style={{ borderTop: "1.5px dashed #fed7aa", paddingTop: "1rem" }}>
-                  <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: "0.5rem" }}>
-                    <span style={{ fontSize: "0.82rem", fontWeight: 800, color: "#9a3412" }}>Puntaje Total Premios:</span>
-                    <strong style={{ fontSize: "1.55rem", fontWeight: 900, color: "#7c2d12" }}>
-                      {top3Winners[2].grandTotalPremios.toFixed(3)} pts
-                    </strong>
-                  </div>
-
-                  <div style={{ display: "flex", flexDirection: "column", gap: "0.35rem", fontSize: "0.78rem", color: "#9a3412" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between" }}>
-                      <span>Pruebas con Bonus:</span>
-                      <strong>{top3Winners[2].totalPruebasBonus.toFixed(3)} pts</strong>
-                    </div>
-                    {top3Winners[2].bonusExtraTotal > 0 && (
-                      <div style={{ display: "flex", justifyContent: "space-between", color: "#ea580c", fontWeight: 800 }}>
-                        <span>⭐ Bonus extra sumado:</span>
-                        <span>+{top3Winners[2].bonusExtraTotal.toFixed(3)} pts</span>
-                      </div>
-                    )}
-                    <div style={{ display: "flex", justifyContent: "space-between" }}>
-                      <span>Manuales individuales:</span>
-                      <strong>{top3Winners[2].totalManuales.toFixed(3)} pts</strong>
-                    </div>
-                    <div style={{ display: "flex", justifyContent: "space-between" }}>
-                      <span>Exámenes parciales:</span>
-                      <strong>{top3Winners[2].totalExamenes.toFixed(3)} pts</strong>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* 4. Barra de Filtros, Búsqueda y Opciones de visualización */}
-      <div
-        style={{
-          background: "#ffffff",
-          borderRadius: "1rem",
-          padding: "1.2rem 1.5rem",
-          border: "1px solid #e2e8f0",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          flexWrap: "wrap",
-          gap: "1rem"
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flex: 1, minWidth: "260px" }}>
-          <div style={{ position: "relative", width: "100%", maxWidth: "380px" }}>
-            <Search size={16} color="#94a3b8" style={{ position: "absolute", left: "0.85rem", top: "50%", transform: "translateY(-50%)" }} />
-            <input
-              type="text"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Buscar estudiante por nombre o cuenta..."
-              style={{
-                width: "100%",
-                padding: "0.55rem 0.85rem 0.55rem 2.3rem",
-                borderRadius: "0.55rem",
-                border: "1.5px solid #cbd5e1",
-                fontSize: "0.85rem",
-                outline: "none"
-              }}
-            />
-          </div>
-
-          <div style={{ display: "flex", alignItems: "center", gap: "0.35rem" }}>
-            <button
-              type="button"
-              onClick={() => setFilterType("todos")}
-              style={{
-                padding: "0.45rem 0.85rem",
-                borderRadius: "0.5rem",
-                border: filterType === "todos" ? "1.5px solid #0284c7" : "1px solid #cbd5e1",
-                background: filterType === "todos" ? "#e0f2fe" : "#ffffff",
-                color: filterType === "todos" ? "#0369a1" : "#475569",
-                fontSize: "0.8rem",
-                fontWeight: 700,
-                cursor: "pointer"
-              }}
-            >
-              Todos ({studentsRanking.length})
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setFilterType("top3")}
-              style={{
-                padding: "0.45rem 0.85rem",
-                borderRadius: "0.5rem",
-                border: filterType === "top3" ? "1.5px solid #f59e0b" : "1px solid #cbd5e1",
-                background: filterType === "top3" ? "#fef3c7" : "#ffffff",
-                color: filterType === "top3" ? "#b45309" : "#475569",
-                fontSize: "0.8rem",
-                fontWeight: 700,
-                cursor: "pointer"
-              }}
-            >
-              🏆 Podio Top 3
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setFilterType("con_bonus")}
-              style={{
-                padding: "0.45rem 0.85rem",
-                borderRadius: "0.5rem",
-                border: filterType === "con_bonus" ? "1.5px solid #10b981" : "1px solid #cbd5e1",
-                background: filterType === "con_bonus" ? "#ecfdf5" : "#ffffff",
-                color: filterType === "con_bonus" ? "#047857" : "#475569",
-                fontSize: "0.8rem",
-                fontWeight: 700,
-                cursor: "pointer"
-              }}
-            >
-              ⭐ Con Bonus Ganado
-            </button>
-          </div>
-        </div>
-
-        <button
-          type="button"
-          onClick={() => setShowDetailColumns(!showDetailColumns)}
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: "0.4rem",
-            padding: "0.5rem 0.95rem",
-            borderRadius: "0.55rem",
-            background: "#f8fafc",
-            border: "1px solid #cbd5e1",
-            color: "#334155",
-            fontSize: "0.8rem",
-            fontWeight: 700,
-            cursor: "pointer"
-          }}
-        >
-          {showDetailColumns ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
-          <span>{showDetailColumns ? "Ocultar Columnas Individuales" : "Ver Columnas Individuales"}</span>
-        </button>
-      </div>
-
-      {/* 5. Tabla Completa de Calificaciones Paralelas y Premios */}
-      <div
-        style={{
-          background: "#ffffff",
-          borderRadius: "1rem",
-          border: "1.5px solid #e2e8f0",
-          boxShadow: "0 4px 16px -2px rgba(0, 0, 0, 0.04)",
-          overflow: "hidden"
-        }}
-      >
-        <div style={{ padding: "1.2rem 1.5rem", borderBottom: "1px solid #e2e8f0", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <div>
-            <h3 style={{ margin: 0, fontSize: "1.05rem", fontWeight: 800, color: "#0f172a" }}>
-              Tabla General de Calificaciones para Premiación
-            </h3>
-            <span style={{ fontSize: "0.78rem", color: "#64748b" }}>
-              {filteredRanking.length} estudiantes ordenados de mayor a menor puntaje
-            </span>
-          </div>
-        </div>
-
-        {filteredRanking.length === 0 ? (
-          <div style={{ padding: "3rem", textAlign: "center", color: "#64748b" }}>
-            No se encontraron estudiantes con los filtros seleccionados.
-          </div>
-        ) : (
-          <div style={{ overflowX: "auto", maxWidth: "100%" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.82rem", textAlign: "left" }}>
-              <thead>
-                <tr style={{ background: "#f8fafc", borderBottom: "2px solid #e2e8f0", color: "#475569" }}>
-                  <th style={{ padding: "0.85rem 1rem", fontWeight: 800, textAlign: "center", width: "70px" }}>Pos.</th>
-                  <th style={{ padding: "0.85rem 1rem", fontWeight: 800 }}>Estudiante</th>
-                  <th style={{ padding: "0.85rem 1rem", fontWeight: 800, textAlign: "center", background: "#fef3c7", color: "#78350f" }}>
-                    🏆 Gran Total Premios
-                  </th>
-                  <th style={{ padding: "0.85rem 1rem", fontWeight: 800, textAlign: "center", color: "#b45309" }}>
-                    ⭐ Bonus Extra
-                  </th>
-                  <th style={{ padding: "0.85rem 1rem", fontWeight: 800, textAlign: "center", background: "#f0fdf4", color: "#166534" }}>
-                    Total Pruebas (c/ Bonus)
-                  </th>
-
-                  {/* Columnas individuales de pruebas */}
-                  {showDetailColumns &&
-                    regularWeeks.map((w) => (
-                      <th
-                        key={`th_sem_${w.numero_semana}`}
-                        style={{
-                          padding: "0.75rem 0.6rem",
-                          fontWeight: 700,
-                          textAlign: "center",
-                          fontSize: "0.74rem",
-                          color: "#64748b",
-                          borderLeft: "1px solid #e2e8f0",
-                          whiteSpace: "nowrap"
-                        }}
-                        title={`Prueba de Semana ${w.numero_semana} (hasta 6 pts con bonus)`}
-                      >
-                        Prueba Sem {w.numero_semana}
-                      </th>
-                    ))}
-
-                  <th style={{ padding: "0.85rem 1rem", fontWeight: 800, textAlign: "center", background: "#eff6ff", color: "#1e40af" }}>
-                    Total Manuales (1 pt)
-                  </th>
-
-                  {/* Columnas individuales de manuales */}
-                  {showDetailColumns &&
-                    evaluableTopics.map((t, idx) => (
-                      <th
-                        key={`th_man_${t.id || idx}`}
-                        style={{
-                          padding: "0.75rem 0.6rem",
-                          fontWeight: 700,
-                          textAlign: "center",
-                          fontSize: "0.72rem",
-                          color: "#64748b",
-                          borderLeft: "1px solid #e2e8f0",
-                          whiteSpace: "nowrap"
-                        }}
-                        title={t.titulo || `Manual Tema ${t.numero_tema || idx + 1}`}
-                      >
-                        Man. {t.numero_tema || idx + 1}
-                      </th>
-                    ))}
-
-                  <th style={{ padding: "0.85rem 1rem", fontWeight: 800, textAlign: "center", background: "#faf5ff", color: "#6b21a8" }}>
-                    Total Exámenes
-                  </th>
-
-                  {/* Columnas individuales de exámenes */}
-                  {showDetailColumns &&
-                    examWeeks.map((ew, idx) => (
-                      <th
-                        key={`th_exam_${ew.numero_semana || idx}`}
-                        style={{
-                          padding: "0.75rem 0.6rem",
-                          fontWeight: 700,
-                          textAlign: "center",
-                          fontSize: "0.74rem",
-                          color: "#64748b",
-                          borderLeft: "1px solid #e2e8f0",
-                          whiteSpace: "nowrap"
-                        }}
-                      >
-                        {ew.parcial || `Examen ${idx + 1}`}
-                      </th>
-                    ))}
-                </tr>
-              </thead>
-
-              <tbody>
-                {filteredRanking.map((st) => {
-                  const isGold = st.posicion === 1;
-                  const isSilver = st.posicion === 2;
-                  const isBronze = st.posicion === 3;
-
-                  let rowBg = "#ffffff";
-                  if (isGold) rowBg = "#fffdf5";
-                  else if (isSilver) rowBg = "#fafafa";
-                  else if (isBronze) rowBg = "#fffaf5";
-
-                  return (
-                    <tr
-                      key={st.id || st.cuenta}
-                      style={{
-                        background: rowBg,
-                        borderBottom: "1px solid #f1f5f9",
-                        transition: "background 0.15s ease"
-                      }}
-                      onMouseEnter={(e) => {
-                        e.currentTarget.style.background = "#f1f5f9";
-                      }}
-                      onMouseLeave={(e) => {
-                        e.currentTarget.style.background = rowBg;
-                      }}
-                    >
-                      {/* Posición */}
-                      <td style={{ padding: "0.85rem 1rem", textAlign: "center" }}>
-                        {isGold && (
-                          <span
-                            style={{
-                              display: "inline-flex",
-                              alignItems: "center",
-                              justifyContent: "center",
-                              width: "28px",
-                              height: "28px",
-                              borderRadius: "50%",
-                              background: "#fbbf24",
-                              color: "#78350f",
-                              fontWeight: 900,
-                              fontSize: "0.82rem",
-                              boxShadow: "0 2px 5px rgba(251, 191, 36, 0.4)"
-                            }}
-                          >
-                            🥇
-                          </span>
-                        )}
-                        {isSilver && (
-                          <span
-                            style={{
-                              display: "inline-flex",
-                              alignItems: "center",
-                              justifyContent: "center",
-                              width: "28px",
-                              height: "28px",
-                              borderRadius: "50%",
-                              background: "#cbd5e1",
-                              color: "#1e293b",
-                              fontWeight: 900,
-                              fontSize: "0.82rem"
-                            }}
-                          >
-                            🥈
-                          </span>
-                        )}
-                        {isBronze && (
-                          <span
-                            style={{
-                              display: "inline-flex",
-                              alignItems: "center",
-                              justifyContent: "center",
-                              width: "28px",
-                              height: "28px",
-                              borderRadius: "50%",
-                              background: "#fdba74",
-                              color: "#7c2d12",
-                              fontWeight: 900,
-                              fontSize: "0.82rem"
-                            }}
-                          >
-                            🥉
-                          </span>
-                        )}
-                        {!isGold && !isSilver && !isBronze && (
-                          <span style={{ color: "#64748b", fontWeight: 800 }}>#{st.posicion}</span>
-                        )}
-                      </td>
-
-                      {/* Nombre y Cuenta */}
-                      <td style={{ padding: "0.85rem 1rem" }}>
-                        <div style={{ fontWeight: 800, color: "#0f172a", fontSize: "0.88rem" }}>{st.nombre}</div>
-                        <div style={{ fontSize: "0.76rem", color: "#64748b", fontWeight: 600 }}>
-                          Cuenta: <span style={{ color: "#0284c7" }}>{st.cuenta}</span>
-                        </div>
-                      </td>
-
-                      {/* Gran Total Premios */}
-                      <td style={{ padding: "0.85rem 1rem", textAlign: "center", background: isGold ? "#fef3c7" : "#fffbeb" }}>
-                        <span
-                          style={{
-                            fontSize: "1.05rem",
-                            fontWeight: 900,
-                            color: "#78350f"
-                          }}
-                        >
-                          {st.grandTotalPremios.toFixed(3)}
-                        </span>
-                      </td>
-
-                      {/* Bonus Extra */}
-                      <td style={{ padding: "0.85rem 1rem", textAlign: "center" }}>
-                        {st.bonusExtraTotal > 0 ? (
-                          <span
-                            style={{
-                              display: "inline-flex",
-                              alignItems: "center",
-                              gap: "0.2rem",
-                              padding: "0.15rem 0.5rem",
-                              borderRadius: "9999px",
-                              background: "#fef3c7",
-                              color: "#b45309",
-                              border: "1px solid #fde68a",
-                              fontWeight: 800,
-                              fontSize: "0.76rem"
-                            }}
-                          >
-                            +{st.bonusExtraTotal.toFixed(3)}
-                          </span>
-                        ) : (
-                          <span style={{ color: "#cbd5e1" }}>—</span>
-                        )}
-                      </td>
-
-                      {/* Total Pruebas (con Bonus) */}
-                      <td style={{ padding: "0.85rem 1rem", textAlign: "center", background: "#f0fdf4" }}>
-                        <strong style={{ color: "#166534", fontSize: "0.92rem" }}>
-                          {st.totalPruebasBonus.toFixed(3)}
-                        </strong>
-                      </td>
-
-                      {/* Desglose Pruebas */}
-                      {showDetailColumns &&
-                        st.pruebasDesglose.map((p) => {
-                          const hasScore = p.notaReal !== null;
-                          const hasBonus = p.tieneBonus;
-
-                          return (
-                            <td
-                              key={`td_pr_${st.cuenta}_sem_${p.semana}`}
-                              style={{
-                                padding: "0.75rem 0.5rem",
-                                textAlign: "center",
-                                borderLeft: "1px solid #f1f5f9"
-                              }}
-                            >
-                              {hasScore ? (
-                                hasBonus ? (
-                                  <span
-                                    style={{
-                                      display: "inline-block",
-                                      padding: "0.1rem 0.35rem",
-                                      borderRadius: "0.3rem",
-                                      background: "#fef3c7",
-                                      color: "#b45309",
-                                      fontWeight: 900,
-                                      border: "1px solid #fde68a"
-                                    }}
-                                    title={`Nota real con bonus: ${p.notaReal.toFixed(3)} (Oficial en registro: ${p.notaOficial?.toFixed(3) || "5.000"})`}
-                                  >
-                                    ⭐ {p.notaReal.toFixed(3)}
-                                  </span>
-                                ) : (
-                                  <span style={{ fontWeight: 700, color: "#334155" }}>
-                                    {p.notaReal.toFixed(3)}
-                                  </span>
-                                )
-                              ) : (
-                                <span style={{ color: "#cbd5e1" }}>—</span>
-                              )}
-                            </td>
-                          );
-                        })}
-
-                      {/* Total Manuales */}
-                      <td style={{ padding: "0.85rem 1rem", textAlign: "center", background: "#eff6ff" }}>
-                        <strong style={{ color: "#1e40af", fontSize: "0.92rem" }}>
-                          {st.totalManuales.toFixed(3)}
-                        </strong>
-                      </td>
-
-                      {/* Desglose Manuales */}
-                      {showDetailColumns &&
-                        st.manualesDesglose.map((m, idx) => (
-                          <td
-                            key={`td_man_${st.cuenta}_${m.temaId || idx}`}
-                            style={{
-                              padding: "0.75rem 0.5rem",
-                              textAlign: "center",
-                              borderLeft: "1px solid #f1f5f9"
-                            }}
-                          >
-                            {m.nota !== null ? (
-                              <span style={{ fontWeight: 600, color: "#334155" }}>
-                                {m.nota.toFixed(3)}
-                              </span>
-                            ) : (
-                              <span style={{ color: "#cbd5e1" }}>—</span>
-                            )}
-                          </td>
-                        ))}
-
-                      {/* Total Exámenes */}
-                      <td style={{ padding: "0.85rem 1rem", textAlign: "center", background: "#faf5ff" }}>
-                        <strong style={{ color: "#6b21a8", fontSize: "0.92rem" }}>
-                          {st.totalExamenes.toFixed(3)}
-                        </strong>
-                      </td>
-
-                      {/* Desglose Exámenes */}
-                      {showDetailColumns &&
-                        st.examenesDesglose.map((e, idx) => (
-                          <td
-                            key={`td_exam_${st.cuenta}_${idx}`}
-                            style={{
-                              padding: "0.75rem 0.5rem",
-                              textAlign: "center",
-                              borderLeft: "1px solid #f1f5f9"
-                            }}
-                          >
-                            {e.nota !== null ? (
-                              <span style={{ fontWeight: 700, color: "#334155" }}>
-                                {e.nota.toFixed(3)}
-                              </span>
-                            ) : (
-                              <span style={{ color: "#cbd5e1" }}>—</span>
-                            )}
-                          </td>
-                        ))}
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-    </div>
+            <p className="section-awards__results" role="status">{filteredRanking.length} de {studentsRanking.length} estudiantes · De mayor a menor puntaje</p>
+            {filteredRanking.length ? <ol className={`section-awards__ranking section-awards__ranking--${viewMode}`} aria-label="Clasificación de estudiantes">
+              {filteredRanking.map(student => <li className="section-awards__student" key={student.id || student.cuenta} data-podium={student.esPodio}>
+                <div className="section-awards__student-main"><div className="section-awards__identity"><span className="section-awards__position" aria-label={`Puesto ${student.posicion}`}>{student.posicion <= 3 && <Medal size={15} aria-hidden="true" />}#{student.posicion}</span><div><h4>{student.nombre}</h4><p className="section-awards__account">Cuenta: {student.cuenta}</p></div></div><div className="section-awards__student-score"><span>Total premios</span><strong>{points(student.grandTotalPremios)}<small> pts</small></strong></div></div>
+                <dl className="section-awards__totals"><div><dt><FileText size={14} aria-hidden="true" />Pruebas con bonus</dt><dd>{points(student.totalPruebasBonus)}</dd></div><div><dt><BookOpen size={14} aria-hidden="true" />Manuales</dt><dd>{points(student.totalManuales)}</dd></div><div><dt><Medal size={14} aria-hidden="true" />Exámenes</dt><dd>{points(student.totalExamenes)}</dd></div></dl>
+                <p className="section-awards__bonus-note">{student.bonusExtraTotal > 0 ? <><Star size={14} aria-hidden="true" />Bonus incluido: +{points(student.bonusExtraTotal)} pts</> : "Sin bonus extra registrado"}</p>
+                {renderBreakdown(student)}
+              </li>)}
+            </ol> : <div className="section-awards__empty"><Search size={30} aria-hidden="true" /><h3>No hay coincidencias</h3><p>Prueba otro nombre, número de cuenta o filtro.</p><button type="button" className="section-awards__button" onClick={resetFilters}>Limpiar filtros</button></div>}
+          </section>
+        </> : <div className="section-awards__empty"><Trophy size={36} aria-hidden="true" /><h3>El cuadro de honor empieza aquí</h3><p>Cuando haya estudiantes matriculados, verás su clasificación y el desglose de sus puntajes.</p></div>}
+      </>}
+    </section>
   );
 }

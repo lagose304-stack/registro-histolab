@@ -1,3 +1,5 @@
+import QuizItemResponse from "./QuizItemResponse";
+import { isQuizItemMultiSlot, quizItemSlotCount, quizSlotLabel } from "../../../shared/quizItems.mjs";
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import {
   GraduationCap,
@@ -700,10 +702,10 @@ export default function StudentPortalView({ student, notify = () => {} }) {
         initAnswers[q.id]["respuesta"] = esPreguntaPerdida ? "sin_responder" : "";
       } else {
         (q.items || []).forEach((it) => {
-          if (it.tipo === "listado") {
+          if (isQuizItemMultiSlot(it)) {
             initAnswers[q.id][it.id] = esPreguntaPerdida
-              ? Array(it.cantidad || 3).fill("sin_responder")
-              : Array(it.cantidad || 3).fill("");
+              ? Array(quizItemSlotCount(it)).fill("sin_responder")
+              : Array(quizItemSlotCount(it)).fill("");
           } else {
             initAnswers[q.id][it.id] = esPreguntaPerdida ? "sin_responder" : "";
           }
@@ -763,6 +765,9 @@ export default function StudentPortalView({ student, notify = () => {} }) {
   const handlePostSubmitSuccess = useCallback(
     (submittedData, forcedReason, targetQuiz = activeQuizToTake) => {
       const quizSem = targetQuiz?.numero_semana || submittedData?.numero_semana;
+      // La salida de pantalla completa ocurre antes de que React retire los
+      // listeners del examen. No debe crear una infracción ni restaurar el intento.
+      autoSubmitTriggeredRef.current = true;
 
       if (forcedReason?.motivo === "expulsion_infracciones") {
         notify("Prueba bloqueada y enviada automáticamente por exceder el límite de advertencias.", "warning");
@@ -771,13 +776,13 @@ export default function StudentPortalView({ student, notify = () => {} }) {
       } else if (forcedReason?.motivo === "entrega_anticipada_por_salida") {
         notify("Evaluación finalizada y enviada con las respuestas contestadas hasta este momento.", "info");
       } else {
-        notify("¡Prueba semanal entregada con éxito! Queda registrada en espera de revisión docente.", "success");
+        notify(submittedData?.estado === "calificado" ? "¡Prueba entregada y calificada automáticamente!" : "¡Prueba entregada! Los apartados automáticos están calificados; los demás esperan revisión docente.", "success");
       }
 
       const finalData = {
         ...submittedData,
-        estado: "enviado",
-        fecha_envio: new Date().toISOString()
+        estado: submittedData?.estado || "enviado",
+        fecha_envio: submittedData?.fecha_envio || new Date().toISOString()
       };
 
       if (quizSem) {
@@ -1015,6 +1020,12 @@ export default function StudentPortalView({ student, notify = () => {} }) {
     // Si ya tenemos activeQuizToTake activo (ej. restaurado directamente al montar desde safeStorage)
     if (activeQuizToTake) {
       const sem = activeQuizToTake.numero_semana;
+      if (existingSubmissions[sem]) {
+        autoSubmitTriggeredRef.current = true;
+        clearActiveAttemptFromDisk(sem);
+        setActiveQuizToTake(null);
+        return;
+      }
       const activeKey = getActiveAttemptStorageKey(sem);
       const activeRaw = safeStorage.getItem(activeKey);
       if (activeRaw) {
@@ -1059,6 +1070,10 @@ export default function StudentPortalView({ student, notify = () => {} }) {
 
     for (const quiz of onlineQuizzes) {
       const sem = quiz.numero_semana;
+      if (existingSubmissions[sem]) {
+        clearActiveAttemptFromDisk(sem);
+        continue;
+      }
       const pendingKey = getPendingSubmissionStorageKey(sem);
       const activeKey = getActiveAttemptStorageKey(sem);
 
@@ -1119,7 +1134,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
         }
       }
     }
-  }, [onlineQuizzes, activeQuizToTake, isExamSealedOffline, getActiveAttemptStorageKey, getPendingSubmissionStorageKey, notify]);
+  }, [onlineQuizzes, activeQuizToTake, existingSubmissions, isExamSealedOffline, getActiveAttemptStorageKey, getPendingSubmissionStorageKey, clearActiveAttemptFromDisk, notify]);
 
   // Interceptor para evitar cierre o recarga involuntaria de pestaña durante la prueba
   useEffect(() => {
@@ -2137,36 +2152,27 @@ export default function StudentPortalView({ student, notify = () => {} }) {
   // Garantiza cero mezclas ni translocaciones entre periodos académicos
   // =========================================================================
   const parcialesData = useMemo(() => {
-    const pDefs = [
-      { key: "I", label: "I Parcial", roman: "I", accent: "#3b82f6", bgLight: "#eff6ff", borderLight: "#bfdbfe" },
-      { key: "II", label: "II Parcial", roman: "II", accent: "#8b5cf6", bgLight: "#f5f3ff", borderLight: "#ddd6fe" },
-      { key: "III", label: "III Parcial", roman: "III", accent: "#ec4899", bgLight: "#fdf2f8", borderLight: "#fbcfe8" }
+    const palette = [
+      { accent: "#3b82f6", bgLight: "#eff6ff", borderLight: "#bfdbfe" },
+      { accent: "#8b5cf6", bgLight: "#f5f3ff", borderLight: "#ddd6fe" },
+      { accent: "#ec4899", bgLight: "#fdf2f8", borderLight: "#fbcfe8" }
     ];
-
-    // Mapeo canónico de semana a Parcial
-    const weekToParcialMap = new Map();
-    (activeCareerWeeks || []).forEach((w) => {
-      const semNum = Number(w.numero_semana);
-      const rawP = String(w.parcial || "").trim().toLowerCase();
-      let key = "I";
-      if (rawP.includes("iii") || rawP.includes("tercer") || rawP === "3") {
-        key = "III";
-      } else if (rawP.includes("ii") || rawP.includes("segundo") || rawP === "2") {
-        key = "II";
-      } else if (rawP.includes("i") || rawP.includes("primer") || rawP === "1") {
-        key = "I";
-      } else {
-        // Fallback proporcional por rango de semanas
-        key = semNum <= 5 ? "I" : semNum <= 10 ? "II" : "III";
-      }
-      weekToParcialMap.set(semNum, key);
-    });
+    const groupName = week => {
+      const exams = examenesList || [];
+      const exam = exams.find(ex => Number(ex.semana) >= Number(week.numero_semana)) || exams[exams.length - 1];
+      return String(week.parcial || exam?.parcialName || "I Parcial").trim();
+    };
+    const names = [...new Set((activeCareerWeeks || []).length ? activeCareerWeeks.map(groupName) : (examenesList || []).map(exam => exam.parcialName))];
+    const pDefs = names.map((label, index) => ({
+      key: label, label, roman: ["I", "II", "III", "IV", "V"][index] || String(index + 1), ...palette[index % palette.length]
+    }));
+    const weekToParcialMap = new Map((activeCareerWeeks || []).map(week => [Number(week.numero_semana), groupName(week)]));
 
     // Mapeo de tema a Parcial por medio del temario oficial
     const topicToParcialMap = new Map();
     (temario || []).forEach((t) => {
       const semNum = Number(t.semana) || 0;
-      const key = weekToParcialMap.get(semNum) || (semNum <= 5 ? "I" : semNum <= 10 ? "II" : "III");
+      const key = weekToParcialMap.get(semNum) || groupName({ numero_semana: semNum, parcial: t.parcial });
       if (t.id) topicToParcialMap.set(String(t.id), key);
       if (t.titulo) topicToParcialMap.set(String(t.titulo).trim().toLowerCase(), key);
     });
@@ -2180,10 +2186,8 @@ export default function StudentPortalView({ student, notify = () => {} }) {
       });
       const weekNums = weeks.map((w) => Number(w.numero_semana));
 
-      // Examen oficial de este parcial
-      const examen = (examenesList || []).find((ex) => {
-        return ex.parcialKey === pKey || weekNums.includes(Number(ex.semana));
-      }) || null;
+      // Cada examen conserva su semana, incluso si hay varios en un parcial.
+      const examenes = (examenesList || []).filter(ex => ex.semana ? weekNums.includes(Number(ex.semana)) : ex.parcialName === pDef.label);
 
       // Manuales pertenecientes a este parcial
       const manuales = (manualesList || []).filter((m) => {
@@ -2252,9 +2256,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
       });
       subtotalPruebas = Math.round(subtotalPruebas * 1000) / 1000;
 
-      const notaExamenNum = (examen && examen.nota !== null && examen.nota !== undefined && examen.nota !== "" && !isNaN(Number(examen.nota)))
-        ? Number(examen.nota)
-        : null;
+      const notaExamenNum = examenes.reduce((sum, exam) => sum + (Number(exam.nota) || 0), 0);
 
       const totalPuntosParcial = Math.round((subtotalManuales + subtotalPruebas + (notaExamenNum || 0)) * 1000) / 1000;
       const minSem = weekNums.length > 0 ? Math.min(...weekNums) : null;
@@ -2266,7 +2268,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
         weeks,
         weekNums,
         rangoSemanasText,
-        examen,
+        examenes,
         manuales,
         pruebas,
         semanasAsistencia,
@@ -3562,7 +3564,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                       }}
                     >
                       {/* CARD 1: EXAMEN PARCIAL */}
-                      <div
+                      {(p.examenes.length ? p.examenes : [null]).map(examen => <div key={examen?.id || "sin-examen"}
                         style={{
                           background: "#faf5ff",
                           border: "1.5px solid #e9d5ff",
@@ -3579,11 +3581,11 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                             <div style={{ display: "flex", alignItems: "center", gap: "0.45rem" }}>
                               <GraduationCap size={18} color="#7c3aed" />
                               <strong style={{ fontSize: "0.88rem", color: "#581c87" }}>
-                                {p.examen?.label || `Examen ${p.label}`}
+                                {examen?.label || `Examen ${p.label}`}
                               </strong>
                             </div>
                             {(() => {
-                              const isExamGraded = p.examen?.nota !== null && p.examen?.nota !== undefined && p.examen?.nota !== "";
+                              const isExamGraded = examen?.nota !== null && examen?.nota !== undefined && examen?.nota !== "";
                               return (
                                 <span
                                   style={{
@@ -3603,14 +3605,14 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                           </div>
 
                           <div style={{ fontSize: "1.75rem", fontWeight: 900, color: "#581c87", lineHeight: 1.1 }}>
-                            {formatGrade(p.examen?.nota)}{" "}
+                            {formatGrade(examen?.nota)}{" "}
                             <span style={{ fontSize: "0.85rem", fontWeight: 700, color: "#9333ea" }}>
-                              / {p.examen?.ptsMax || 10} pts
+                              / {examen?.ptsMax || 10} pts
                             </span>
                           </div>
 
                           <div style={{ fontSize: "0.74rem", color: "#6b21a8", marginTop: "0.35rem", fontWeight: 600 }}>
-                            {p.examen?.subLabel || `Evaluación oficial de ${p.label}`}
+                            {examen?.subLabel || `Evaluación oficial de ${p.label}`}
                           </div>
                         </div>
 
@@ -3633,7 +3635,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                             <span>Inhabilitado por 2+ faltas injustificadas en este parcial.</span>
                           </div>
                         )}
-                      </div>
+                      </div>)}
 
                       {/* CARD 2: MANUALES DE LABORATORIO */}
                       <div
@@ -4424,11 +4426,11 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                               studentRespuestas?.[pregunta.id] ??
                               null;
                             const itemLabel = item.instruccion || item.etiqueta || `Inciso ${itemIdx + 1}`;
-                            const isList = item.tipo !== "texto_corto";
-                            const cantSlots = isList ? (parseInt(item.cantidad, 10) || 3) : 1;
+                            const displayCompletion = item.tipo === "completacion" ? item.texto_completar || "" : "";
+                            const isList = isQuizItemMultiSlot(item);
+                            const cantSlots = quizItemSlotCount(item);
                             const defaultItemPts = Math.round((Number(pregunta.puntos || 1.0) / (pregunta.items.length || 1)) * 1000) / 1000;
                             const itemMaxPts = item.puntos !== undefined && !isNaN(Number(item.puntos)) ? Number(item.puntos) : defaultItemPts;
-                            const slotPts = isList ? Math.round((itemMaxPts / cantSlots) * 1000) / 1000 : itemMaxPts;
 
                             // Evaluación directa de todo el apartado (modo texto corto o retrocompatibilidad)
                             const evalItem = evaluaciones[`${pregunta.id}___${item.id}`];
@@ -4464,7 +4466,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "0.4rem" }}>
                                   <div style={{ display: "flex", alignItems: "center", gap: "0.45rem", flexWrap: "wrap" }}>
                                     <strong style={{ fontSize: "0.85rem", color: "#334155" }}>
-                                      {String.fromCharCode(97 + itemIdx)}) {itemLabel}:
+                                      {String.fromCharCode(97 + itemIdx)}) {itemLabel}: {displayCompletion}
                                     </strong>
                                     <span
                                       style={{
@@ -4477,7 +4479,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                                         border: "1px solid #bae6fd"
                                       }}
                                     >
-                                      {itemMaxPts.toFixed(3)} pt(s) {isList ? `(${cantSlots} casillas • ${slotPts.toFixed(3)} pt c/u)` : ""}
+                                      {itemMaxPts.toFixed(3)} pt(s) {isList ? `(${cantSlots} casillas • puntaje distribuido entre casillas)` : ""}
                                     </span>
                                   </div>
 
@@ -4698,7 +4700,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                                                 flexShrink: 0
                                               }}
                                             >
-                                              {rIdx + 1}
+                                              {rIdx + 1}.
                                             </span>
                                             <span
                                               style={{
@@ -4708,7 +4710,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                                                 fontStyle: rowVal && String(rowVal).trim() ? "normal" : "italic"
                                               }}
                                             >
-                                              {rowVal && String(rowVal).trim() ? rowVal : "Sin respuesta enviada"}
+                                              {item.tipo === "terminos_pareados" && <strong>{quizSlotLabel(item,rIdx)} → </strong>}{rowVal && String(rowVal).trim() ? rowVal : "Sin respuesta enviada"}
                                             </span>
                                           </div>
 
@@ -4941,7 +4943,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                             {/* Estatus */}
                             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                               <span style={{ fontSize: "0.75rem", fontWeight: 700, color: "#64748b" }}>
-                                {quiz.preguntas?.length || 0} preguntas • 1:30 min c/u
+                                {quiz.preguntas?.length || 0} preguntas • {formatTimer(Number(quiz.tiempo_por_pregunta_segundos || 90))} min c/u
                               </span>
 
                               {isGraded ? (
@@ -5366,7 +5368,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                             </div>
 
                             <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: "0.75rem", padding: "1rem", display: "flex", flexDirection: "column", gap: "0.3rem" }}>
-                              <strong style={{ fontSize: "0.86rem", color: "#15803d" }}>⏱️ 1:30 min por Pregunta</strong>
+                              <strong style={{ fontSize: "0.86rem", color: "#15803d" }}>⏱️ {formatTimer(Number(activeQuizToTake.tiempo_por_pregunta_segundos || 90))} min por Pregunta</strong>
                               <span style={{ fontSize: "0.76rem", color: "#166534" }}>Tiempo global sincronizado. El cronómetro corre en directo para toda la sección.</span>
                             </div>
 
@@ -5715,6 +5717,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                             (currentActiveQ.items || []).map((item, itemIdx) => {
                               const currentVal = quizAnswers?.[currentActiveQ.id]?.[item.id];
                               const itemLabel = item.instruccion || item.etiqueta || `Inciso ${itemIdx + 1}`;
+                            const displayCompletion = item.tipo === "completacion" ? item.texto_completar || "" : "";
                               return (
                                 <div
                                   key={item.id}
@@ -5730,7 +5733,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                                 >
                                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "0.4rem" }}>
                                     <label style={{ fontSize: "0.88rem", fontWeight: 800, color: "#1e293b", margin: 0 }}>
-                                      {String.fromCharCode(97 + itemIdx)}) {itemLabel}:
+                                      {String.fromCharCode(97 + itemIdx)}) {itemLabel}: {displayCompletion}
                                     </label>
                                     {item.puntos !== undefined && (
                                       <span style={{ fontSize: "0.75rem", fontWeight: 800, color: "#0369a1", background: "#ffffff", border: "1px solid #bae6fd", padding: "0.15rem 0.5rem", borderRadius: "0.35rem" }}>
@@ -5739,97 +5742,11 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                                     )}
                                   </div>
 
-                                  {item.tipo === "texto_corto" ? (
-                                    <textarea
-                                      rows={2}
-                                      className="sp-quiz-input sp-quiz-textarea"
-                                      value={typeof currentVal === "string" ? currentVal : ""}
-                                      readOnly={isExamSealedOffline || submittingQuiz || timeRemainingSeconds <= 0}
-                                      onChange={(e) => {
-                                        handleAnswerChange(currentActiveQ.id, item.id, e.target.value);
-                                        e.target.style.height = "auto";
-                                        e.target.style.height = `${Math.max(56, e.target.scrollHeight)}px`;
-                                      }}
-                                      onBlur={() => handleAnswerBlur(currentActiveQ.id)}
-                                      onFocus={(e) => {
-                                        const target = e.target;
-                                        setTimeout(() => target.scrollIntoView({ behavior: "smooth", block: "center" }), 250);
-                                      }}
-                                      onKeyDown={(e) => {
-                                        if (e.key === "Enter" && !e.shiftKey) e.preventDefault();
-                                      }}
-                                      onPaste={(e) => {
-                                        e.preventDefault();
-                                        notify("⚠️ Acción bloqueada por seguridad académica: No está permitido pegar texto.", "warning");
-                                      }}
-                                      autoComplete="off"
-                                      autoCorrect="off"
-                                      spellCheck="false"
-                                      placeholder="Escribe tu respuesta manualmente aquí..."
-                                      style={{
-                                        width: "100%",
-                                        boxSizing: "border-box",
-                                        padding: "0.65rem 0.85rem",
-                                        borderRadius: "0.55rem",
-                                        border: currentVal ? "2px solid #0284c7" : "1.5px solid #cbd5e1",
-                                        background: (isExamSealedOffline || submittingQuiz || timeRemainingSeconds <= 0) ? "#f8fafc" : currentVal ? "#f0f9ff" : "#ffffff",
-                                        fontSize: "0.9rem",
-                                        lineHeight: "1.45",
-                                        fontWeight: 600,
-                                        color: "#0f172a",
-                                        outline: "none",
-                                        resize: "vertical",
-                                        minHeight: "56px",
-                                        fontFamily: "inherit",
-                                        cursor: (isExamSealedOffline || submittingQuiz || timeRemainingSeconds <= 0) ? "not-allowed" : "text"
-                                      }}
-                                    />
-                                  ) : (
-                                    <div style={{ display: "flex", flexDirection: "column", gap: "0.45rem" }}>
-                                      {Array.from({ length: item.cantidad || 3 }).map((_, rIdx) => {
-                                        const rowVal = Array.isArray(currentVal) ? currentVal[rIdx] || "" : "";
-                                        return (
-                                          <div key={rIdx} style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                                            <span style={{ fontSize: "0.84rem", fontWeight: 800, color: "#64748b", width: "22px" }}>
-                                              {rIdx + 1}.
-                                            </span>
-                                            <input
-                                              type="text"
-                                              className="sp-quiz-input"
-                                              value={rowVal}
-                                              readOnly={isExamSealedOffline || submittingQuiz || timeRemainingSeconds <= 0}
-                                              onChange={(e) => handleAnswerChange(currentActiveQ.id, item.id, rIdx, e.target.value)}
-                                              onBlur={() => handleAnswerBlur(currentActiveQ.id)}
-                                              onFocus={(e) => {
-                                                const target = e.target;
-                                                setTimeout(() => target.scrollIntoView({ behavior: "smooth", block: "center" }), 250);
-                                              }}
-                                              onPaste={(e) => {
-                                                e.preventDefault();
-                                                notify("⚠️ Acción bloqueada por seguridad: No está permitido pegar texto.", "warning");
-                                              }}
-                                              autoComplete="off"
-                                              autoCorrect="off"
-                                              spellCheck="false"
-                                              placeholder={`Elemento ${rIdx + 1}...`}
-                                              style={{
-                                                flex: 1,
-                                                padding: "0.55rem 0.8rem",
-                                                borderRadius: "0.5rem",
-                                                border: rowVal ? "2px solid #0284c7" : "1.5px solid #cbd5e1",
-                                                background: (isExamSealedOffline || submittingQuiz || timeRemainingSeconds <= 0) ? "#f8fafc" : rowVal ? "#f0f9ff" : "#ffffff",
-                                                fontSize: "0.86rem",
-                                                fontWeight: 600,
-                                                color: "#0f172a",
-                                                outline: "none",
-                                                cursor: (isExamSealedOffline || submittingQuiz || timeRemainingSeconds <= 0) ? "not-allowed" : "text"
-                                              }}
-                                            />
-                                          </div>
-                                        );
-                                      })}
-                                    </div>
-                                  )}
+                                  <QuizItemResponse item={item} value={currentVal}
+                                    disabled={isExamSealedOffline || submittingQuiz || timeRemainingSeconds <= 0}
+                                    onChange={value => handleAnswerChange(currentActiveQ.id,item.id,value)}
+                                    onBlur={() => handleAnswerBlur(currentActiveQ.id)}
+                                    onPasteBlocked={() => notify("No está permitido pegar texto durante la prueba.", "warning")} />
                                 </div>
                               );
                             })

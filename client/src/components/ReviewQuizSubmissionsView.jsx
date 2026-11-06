@@ -1,3 +1,5 @@
+import { buildAutomaticQuizAssessment, isAutomaticQuizItem, splitQuizPoints } from "../../../shared/quizAutoGrading.mjs";
+import { isQuizItemMultiSlot, quizItemSlotCount, quizItemLabel, quizSlotLabel } from "../../../shared/quizItems.mjs";
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 import {
@@ -250,6 +252,12 @@ export default function ReviewQuizSubmissionsView({
     return { total, calificados, pendientes };
   }, [entregasSemana]);
 
+  const evaluationsFor = submission => {
+    const stored = submission.evaluaciones_incisos || submission.auditoria?.evaluaciones_incisos || {};
+    const automatic = submission.auditoria?.calificacion_automatica?.automaticas || buildAutomaticQuizAssessment(quizSemanal?.preguntas || [],submission.respuestas || {}).automaticas;
+    return {...stored,...automatic};
+  };
+
   // Abrir modal de calificación
   const handleOpenGradeModal = (entrega) => {
     setSelectedEntrega(entrega);
@@ -266,7 +274,7 @@ export default function ReviewQuizSubmissionsView({
                 ? Number(entrega.auditoria.nota_real)
                 : oficial));
 
-    const initialEvals = entrega.evaluaciones_incisos || entrega.auditoria?.evaluaciones_incisos || {};
+    const initialEvals = evaluationsFor(entrega);
     setEvaluaciones(initialEvals);
 
     // Calcular en base a las evaluaciones si existen, o a partir de notas ya registradas
@@ -301,6 +309,7 @@ export default function ReviewQuizSubmissionsView({
 
   // Evaluar un ítem completo (texto corto o reactivo directo)
   const handleEvaluateItem = (preguntaId, itemId, status, maxPoints) => {
+    if (evaluaciones[`${preguntaId}___${itemId}`]?.origen === "automatica") return;
     const numMax = Number(maxPoints) || 0;
     let earned = 0;
     if (status === "buena") earned = numMax;
@@ -332,6 +341,7 @@ export default function ReviewQuizSubmissionsView({
 
   // Evaluar una casilla individual de un apartado tipo listado
   const handleEvaluateSlot = (preguntaId, itemId, slotIdx, status, slotMaxPoints) => {
+    if (evaluaciones[`${preguntaId}___${itemId}___slot_${slotIdx}`]?.origen === "automatica") return;
     const numMax = Number(slotMaxPoints) || 0;
     let earned = 0;
     if (status === "buena") earned = numMax;
@@ -390,12 +400,12 @@ export default function ReviewQuizSubmissionsView({
         const defaultItemPts = Math.round((Number(pregunta.puntos || 1.0) / pregunta.items.length) * 1000) / 1000;
         pregunta.items.forEach((item) => {
           const maxPts = item.puntos !== undefined && !isNaN(Number(item.puntos)) ? Number(item.puntos) : defaultItemPts;
-          const isList = item.tipo !== "texto_corto";
-          const cantSlots = isList ? (parseInt(item.cantidad, 10) || 3) : 1;
+          const isList = isQuizItemMultiSlot(item);
+          const cantSlots = isList ? quizItemSlotCount(item) : 1;
 
           if (isList && cantSlots > 1) {
-            const slotPts = Math.round((maxPts / cantSlots) * 1000) / 1000;
             for (let s = 0; s < cantSlots; s++) {
+              const slotPts = splitQuizPoints(maxPts, cantSlots)[s];
               let earned = 0;
               if (status === "buena") earned = slotPts;
               else if (status === "regular") earned = Math.round((slotPts / 2) * 1000) / 1000;
@@ -472,7 +482,7 @@ export default function ReviewQuizSubmissionsView({
       const res = await api.pruebas.calificar(selectedEntrega.id, payload);
       if (res?.success) {
         notifyRef.current(
-          `¡Calificación guardada (${cleanNotaOficial.toFixed(3)} / 5.000 pts${cleanNotaReal > 5.0 ? ` • ${cleanNotaReal.toFixed(3)} pts con bonus` : ""}) para ${selectedEntrega.nombre_completo}!`,
+          res.data?.estado === "enviado" ? "Revisión guardada. Quedan apartados pendientes de calificar." : `¡Calificación guardada (${cleanNotaOficial.toFixed(3)} / 5.000 pts${cleanNotaReal > 5.0 ? ` • ${cleanNotaReal.toFixed(3)} pts con bonus` : ""}) para ${selectedEntrega.nombre_completo}!`,
           "success"
         );
 
@@ -494,7 +504,8 @@ export default function ReviewQuizSubmissionsView({
                     evaluaciones_incisos: evaluaciones,
                     nota_real: cleanNotaReal
                   },
-                  updated_at: new Date().toISOString()
+                  updated_at: new Date().toISOString(),
+                  ...(res.data || {})
                 }
               : it
           )
@@ -563,7 +574,7 @@ export default function ReviewQuizSubmissionsView({
     // Inicializar mapa de evaluaciones de todos los estudiantes pre-poblando lo ya calificado
     const initialMap = {};
     entregasSemana.forEach((e) => {
-      const existing = e.evaluaciones_incisos || e.auditoria?.evaluaciones_incisos || {};
+      const existing = evaluationsFor(e);
       initialMap[e.id] = { ...existing };
     });
     setQuickEvaluations(initialMap);
@@ -624,6 +635,7 @@ export default function ReviewQuizSubmissionsView({
 
   // Evaluar ítem directo o texto corto en Revisión Rápida
   const handleQuickEvaluateItem = (entregaId, preguntaId, itemId, status, maxPoints) => {
+    if (quickEvaluations[entregaId]?.[`${preguntaId}___${itemId}`]?.origen === "automatica") return;
     const numMax = Number(maxPoints) || 0;
     let earned = 0;
     if (status === "buena") earned = numMax;
@@ -650,6 +662,7 @@ export default function ReviewQuizSubmissionsView({
 
   // Evaluar casilla individual de listado en Revisión Rápida
   const handleQuickEvaluateSlot = (entregaId, preguntaId, itemId, slotIdx, status, slotMaxPoints) => {
+    if (quickEvaluations[entregaId]?.[`${preguntaId}___${itemId}___slot_${slotIdx}`]?.origen === "automatica") return;
     const numMax = Number(slotMaxPoints) || 0;
     let earned = 0;
     if (status === "buena") earned = numMax;
@@ -689,8 +702,8 @@ export default function ReviewQuizSubmissionsView({
       if (evs[`${pregunta.id}___direct`]?.estado) completed++;
     } else {
       pregunta.items.forEach((item) => {
-        const isList = item.tipo !== "texto_corto";
-        const cantSlots = isList ? (parseInt(item.cantidad, 10) || 3) : 1;
+        const isList = isQuizItemMultiSlot(item);
+        const cantSlots = isList ? quizItemSlotCount(item) : 1;
         if (!isList) {
           total++;
           if (evs[`${pregunta.id}___${item.id}`]?.estado) completed++;
@@ -750,11 +763,9 @@ export default function ReviewQuizSubmissionsView({
       const minDelay = new Promise((resolve) => setTimeout(resolve, 350));
 
       // Guardar en el servidor para este alumno específico
-      const apiPromise = api.pruebas.calificar(currentStudent.id, payload).catch((err) => {
-        console.warn("Aviso al sincronizar calificación en revisión rápida:", err);
-      });
-
-      await Promise.all([apiPromise, minDelay]);
+      const apiPromise = api.pruebas.calificar(currentStudent.id, payload);
+      const [savedResponse] = await Promise.all([apiPromise, minDelay]);
+      if (!savedResponse?.success) throw new Error(savedResponse?.message || "No se pudo guardar la revisión.");
 
       // Actualizar en el estado local de entregas
       setEntregasSemana((prev) =>
@@ -772,7 +783,8 @@ export default function ReviewQuizSubmissionsView({
                   ...(it.auditoria || {}),
                   evaluaciones_incisos: studentEvals,
                   nota_real: cleanNotaReal
-                }
+                },
+                ...(savedResponse.data || {})
               }
             : it
         )
@@ -1909,8 +1921,8 @@ export default function ReviewQuizSubmissionsView({
                       qEarned = Number(evaluaciones[`${pregunta.id}___direct`]?.puntos_obtenidos) || 0;
                     } else {
                       pregunta.items.forEach((it) => {
-                        const isList = it.tipo !== "texto_corto";
-                        const cant = isList ? (parseInt(it.cantidad, 10) || 3) : 1;
+                        const isList = isQuizItemMultiSlot(it);
+                        const cant = isList ? quizItemSlotCount(it) : 1;
                         if (isList && cant > 1) {
                           for (let s = 0; s < cant; s++) {
                             qEarned += Number(evaluaciones[`${pregunta.id}___${it.id}___slot_${s}`]?.puntos_obtenidos) || 0;
@@ -2196,11 +2208,11 @@ export default function ReviewQuizSubmissionsView({
                               entregaRespuestas?.[pregunta.id] ??
                               null;
                             const itemLabel = item.instruccion || item.etiqueta || `Apartado ${itemIdx + 1}`;
+                            const displayCompletion = item.tipo === "completacion" ? item.texto_completar || "" : "";
                             const defaultItemPts = Math.round((Number(pregunta.puntos || 1.0) / pregunta.items.length) * 1000) / 1000;
                             const itemMaxPts = item.puntos !== undefined && !isNaN(Number(item.puntos)) ? Number(item.puntos) : defaultItemPts;
-                            const isList = item.tipo !== "texto_corto";
-                            const cantSlots = isList ? (parseInt(item.cantidad, 10) || 3) : 1;
-                            const slotPts = isList ? Math.round((itemMaxPts / cantSlots) * 1000) / 1000 : itemMaxPts;
+                            const isList = isQuizItemMultiSlot(item);
+                            const cantSlots = isList ? quizItemSlotCount(item) : 1;
 
                             if (!isList) {
                               // Modo Texto Corto: evaluación directa para todo el apartado
@@ -2221,7 +2233,7 @@ export default function ReviewQuizSubmissionsView({
                                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "0.3rem" }}>
                                     <div style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
                                       <strong style={{ fontSize: "0.84rem", color: "#334155" }}>
-                                        {String.fromCharCode(97 + itemIdx)}) {itemLabel}:
+                                        {String.fromCharCode(97 + itemIdx)}) {itemLabel}: {displayCompletion}
                                       </strong>
                                       <span
                                         style={{
@@ -2238,7 +2250,7 @@ export default function ReviewQuizSubmissionsView({
                                       </span>
                                     </div>
                                     <span style={{ fontSize: "0.72rem", color: "#64748b", fontWeight: 700 }}>
-                                      Texto corto
+                                      {quizItemLabel(item)}{isAutomaticQuizItem(item) && " · Automática"}
                                     </span>
                                   </div>
 
@@ -2308,6 +2320,7 @@ export default function ReviewQuizSubmissionsView({
                                     <div style={{ display: "flex", alignItems: "center", gap: "0.35rem" }}>
                                       <button
                                         type="button"
+                                        disabled={currentEval?.origen === "automatica"}
                                         onClick={() => handleEvaluateItem(pregunta.id, item.id, "buena", itemMaxPts)}
                                         style={{
                                           display: "inline-flex",
@@ -2330,6 +2343,7 @@ export default function ReviewQuizSubmissionsView({
 
                                       <button
                                         type="button"
+                                        disabled={currentEval?.origen === "automatica"}
                                         onClick={() => handleEvaluateItem(pregunta.id, item.id, "regular", itemMaxPts)}
                                         style={{
                                           display: "inline-flex",
@@ -2350,6 +2364,7 @@ export default function ReviewQuizSubmissionsView({
 
                                       <button
                                         type="button"
+                                        disabled={currentEval?.origen === "automatica"}
                                         onClick={() => handleEvaluateItem(pregunta.id, item.id, "mala", itemMaxPts)}
                                         style={{
                                           display: "inline-flex",
@@ -2407,7 +2422,7 @@ export default function ReviewQuizSubmissionsView({
                                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "0.5rem" }}>
                                   <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", flexWrap: "wrap" }}>
                                     <strong style={{ fontSize: "0.86rem", color: "#334155" }}>
-                                      {String.fromCharCode(97 + itemIdx)}) {itemLabel}:
+                                      {String.fromCharCode(97 + itemIdx)}) {itemLabel}: {displayCompletion}
                                     </strong>
                                     <span
                                       style={{
@@ -2420,7 +2435,7 @@ export default function ReviewQuizSubmissionsView({
                                         border: "1px solid #bfdbfe"
                                       }}
                                     >
-                                      Valor Total: {itemMaxPts.toFixed(3)} pt ({cantSlots} respuestas • {slotPts.toFixed(3)} pt c/u)
+                                      Valor Total: {itemMaxPts.toFixed(3)} pt ({cantSlots} respuestas • puntaje distribuido entre casillas)
                                     </span>
                                   </div>
 
@@ -2483,6 +2498,7 @@ export default function ReviewQuizSubmissionsView({
                                 {/* Listado de Casillas con evaluación individual */}
                                 <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
                                   {Array.from({ length: cantSlots }).map((_, rIdx) => {
+                                    const slotPts = splitQuizPoints(itemMaxPts, cantSlots)[rIdx];
                                     const rowVal = Array.isArray(studentAnswer)
                                       ? studentAnswer[rIdx]
                                       : (typeof studentAnswer === "object" && studentAnswer ? studentAnswer[rIdx] : "");
@@ -2534,7 +2550,7 @@ export default function ReviewQuizSubmissionsView({
                                                 color: rowVal && String(rowVal).trim() ? "#0f172a" : "#94a3b8"
                                               }}
                                             >
-                                              {rowVal && String(rowVal).trim() ? String(rowVal) : "— (Sin respuesta) —"}
+                                              {item.tipo === "terminos_pareados" && <strong>{quizSlotLabel(item,rIdx)} → </strong>}{rowVal && String(rowVal).trim() ? String(rowVal) : "— (Sin respuesta) —"}
                                             </span>
                                           </div>
                                           {expectedAns && (
@@ -2572,6 +2588,7 @@ export default function ReviewQuizSubmissionsView({
 
                                           <button
                                             type="button"
+                                            disabled={slotEval?.origen === "automatica"}
                                             onClick={() => handleEvaluateSlot(pregunta.id, item.id, rIdx, "buena", slotPts)}
                                             style={{
                                               display: "inline-flex",
@@ -2593,6 +2610,7 @@ export default function ReviewQuizSubmissionsView({
 
                                           <button
                                             type="button"
+                                            disabled={slotEval?.origen === "automatica"}
                                             onClick={() => handleEvaluateSlot(pregunta.id, item.id, rIdx, "regular", slotPts)}
                                             style={{
                                               display: "inline-flex",
@@ -2612,6 +2630,7 @@ export default function ReviewQuizSubmissionsView({
 
                                           <button
                                             type="button"
+                                            disabled={slotEval?.origen === "automatica"}
                                             onClick={() => handleEvaluateSlot(pregunta.id, item.id, rIdx, "mala", slotPts)}
                                             style={{
                                               display: "inline-flex",
@@ -3416,11 +3435,11 @@ export default function ReviewQuizSubmissionsView({
                                 null;
 
                               const itemLabel = item.instruccion || item.etiqueta || `Apartado ${itemIdx + 1}`;
+                            const displayCompletion = item.tipo === "completacion" ? item.texto_completar || "" : "";
                               const defaultItemPts = Math.round((Number(currentQ.puntos || 1.0) / currentQ.items.length) * 1000) / 1000;
                               const itemMaxPts = item.puntos !== undefined && !isNaN(Number(item.puntos)) ? Number(item.puntos) : defaultItemPts;
-                              const isList = item.tipo !== "texto_corto";
-                              const cantSlots = isList ? (parseInt(item.cantidad, 10) || 3) : 1;
-                              const slotPts = isList ? Math.round((itemMaxPts / cantSlots) * 1000) / 1000 : itemMaxPts;
+                              const isList = isQuizItemMultiSlot(item);
+                              const cantSlots = isList ? quizItemSlotCount(item) : 1;
 
                               if (!isList) {
                                 // Apartado Texto Corto
@@ -3457,6 +3476,7 @@ export default function ReviewQuizSubmissionsView({
                                     <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.3rem", paddingTop: "0.35rem", borderTop: "1px dashed #cbd5e1" }}>
                                       <button
                                         type="button"
+                                        disabled={curEval?.origen === "automatica"}
                                         onClick={() => handleQuickEvaluateItem(currentStudent.id, currentQ.id, item.id, "buena", itemMaxPts)}
                                         style={{
                                           padding: "0.25rem 0.55rem",
@@ -3473,6 +3493,7 @@ export default function ReviewQuizSubmissionsView({
                                       </button>
                                       <button
                                         type="button"
+                                        disabled={curEval?.origen === "automatica"}
                                         onClick={() => handleQuickEvaluateItem(currentStudent.id, currentQ.id, item.id, "regular", itemMaxPts)}
                                         style={{
                                           padding: "0.25rem 0.5rem",
@@ -3489,6 +3510,7 @@ export default function ReviewQuizSubmissionsView({
                                       </button>
                                       <button
                                         type="button"
+                                        disabled={curEval?.origen === "automatica"}
                                         onClick={() => handleQuickEvaluateItem(currentStudent.id, currentQ.id, item.id, "mala", itemMaxPts)}
                                         style={{
                                           padding: "0.25rem 0.55rem",
@@ -3524,13 +3546,14 @@ export default function ReviewQuizSubmissionsView({
                                 >
                                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap" }}>
                                     <strong style={{ fontSize: "0.82rem", color: "#334155" }}>
-                                      {String.fromCharCode(97 + itemIdx)}) {itemLabel} ({cantSlots} casillas • {slotPts.toFixed(3)} pt c/u):
+                                      {String.fromCharCode(97 + itemIdx)}) {itemLabel} ({cantSlots} casillas • puntaje distribuido entre casillas):
                                     </strong>
                                   </div>
 
                                   {/* Listado de Casillas */}
                                   <div style={{ display: "flex", flexDirection: "column", gap: "0.45rem" }}>
                                     {Array.from({ length: cantSlots }).map((_, slotIdx) => {
+                                      const slotPts = splitQuizPoints(itemMaxPts, cantSlots)[slotIdx];
                                       const rowVal = Array.isArray(studentAnswer)
                                         ? studentAnswer[slotIdx]
                                         : (typeof studentAnswer === "object" && studentAnswer ? studentAnswer[slotIdx] : "");
@@ -3570,13 +3593,14 @@ export default function ReviewQuizSubmissionsView({
                                               {slotIdx + 1}.
                                             </span>
                                             <span style={{ fontSize: "0.86rem", fontWeight: 700, color: rowVal && String(rowVal).trim() ? "#0f172a" : "#94a3b8" }}>
-                                              {rowVal && String(rowVal).trim() ? String(rowVal) : "— (Vacío) —"}
+                                              {item.tipo === "terminos_pareados" && <strong>{quizSlotLabel(item,slotIdx)} → </strong>}{rowVal && String(rowVal).trim() ? String(rowVal) : "— (Vacío) —"}
                                             </span>
                                           </div>
 
                                           <div style={{ display: "flex", alignItems: "center", gap: "0.25rem" }}>
                                             <button
                                               type="button"
+                                              disabled={slotEval?.origen === "automatica"}
                                               onClick={() => handleQuickEvaluateSlot(currentStudent.id, currentQ.id, item.id, slotIdx, "buena", slotPts)}
                                               style={{
                                                 padding: "0.2rem 0.5rem",
@@ -3593,6 +3617,7 @@ export default function ReviewQuizSubmissionsView({
                                             </button>
                                             <button
                                               type="button"
+                                              disabled={slotEval?.origen === "automatica"}
                                               onClick={() => handleQuickEvaluateSlot(currentStudent.id, currentQ.id, item.id, slotIdx, "regular", slotPts)}
                                               style={{
                                                 padding: "0.2rem 0.45rem",
@@ -3609,6 +3634,7 @@ export default function ReviewQuizSubmissionsView({
                                             </button>
                                             <button
                                               type="button"
+                                              disabled={slotEval?.origen === "automatica"}
                                               onClick={() => handleQuickEvaluateSlot(currentStudent.id, currentQ.id, item.id, slotIdx, "mala", slotPts)}
                                               style={{
                                                 padding: "0.2rem 0.5rem",
@@ -3671,8 +3697,9 @@ export default function ReviewQuizSubmissionsView({
                           ) : (
                             currentQ.items.map((item, itemIdx) => {
                               const itemLabel = item.instruccion || item.etiqueta || `Apartado ${itemIdx + 1}`;
-                              const isList = item.tipo !== "texto_corto";
-                              const cantSlots = isList ? (parseInt(item.cantidad, 10) || 3) : 1;
+                            const displayCompletion = item.tipo === "completacion" ? item.texto_completar || "" : "";
+                              const isList = isQuizItemMultiSlot(item);
+                              const cantSlots = isList ? quizItemSlotCount(item) : 1;
 
                               return (
                                 <div
@@ -3689,10 +3716,10 @@ export default function ReviewQuizSubmissionsView({
                                 >
                                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap" }}>
                                     <strong style={{ fontSize: "0.82rem", color: "#166534" }}>
-                                      {String.fromCharCode(97 + itemIdx)}) {itemLabel}:
+                                      {String.fromCharCode(97 + itemIdx)}) {itemLabel}: {displayCompletion}
                                     </strong>
                                     <span style={{ fontSize: "0.72rem", fontWeight: 800, color: "#15803d", background: "#ffffff", padding: "0.1rem 0.45rem", borderRadius: "0.35rem", border: "1px solid #86efac" }}>
-                                      {isList ? `Listado (${cantSlots} casillas solicitadas)` : "Texto Corto"}
+                                      {quizItemLabel(item)}{isAutomaticQuizItem(item) && " · Automática"}
                                     </span>
                                   </div>
 

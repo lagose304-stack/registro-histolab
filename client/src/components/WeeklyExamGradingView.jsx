@@ -3,7 +3,7 @@ import { GraduationCap, Search, Save, Users, ArrowLeft, ShieldCheck, Lock, Check
 import { api } from "../services/api";
 import {
   calculateStudentAcademicSummary,
-  getCanonicalExamGrade
+  getCanonicalExamGrade, getExamMetadata, isExamWeek
 } from "../utils/academicEngine";
 import { hasFullSectionAccess } from "../utils/sectionRoleUtils";
 import { displaySectionCode } from "../../../shared/sectionCode.mjs";
@@ -27,6 +27,8 @@ export default function WeeklyExamGradingView({
   const [statusFilter, setStatusFilter] = useState("all");
   const [editingAccount, setEditingAccount] = useState(null);
   const savedStudents = useRef([]);
+  const loadEpoch = useRef(0);
+  const editRevision = useRef(0);
 
   // Referencia estable de notify
   const notifyRef = useRef(notify);
@@ -75,6 +77,8 @@ export default function WeeklyExamGradingView({
   // 1. Cargar datos del servidor
   const loadData = useCallback(async (isInitial = false) => {
     if (!seccion?.id || !hasFullAccess) return;
+    const requestEpoch = ++loadEpoch.current;
+    const revision = editRevision.current;
     if (isInitial) setLoading(true);
     setLoadError("");
 
@@ -86,6 +90,7 @@ export default function WeeklyExamGradingView({
         api.asignaciones.getBySeccion(seccion.id),
         api.temario.getPuntajes(carrera)
       ]);
+      if (requestEpoch !== loadEpoch.current || revision !== editRevision.current) return;
 
       if (resEst?.data) {
         const sorted = [...resEst.data].sort((a, b) =>
@@ -121,9 +126,7 @@ export default function WeeklyExamGradingView({
           setSelectedSemana(Number(savedWeek));
         } else {
           // Buscar la primera semana de examen configurada
-          const examWeek = loadedSemanas.find((s) =>
-            Boolean(s.es_examen) || String(s.nombre_semana || "").toLowerCase().includes("examen") || String(s.temas || "").toLowerCase().includes("examen")
-          );
+          const examWeek = loadedSemanas.find(isExamWeek);
 
           if (examWeek && examWeek.numero_semana) {
             handleSelectSemana(Number(examWeek.numero_semana));
@@ -140,15 +143,17 @@ export default function WeeklyExamGradingView({
         hasInitializedWeekRef.current = true;
       }
     } catch (err) {
+      if (requestEpoch !== loadEpoch.current) return;
       console.error("Error al cargar notas de examen parcial:", err);
       setLoadError("No pudimos cargar los estudiantes y las notas del examen. Inténtalo de nuevo.");
     } finally {
-      setLoading(false);
+      if (requestEpoch === loadEpoch.current) setLoading(false);
     }
   }, [seccion?.id, carrera, hasFullAccess]);
 
   useEffect(() => {
     loadData(true);
+    return () => { loadEpoch.current++; };
   }, [loadData]);
 
   // Helper para obtener el nombre visible de la semana
@@ -167,19 +172,14 @@ export default function WeeklyExamGradingView({
     semanasConfig.forEach((s) => {
       const num = Number(s.numero_semana);
       if (!num) return;
-      const isExam =
-        Boolean(s.es_examen) ||
-        s.es_examen === "true" ||
-        String(s.nombre_semana || "").toLowerCase().includes("examen") ||
-        String(s.descripcion || "").toLowerCase().includes("examen") ||
-        String(s.temas || "").toLowerCase().includes("examen");
+      const isExam = isExamWeek(s);
 
       const rawNombre = s.nombre_semana || s.descripcion || (isExam ? `Semana ${num} - Examen` : `Semana ${num}`);
 
       weekMap.set(num, {
         numero_semana: num,
         nombre_semana: rawNombre,
-        parcial: s.parcial || (num <= 4 ? "I Parcial" : num <= 8 ? "II Parcial" : "III Parcial"),
+        parcial: s.parcial || "",
         fecha_inicio: s.fecha_inicio,
         fecha_fin: s.fecha_fin,
         esExamen: isExam,
@@ -241,42 +241,14 @@ export default function WeeklyExamGradingView({
 
   // Determinación del examen correspondiente según la semana
   const examMeta = useMemo(() => {
-    const p = String(currentWeekInfo.parcial || "").toLowerCase();
-    const semIndex = examWeeks.findIndex((w) => Number(w.numero_semana) === Number(currentWeekInfo.numero_semana));
-
-    if (p.includes("iii") || p.includes("tercer") || semIndex === 2) {
-      return {
-        id: "examen_III",
-        columnKey: "tercer_examen",
-        label: "III Examen Parcial",
-        parcial: "III Parcial",
-        badgeBg: "#faf5ff",
-        badgeBorder: "#d8b4fe",
-        badgeText: "#6b21a8"
-      };
-    }
-
-    if (p.includes("ii") || p.includes("segundo") || semIndex === 1) {
-      return {
-        id: "examen_II",
-        columnKey: "segundo_examen",
-        label: "II Examen Parcial",
-        parcial: "II Parcial",
-        badgeBg: "#eff6ff",
-        badgeBorder: "#bfdbfe",
-        badgeText: "#1e40af"
-      };
-    }
-
-    return {
-      id: "examen_I",
-      columnKey: "primer_examen",
-      label: "I Examen Parcial",
-      parcial: "I Parcial",
-      badgeBg: "#fef3c7",
-      badgeBorder: "#fde68a",
-      badgeText: "#92400e"
-    };
+    const semIndex = Math.max(0, examWeeks.findIndex(w => Number(w.numero_semana) === Number(currentWeekInfo.numero_semana)));
+    const meta = getExamMetadata(currentWeekInfo, semIndex);
+    const colors = [
+      { badgeBg: "#fef3c7", badgeBorder: "#fde68a", badgeText: "#92400e" },
+      { badgeBg: "#eff6ff", badgeBorder: "#bfdbfe", badgeText: "#1e40af" },
+      { badgeBg: "#faf5ff", badgeBorder: "#d8b4fe", badgeText: "#6b21a8" }
+    ];
+    return { ...meta, id: meta.aliasKey || meta.key, parcial: meta.parcialName, ...colors[semIndex % colors.length] };
   }, [currentWeekInfo, examWeeks]);
 
   // Docente asignado al rol de "Subir nota de examen parcial"
@@ -322,11 +294,9 @@ export default function WeeklyExamGradingView({
   // Helper para leer la nota de examen de un estudiante
   const getStudentExamGrade = (est) => {
     if (!est) return "";
-    const colKey = examMeta.columnKey;
-    // Conservar el texto provisional mientras se escribe un decimal.
-    if (typeof est[colKey] === "string") return est[colKey];
-    const examIndex = colKey === "primer_examen" ? 0 : colKey === "segundo_examen" ? 1 : 2;
-    const val = getCanonicalExamGrade(est, examIndex, currentWeekInfo);
+    // Conservar el texto provisional de este examen, identificado por su semana.
+    if (typeof est.notas?.[examMeta.key] === "string") return est.notas[examMeta.key];
+    const val = getCanonicalExamGrade(est, examMeta.index, currentWeekInfo);
     if (val === undefined || val === null || val === "") return "";
     return val;
   };
@@ -363,10 +333,13 @@ export default function WeeklyExamGradingView({
     const cleanVal = normalizedValue.startsWith(".") ? `0${normalizedValue}` : normalizedValue;
 
     if (cleanVal === "") {
+      editRevision.current++;
       setEstudiantes((prev) =>
         prev.map((est) => {
           if (est.numero_cuenta !== numero_cuenta) return est;
           const currentNotas = { ...(est.notas || {}) };
+          delete currentNotas[examMeta.key];
+          delete currentNotas[`examen_${currentWeekInfo.numero_semana}`];
           delete currentNotas[examMeta.columnKey];
           delete currentNotas[examMeta.id];
 
@@ -390,6 +363,7 @@ export default function WeeklyExamGradingView({
     }
 
     const storedVal = cleanVal;
+    editRevision.current++;
 
     setEstudiantes((prev) =>
       prev.map((est) => {
@@ -398,6 +372,7 @@ export default function WeeklyExamGradingView({
         const currentNotas = est.notas || {};
         const updatedNotas = {
           ...currentNotas,
+          [examMeta.key]: storedVal,
           [examMeta.columnKey]: storedVal,
           [examMeta.id]: storedVal
         };

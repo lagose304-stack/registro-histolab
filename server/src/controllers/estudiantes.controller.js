@@ -743,7 +743,7 @@ export const getEstudianteByCuenta = async (req, res) => {
 };
 
 // 7. Helper directo para actualizar una nota específica de un estudiante (usado por módulo de pruebas)
-export const updateEstudianteGradeDirect = async (seccion_id, numero_cuenta, carrera, key, value) => {
+export const updateEstudianteGradeDirect = async (seccion_id, numero_cuenta, carrera, key, value, strict = false) => {
   const tableName = await getTableForSeccion(seccion_id, carrera);
 
   if (!inMemoryEstudiantes[tableName]) {
@@ -758,19 +758,22 @@ export const updateEstudianteGradeDirect = async (seccion_id, numero_cuenta, car
 
   if (isSupabaseConfigured && supabase) {
     try {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from(tableName)
         .select("*")
         .eq("seccion_id", seccion_id)
         .eq("numero_cuenta", numero_cuenta)
         .maybeSingle();
+      if (strict && error) throw error;
       if (data) currentEst = data;
+      else if (strict) currentEst = null;
     } catch (err) {
+      if (strict) throw err;
       // fallback
     }
   }
 
-  if (!currentEst) return false;
+  if (!currentEst) { if (strict) throw new Error("No se encontró el estudiante para sincronizar la nota."); return false; }
 
   const currentNotas = { ...(currentEst.notas || {}) };
   currentNotas[key] = value;
@@ -783,12 +786,16 @@ export const updateEstudianteGradeDirect = async (seccion_id, numero_cuenta, car
 
   if (isSupabaseConfigured && supabase) {
     try {
-      await supabase
+      const result = await supabase
         .from(tableName)
         .update(payload)
         .eq("seccion_id", seccion_id)
-        .eq("numero_cuenta", numero_cuenta);
+        .eq("numero_cuenta", numero_cuenta)
+        .select("numero_cuenta");
+      if (strict && result.error) throw result.error;
+      if (strict && !result.data?.length) throw new Error("No se pudo confirmar el guardado de la nota.");
     } catch (err) {
+      if (strict) throw err;
       console.warn("Aviso en Supabase updateEstudianteGradeDirect:", err.message);
     }
   }
@@ -799,7 +806,7 @@ export const updateEstudianteGradeDirect = async (seccion_id, numero_cuenta, car
       notas: sanitized,
       updated_at: payload.updated_at
     };
-    savePersistentEstudiantes(inMemoryEstudiantes);
+    savePersistentEstudiantes(inMemoryEstudiantes, strict);
   }
 
   return true;

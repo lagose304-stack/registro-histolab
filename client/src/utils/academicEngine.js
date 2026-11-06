@@ -183,56 +183,38 @@ export function getCanonicalQuizGrade(notas = {}, weekNum, student = null) {
 }
 
 /**
- * Extrae la calificación canónica de un examen parcial.
+ * Identifica el examen por su semana y su posición en la lista cronológica
+ * completa, conservando los alias históricos de los tres primeros exámenes.
  */
+export function getExamMetadata(week = {}, index = 0) {
+  const ordinal = Math.max(0, index);
+  const roman = ["I", "II", "III", "IV", "V", "VI"][ordinal] || String(ordinal + 1);
+  const legacyKey = ["primer_examen", "segundo_examen", "tercer_examen"][ordinal] || null;
+  const key = `examen_semana_${Number(week.numero_semana)}`;
+  return {
+    key, legacyKey, aliasKey: legacyKey ? `examen_${roman}` : null,
+    columnKey: legacyKey || key, index: ordinal,
+    parcialKey: roman, parcialName: week.parcial || `${roman} Parcial`,
+    label: (week.nombre_semana || week.descripcion || "").replace(/^Semana\s*\d+\s*[-:•–—]?\s*/i, "").trim() || `Examen ${roman}`
+  };
+}
+
 export function getCanonicalExamGrade(student = {}, examIndex = 0, examWeek = null, customNotas = null) {
   const notas = customNotas || student?.notas || {};
   const semNum = examWeek ? Number(examWeek.numero_semana) : null;
-  const parcialStr = String(examWeek?.parcial || "").toLowerCase();
-
-  let columnKey = "primer_examen";
-  let altExamKey = "examen_I";
-
-  if (parcialStr.includes("iii") || parcialStr.includes("tercer") || examIndex === 2) {
-    columnKey = "tercer_examen";
-    altExamKey = "examen_III";
-  } else if (parcialStr.includes("ii") || parcialStr.includes("segundo") || examIndex === 1) {
-    columnKey = "segundo_examen";
-    altExamKey = "examen_II";
-  }
-
-  // 1. Claves explícitas en el objeto notas JSON (donde el docente califica directamente)
-  if (notas[columnKey] !== undefined && notas[columnKey] !== null && notas[columnKey] !== "") {
-    return Number(notas[columnKey]);
-  }
-  if (notas[altExamKey] !== undefined && notas[altExamKey] !== null && notas[altExamKey] !== "") {
-    return Number(notas[altExamKey]);
+  const meta = getExamMetadata(examWeek || {}, examIndex);
+  // La semana identifica el examen; los nombres históricos solo sirven de respaldo.
+  const keys = [...(semNum ? [meta.key, `examen_${semNum}`] : []), meta.legacyKey, meta.aliasKey].filter(Boolean);
+  for (const key of keys) {
+    const value = notas[key];
+    if (value !== undefined && value !== null && value !== "" && Number.isFinite(Number(value))) return Number(value);
   }
   if (semNum) {
-    if (notas[`examen_${semNum}`] !== undefined && notas[`examen_${semNum}`] !== null && notas[`examen_${semNum}`] !== "") {
-      return Number(notas[`examen_${semNum}`]);
-    }
-    if (notas[`examen_semana_${semNum}`] !== undefined && notas[`examen_semana_${semNum}`] !== null && notas[`examen_semana_${semNum}`] !== "") {
-      return Number(notas[`examen_semana_${semNum}`]);
-    }
+    const value = student[`Examen semana ${semNum}`];
+    if (value !== undefined && value !== null && value !== "" && Number.isFinite(Number(value))) return Number(value);
   }
-
-  // 2. Columnas en tabla estudiante: solo si tiene calificación positiva explícita
-  // (evita que el valor 0 por defecto de la base de datos marque un examen no calificado como calificado)
-  if (student?.[columnKey] !== undefined && student[columnKey] !== null && student[columnKey] !== "") {
-    const num = Number(student[columnKey]);
-    if (!isNaN(num) && num > 0) {
-      return num;
-    }
-  }
-
-  if (semNum && student?.[`Examen semana ${semNum}`] !== undefined && student[`Examen semana ${semNum}`] !== null && student[`Examen semana ${semNum}`] !== "") {
-    const num = Number(student[`Examen semana ${semNum}`]);
-    if (!isNaN(num) && num > 0) {
-      return num;
-    }
-  }
-
+  // Las columnas históricas tienen 0 por defecto incluso antes de calificar.
+  if (meta.legacyKey && Number(student[meta.legacyKey]) > 0) return Number(student[meta.legacyKey]);
   return null;
 }
 
@@ -376,26 +358,8 @@ export function calculateStudentAcademicSummary(student = {}, configPuntajes = {
   if (examWeeks.length > 0) {
     examWeeks.forEach((w, index) => {
       const semNum = Number(w.numero_semana);
-      const parcialStr = String(w.parcial || "").toLowerCase();
-
-      let columnKey = "primer_examen";
-      let fallbackLabel = "I Examen Parcial";
-      let parcialKey = "I";
-
-      if (parcialStr.includes("iii") || parcialStr.includes("tercer") || index === 2) {
-        columnKey = "tercer_examen";
-        fallbackLabel = "III Examen Parcial";
-        parcialKey = "III";
-      } else if (parcialStr.includes("ii") || parcialStr.includes("segundo") || index === 1) {
-        columnKey = "segundo_examen";
-        fallbackLabel = "II Examen Parcial";
-        parcialKey = "II";
-      }
-
-      const customName = (w.nombre_semana || w.descripcion || "").trim();
-      const label = customName && !customName.toLowerCase().startsWith("semana")
-        ? customName
-        : fallbackLabel;
+      const meta = getExamMetadata(w, index);
+      const { parcialKey, label } = meta;
 
       const rawGrade = getCanonicalExamGrade(student, index, w, customNotas);
       const numGrade = rawGrade !== null ? Number(rawGrade) : 0;
@@ -406,7 +370,9 @@ export function calculateStudentAcademicSummary(student = {}, configPuntajes = {
 
       examenesList.push({
         id: `exam_sem_${semNum}`,
-        key: columnKey,
+        key: meta.key,
+        legacyKey: meta.legacyKey,
+        parcialName: meta.parcialName,
         semana: semNum,
         label: label,
         subLabel: `Semana ${semNum} • ${w.parcial || "Examen Parcial"}`,
@@ -417,10 +383,16 @@ export function calculateStudentAcademicSummary(student = {}, configPuntajes = {
     });
   } else {
     // Fallback: exámenes tradicionales I, II y III
-    const ex1 = Number(student?.primer_examen ?? notas.primer_examen ?? notas.examen_I ?? 0);
-    const ex2 = Number(student?.segundo_examen ?? notas.segundo_examen ?? notas.examen_II ?? 0);
-    const ex3 = Number(student?.tercer_examen ?? notas.tercer_examen ?? notas.examen_III ?? 0);
-    sumaExamenes = ex1 + ex2 + ex3;
+    for (let index = 0; index < 3; index++) {
+      const grade = getCanonicalExamGrade(student, index, null, customNotas);
+      sumaExamenes += grade || 0;
+      if (grade !== null) {
+        const meta = getExamMetadata({}, index);
+        examenesList.push({ id: `legacy_exam_${index}`, key: meta.legacyKey, semana: null,
+          label: `Examen ${meta.parcialKey}`, parcialKey: meta.parcialKey, parcialName: meta.parcialName,
+          nota: grade, ptsMax: index === 2 ? 15 : 10 });
+      }
+    }
   }
 
   sumaExamenes = Math.round(sumaExamenes * 1000) / 1000;

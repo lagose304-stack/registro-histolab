@@ -29,7 +29,7 @@ import { exportStyledExcel } from "../utils/exportExcel";
 import { getNavState, setNavState } from "../utils/navigationState";
 import {
   isExamWeek as isExamWeekCore,
-  calculateStudentAcademicSummary
+  calculateStudentAcademicSummary, getExamMetadata, getCanonicalExamGrade
 } from "../utils/academicEngine";
 
 // Helper: Calcula si el estudiante perdió derecho a examen por acumular 2 o más faltas injustificadas en un parcial
@@ -294,17 +294,10 @@ export default function SectionGradebookView({
           .filter((s) => !weeksFilter || weeksFilter.includes(Number(s.numero_semana)))
           .map((s) => {
             const numSem = Number(s.numero_semana);
-            const parcialStr = String(s.parcial || pNameFallback || "").toLowerCase();
-            let pKey = "I";
-            let defaultKey = "primer_examen";
-
-            if (parcialStr.includes("iii") || parcialStr.includes("tercer") || numSem > 8) {
-              pKey = "III";
-              defaultKey = "tercer_examen";
-            } else if (parcialStr.includes("ii") || parcialStr.includes("segundo") || numSem > 4) {
-              pKey = "II";
-              defaultKey = "segundo_examen";
-            }
+            const examIndex = configuredExamWeeks.findIndex(week => Number(week.numero_semana) === numSem);
+            const meta = getExamMetadata(s, examIndex);
+            const pKey = meta.parcialKey;
+            const defaultKey = meta.legacyKey;
 
             // Limpiar cualquier prefijo que mencione la semana (ej: "Semana 16 - ", "Semana 16:", "Semana 16 ")
             const rawLabel = (s.nombre_semana || s.descripcion || "").trim();
@@ -323,7 +316,9 @@ export default function SectionGradebookView({
             }
 
             return {
-              key: `examen_semana_${numSem}`,
+              key: meta.key,
+              examIndex,
+              examWeek: s,
               legacyKey: defaultKey,
               altKey: defaultKey,
               label,
@@ -1644,11 +1639,7 @@ export default function SectionGradebookView({
                             (ex.parcialKey === "II" && derecho.perdioII) ||
                             (ex.parcialKey === "III" && derecho.perdioIII);
 
-                          const gradeVal = getStudentGrade(
-                            est,
-                            ex.key,
-                            getStudentGrade(est, ex.legacyKey, getStudentGrade(est, ex.altKey, 0))
-                          );
+                          const gradeVal = getCanonicalExamGrade(est, ex.examIndex, ex.examWeek);
 
                           return (
                             <td

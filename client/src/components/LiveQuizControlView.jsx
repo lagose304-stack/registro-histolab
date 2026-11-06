@@ -1,31 +1,9 @@
+import { quizItemLabel } from "../../../shared/quizItems.mjs";
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import {
-  Radio,
-  Play,
-  SkipForward,
-  Square,
-  RefreshCw,
-  Users,
-  Clock,
-  CheckCircle2,
-  AlertTriangle,
-  ArrowLeft,
-  Eye,
-  Sparkles,
-  Award,
-  Layers,
-  HelpCircle,
-  ShieldAlert,
-  Send,
-  Lock,
-  Unlock,
-  Check,
-  Zap,
-  Info,
-  User,
-  Crown
-} from "lucide-react";
+import { Radio, Play, SkipForward, Square, RefreshCw, Users, Clock, CheckCircle2, AlertTriangle, ArrowLeft, Lock, User, Search, Wifi, WifiOff } from "lucide-react";
 import { api } from "../services/api";
+import { displaySectionCode } from "../../../shared/sectionCode.mjs";
+import "./LiveQuizControlView.css";
 import {
   hasFullSectionAccess,
   isWeekAssignedToUser,
@@ -44,6 +22,17 @@ export default function LiveQuizControlView({
 }) {
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
+  const [loadError, setLoadError] = useState("");
+  const [quizLoading, setQuizLoading] = useState(false);
+  const [quizError, setQuizError] = useState("");
+  const [quizRetry, setQuizRetry] = useState(0);
+  const [syncError, setSyncError] = useState("");
+  const [sessionSynced, setSessionSynced] = useState(false);
+  const [actionError, setActionError] = useState("");
+  const [studentSearch, setStudentSearch] = useState("");
+  const [studentFilter, setStudentFilter] = useState("all");
+  const sessionKeyRef = useRef("");
+  const controlEpochRef = useRef(0);
   const [semanasConfig, setSemanasConfig] = useState([]);
   const [sectionQuizzes, setSectionQuizzes] = useState([]);
   const [studentsList, setStudentsList] = useState([]);
@@ -73,6 +62,7 @@ export default function LiveQuizControlView({
   notifyRef.current = notify;
 
   const carrera = seccion?.carrera || "Medicina";
+  sessionKeyRef.current = `${seccion?.id || ""}_${selectedSemana || ""}`;
 
   // Formatear segundos a mm:ss
   const formatTimer = (totalSec) => {
@@ -87,7 +77,6 @@ export default function LiveQuizControlView({
   const hasFullAccess = useMemo(() => hasFullSectionAccess(currentUser, seccion), [currentUser, seccion]);
 
   // Verificación de horario exclusivo de la sección para el instructor asignado
-  const scheduleCheck = useMemo(() => checkSectionSchedule(seccion), [seccion]);
 
   const QUIZ_ROLES = useMemo(
     () => [SECTION_ROLES.CREAR_PRUEBA, SECTION_ROLES.PRUEBAS, SECTION_ROLES.PRUEBAS_LEGACY],
@@ -107,14 +96,15 @@ export default function LiveQuizControlView({
   const loadInitialData = useCallback(async () => {
     if (!seccion?.id) return;
     setLoading(true);
+    setLoadError("");
 
     try {
       const [resSemanas, resTemario, resQuizzes, resStudents, resAsig] = await Promise.all([
-        api.semanas.getConfig(carrera).catch(() => ({ data: [] })),
-        api.temario.getAll({ carrera }).catch(() => ({ data: [] })),
-        api.pruebas.getBySeccion(seccion.id).catch(() => ({ data: [] })),
-        api.estudiantes.getBySeccion(seccion.id, carrera).catch(() => ({ data: [] })),
-        api.asignaciones.getBySeccion(seccion.id).catch(() => ({ data: [] }))
+        api.semanas.getConfig(carrera),
+        api.temario.getAll({ carrera }),
+        api.pruebas.getBySeccion(seccion.id),
+        api.estudiantes.getBySeccion(seccion.id, carrera),
+        api.asignaciones.getBySeccion(seccion.id)
       ]);
 
       if (resSemanas?.data) setSemanasConfig(resSemanas.data);
@@ -128,7 +118,7 @@ export default function LiveQuizControlView({
       }
     } catch (err) {
       console.error("Error al cargar datos de control en vivo:", err);
-      notifyRef.current("Error al cargar datos de la sección", "error");
+      setLoadError("No pudimos cargar las pruebas y los estudiantes de la sección.");
     } finally {
       setLoading(false);
     }
@@ -217,6 +207,10 @@ export default function LiveQuizControlView({
     if (!seccion?.id || !selectedSemana) return;
 
     let isMounted = true;
+    setQuizLoading(true);
+    setQuizError("");
+    setActiveQuiz(null);
+    setActionError("");
     const fetchQuiz = async () => {
       try {
         const res = await api.pruebas.getBySemana(seccion.id, selectedSemana);
@@ -226,33 +220,41 @@ export default function LiveQuizControlView({
           setActiveQuiz(null);
         }
       } catch (_) {
-        if (isMounted) setActiveQuiz(null);
-      }
+        if (isMounted) setQuizError("No pudimos consultar la prueba de esta semana.");
+      } finally { if (isMounted) setQuizLoading(false); }
     };
 
     fetchQuiz();
     return () => {
       isMounted = false;
     };
-  }, [seccion?.id, selectedSemana]);
+  }, [seccion?.id, selectedSemana, quizRetry]);
 
   // Sincronización en vivo vía polling cada 1.2 segundos
   const syncLiveState = useCallback(async () => {
     if (!seccion?.id || !selectedSemana) return;
 
+    const requestKey = `${seccion.id}_${selectedSemana}`;
+    const controlEpoch = controlEpochRef.current;
     try {
       const res = await api.pruebas.getLiveState(seccion.id, selectedSemana);
+      if (sessionKeyRef.current !== requestKey || controlEpochRef.current !== controlEpoch) return;
       if (res?.success && res.data) {
+        setSyncError("");
+        setSessionSynced(true);
         setLiveSession(res.data);
         setLocalSecondsRemaining(res.data.tiempo_restante_segundos ?? 90);
-      }
+      } else throw new Error("Estado no disponible");
     } catch (e) {
+      if (sessionKeyRef.current === requestKey && controlEpochRef.current === controlEpoch) setSyncError("Sin conexión con la sesión. Esperando sincronización…");
       console.warn("Aviso en syncLiveState:", e.message);
     }
   }, [seccion?.id, selectedSemana]);
 
   // Montar ciclo de polling
   useEffect(() => {
+    setSessionSynced(false);
+    setSyncError("");
     syncLiveState();
 
     if (pollTimerRef.current) clearInterval(pollTimerRef.current);
@@ -287,7 +289,8 @@ export default function LiveQuizControlView({
 
   // Ejecutar comando maestro de control
   const handleExecuteControl = async (accion, extra = {}) => {
-    if (!seccion?.id || !selectedSemana) return;
+    if (!seccion?.id || !selectedSemana || actionLoading || !sessionSynced || syncError) return;
+    if (accion === "finalizar" && !window.confirm("¿Finalizar la prueba para toda la sección? Los estudiantes terminarán su intento con las respuestas registradas.")) return;
 
     // Validación estricta de permisos: solo asignado a crear/revisar o titular
     const canControl = hasFullAccess || isWeekAssignedToUser(asignaciones, QUIZ_ROLES, selectedSemana, currentUser, seccion);
@@ -309,6 +312,8 @@ export default function LiveQuizControlView({
     }
 
     setActionLoading(true);
+    controlEpochRef.current++;
+    setActionError("");
 
     try {
       const payload = { accion, es_titular: hasFullAccess, ...extra };
@@ -317,6 +322,7 @@ export default function LiveQuizControlView({
         throw new Error(res?.message || "Error al enviar comando");
       }
 
+      controlEpochRef.current++;
       setLiveSession(res.data);
       setLocalSecondsRemaining(res.data.tiempo_restante_segundos ?? 90);
 
@@ -333,7 +339,7 @@ export default function LiveQuizControlView({
       }
     } catch (err) {
       console.error("Error al ejecutar control:", err);
-      notify(err.message || "Error en comando maestro", "error");
+      setActionError(err.message || "No pudimos ejecutar la acción. El estado mostrado se actualizará al sincronizar.");
     } finally {
       setActionLoading(false);
     }
@@ -353,1034 +359,86 @@ export default function LiveQuizControlView({
   );
   const connectedCount = activeConnectedStudents.length;
 
+  const canControl = hasFullAccess || (selectedSemana && isWeekAssignedToUser(asignaciones,QUIZ_ROLES,selectedSemana,currentUser,seccion));
+  const published = activeQuiz?.publicada === true || activeQuiz?.estado === "publicada";
+  const state = sessionSynced ? liveSession.estado : "conectando";
+  const stateDetails = {
+    conectando: ["Conectando", "Consultando el estado de la sesión…"],
+    inactiva: ["Sala cerrada", "Abre la sala para que los estudiantes ingresen y lean las instrucciones."],
+    lobby: ["Sala de espera", "Los estudiantes pueden ingresar. Inicia la primera pregunta cuando el grupo esté listo."],
+    en_pregunta: ["Pregunta en curso", "Todos responden la misma pregunta con un cronómetro sincronizado."],
+    esperando_siguiente: ["Esperando la siguiente", "La pregunta quedó bloqueada. Puedes avanzar cuando estés listo."],
+    finalizada: ["Prueba finalizada", "La sesión terminó. Las respuestas se entregan y los apartados objetivos se califican automáticamente."]
+  };
+  const [stateLabel,stateDescription] = stateDetails[state] || stateDetails.inactiva;
+  const controlDisabled = actionLoading || !canControl || !sessionSynced || Boolean(syncError);
+  const questionDuration = Number(currentQuestion?.tiempo_segundos || activeQuiz?.tiempo_por_pregunta_segundos || 90);
+  const students = studentsList.map(student => {
+    const key=String(student.numero_cuenta || "").trim();
+    const connection=connectedMap[key];
+    const connected=Boolean(connection && (!connection.ultimo_ping || nowTs-connection.ultimo_ping<60000));
+    return {...student,key,connected,answered:connected && Boolean(connection?.ha_respondido)};
+  });
+  const shownStudents=students.filter(student => {
+    const query=studentSearch.trim().toLocaleLowerCase();
+    return (!query || `${student.nombre_completo || ""} ${student.key}`.toLocaleLowerCase().includes(query)) && (studentFilter==="all" || (studentFilter==="connected" ? student.connected : !student.connected));
+  });
+  const answeredCount=students.filter(student=>student.answered).length;
+  const actionButton=(label,Icon,action,extra={},primary=false,disabled=false)=><button type="button" className={`user-button${primary?" user-button--primary":""}${action==="finalizar"?" user-button--danger":""}`} disabled={controlDisabled || disabled} onClick={()=>handleExecuteControl(action,extra)}><Icon size={18} aria-hidden="true" />{actionLoading?"Procesando…":label}</button>;
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem", paddingBottom: "3rem" }}>
-      {/* 1. BARRA SUPERIOR DE TRANSMISIÓN EN DIRECTO (MODO CLARO) */}
-      <div
-        className="glass-panel"
-        style={{
-          background: "#ffffff",
-          borderRadius: "1.25rem",
-          padding: "1.5rem 2rem",
-          boxShadow: "0 10px 30px -5px rgba(0, 0, 0, 0.05)",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          flexWrap: "wrap",
-          gap: "1.25rem",
-          border: "1.5px solid #e2e8f0"
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: "1rem" }}>
-          {!hideBackButton && (
-            <button
-              type="button"
-              onClick={onClose}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                width: "40px",
-                height: "40px",
-                borderRadius: "0.65rem",
-                border: "1.5px solid #cbd5e1",
-                background: "#ffffff",
-                color: "#334155",
-                cursor: "pointer",
-                transition: "all 0.15s ease",
-                flexShrink: 0
-              }}
-              title="Volver al panel de la sección"
-            >
-              <ArrowLeft size={18} />
-            </button>
-          )}
-
-          <div
-            style={{
-              width: "48px",
-              height: "48px",
-              borderRadius: "0.85rem",
-              background: liveSession.habilitada
-                ? "linear-gradient(135deg, #ef4444 0%, #dc2626 100%)"
-                : "linear-gradient(135deg, #0284c7 0%, #0369a1 100%)",
-              color: "#ffffff",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              flexShrink: 0,
-              boxShadow: liveSession.habilitada ? "0 4px 14px rgba(239, 68, 68, 0.35)" : "0 4px 14px rgba(2, 132, 199, 0.25)"
-            }}
-          >
-            <Radio size={24} className={liveSession.habilitada ? "animate-pulse" : ""} />
-          </div>
-
-          <div>
-            <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", flexWrap: "wrap" }}>
-              <span
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "0.4rem",
-                  padding: "0.2rem 0.65rem",
-                  borderRadius: "9999px",
-                  background: liveSession.habilitada ? "#fef2f2" : "#f1f5f9",
-                  border: liveSession.habilitada ? "1px solid #fecaca" : "1px solid #cbd5e1",
-                  color: liveSession.habilitada ? "#dc2626" : "#475569",
-                  fontSize: "0.74rem",
-                  fontWeight: 900,
-                  letterSpacing: "0.5px"
-                }}
-              >
-                <Radio size={12} className={liveSession.habilitada ? "animate-pulse" : ""} />
-                <span>{liveSession.habilitada ? "EN DIRECTO • SINCRONIZADO" : "EN ESPERA DE HABILITACIÓN"}</span>
-              </span>
-
-              <span style={{ fontSize: "0.78rem", color: "#64748b", fontWeight: 700 }}>
-                Sección: <strong style={{ color: "#0f172a" }}>{seccion?.codigo || ""}</strong> • {carrera}
-              </span>
-            </div>
-
-            <h2 style={{ margin: "0.3rem 0 0", fontSize: "1.45rem", fontWeight: 900, color: "#0f172a", letterSpacing: "-0.02em" }}>
-              Panel de Control en Vivo de Pruebas Semanales
-            </h2>
-          </div>
+    <section className="user-directory live-quiz-panel" aria-labelledby="live-quiz-title">
+      {!hideBackButton && <button type="button" className="user-button user-button--back" onClick={onClose}><ArrowLeft size={17} aria-hidden="true" /> Volver a módulos</button>}
+      <header className="user-directory__hero"><div><p className="user-directory__eyebrow"><Radio size={18} aria-hidden="true" /> Sección {displaySectionCode(seccion?.codigo)} · {carrera}</p><h2 id="live-quiz-title">Panel de control en vivo</h2><p>Dirige la prueba semanal y acompaña al grupo en tiempo real.</p></div></header>
+      {loading ? <div className="live-quiz-panel__skeleton" role="status" aria-label="Cargando panel en vivo"><span /><span /></div>
+      : loadError ? <div className="user-directory__state" role="alert"><p>{loadError}</p><button type="button" className="user-button" onClick={loadInitialData}>Reintentar</button></div>
+      : !visibleSemanasConfig.length ? <div className="user-directory__state"><Lock size={24} aria-hidden="true" /><h3>{hasFullAccess?"No hay semanas configuradas":"No tienes semanas asignadas para control en vivo"}</h3><p>{hasFullAccess?"Define las semanas de esta carrera para comenzar.":"El titular puede asignarte la creación y revisión de una prueba desde Proporcionar asignaciones."}</p></div> : <>
+        <div className="live-quiz-panel__selection">
+          <label className="user-field">Semana de la prueba<select aria-label="Semana de la prueba" value={selectedSemana || ""} disabled={actionLoading} onChange={event=>setSelectedSemana(Number(event.target.value))}>{visibleSemanasConfig.map(week=><option key={week.numero_semana} value={week.numero_semana}>{getWeekDisplayName(week)}</option>)}</select></label>
+          <div><p><User size={16} aria-hidden="true" /> Responsable <strong>{assignedTeacherName}</strong></p><small>{hasFullAccess?"Acceso completo a la sección":`Horario de habilitación: ${seccion?.dia} · ${seccion?.hora_inicio} – ${seccion?.hora_fin}`}</small></div>
+          <button type="button" className="user-button" disabled={!selectedSemana || actionLoading} onClick={syncLiveState}><RefreshCw size={17} aria-hidden="true" /> Actualizar estado</button>
         </div>
-
-        {/* Indicadores rápidos de cabecera en modo claro */}
-        <div style={{ display: "flex", alignItems: "center", gap: "1rem", flexWrap: "wrap" }}>
-          <div
-            style={{
-              background: "#f8fafc",
-              border: "1.5px solid #e2e8f0",
-              padding: "0.6rem 1.1rem",
-              borderRadius: "0.75rem",
-              display: "flex",
-              alignItems: "center",
-              gap: "0.75rem"
-            }}
-          >
-            <div
-              style={{
-                width: "36px",
-                height: "36px",
-                borderRadius: "0.5rem",
-                background: "#eff6ff",
-                border: "1px solid #bae6fd",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                color: "#0284c7"
-              }}
-            >
-              <Users size={18} />
+        {quizLoading ? <p className="user-directory__state" role="status">Cargando prueba…</p>
+        : quizError ? <div className="user-directory__state" role="alert"><p>{quizError}</p><button type="button" className="user-button" onClick={()=>setQuizRetry(value=>value+1)}>Reintentar</button></div>
+        : !activeQuiz ? <div className="user-directory__state"><h3>No hay una prueba creada para esta semana</h3><p>Prepárala desde Crear prueba semanal antes de abrir la sesión en vivo.</p></div>
+        : !published ? <div className="live-quiz-panel__warning"><AlertTriangle size={22} aria-hidden="true" /><div><h3>La prueba está en borrador</h3><p>Publícala desde Crear prueba semanal para habilitar el acceso de los estudiantes.</p></div></div> : <>
+          <dl className="live-quiz-panel__stats" aria-label="Resumen de la sesión">
+            {[["Matriculados",studentsList.length],["Conectados",connectedCount],["Con respuesta",answeredCount],["Pregunta",state==="inactiva" || state==="lobby"?`— / ${totalPreguntas}`:`${currentQIdx+1} / ${totalPreguntas}`]].map(([label,value])=><div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}
+          </dl>
+          <div className="live-quiz-panel__layout">
+            <div className="live-quiz-panel__main">
+              <section className="live-quiz-panel__console" data-state={state} aria-labelledby="live-console-title">
+                <div className="live-quiz-panel__console-top"><div><p className="live-quiz-panel__eyebrow">Sesión de la semana {selectedSemana}</p><h3 id="live-console-title">{stateLabel}</h3></div><span className="live-quiz-panel__connection" data-error={Boolean(syncError)}>{syncError?<WifiOff size={15} aria-hidden="true" />:<Wifi size={15} aria-hidden="true" />}{syncError?"Sin conexión":sessionSynced?"Sincronizado":"Conectando"}</span></div>
+                <p className="live-quiz-panel__description">{stateDescription}</p>
+                {state==="en_pregunta" && <div className="live-quiz-panel__timer" data-urgent={localSecondsRemaining<=15}><span><Clock size={18} aria-hidden="true" /> Tiempo restante</span><strong role="timer" aria-label="Tiempo restante de la pregunta">{formatTimer(localSecondsRemaining)}</strong><small>Pregunta {currentQIdx+1}{isBonusQuestion?" · Bonus":""} · {formatTimer(questionDuration)} de duración</small><progress max={questionDuration} value={Math.max(0,Math.min(questionDuration,localSecondsRemaining))} aria-label="Tiempo disponible" /></div>}
+                <ol className="live-quiz-panel__progress" aria-label="Avance de preguntas">{activeQuiz.preguntas?.map((question,index)=><li key={question.id || index} data-current={index===currentQIdx && ["en_pregunta","esperando_siguiente"].includes(state)} data-done={state==="finalizada" || index<currentQIdx}><span>{index===5?"Bonus":index+1}</span></li>)}</ol>
+                {!hasFullAccess && !checkSectionSchedule(seccion).isWithin && (state==="inactiva" || state==="finalizada") && <p className="live-quiz-panel__notice">La sala se puede habilitar durante el horario asignado a la sección: {seccion?.dia}, {seccion?.hora_inicio} – {seccion?.hora_fin}.</p>}
+                {syncError && <p className="user-dialog__error" role="alert">{syncError} Los controles se habilitarán al recuperar la conexión.</p>}
+                {actionError && <p className="user-dialog__error" role="alert">{actionError}</p>}
+                <div className="live-quiz-panel__actions">
+                  {(state==="inactiva" || state==="finalizada") && actionButton(state==="finalizada"?"Abrir sala nuevamente":"Abrir sala de espera",Radio,"habilitar",{duracion_segundos:activeQuiz.tiempo_por_pregunta_segundos || 90},true,!hasFullAccess && !checkSectionSchedule(seccion).isWithin)}
+                  {state==="lobby" && <>{actionButton("Iniciar pregunta 1",Play,"iniciar_pregunta",{pregunta_idx:0,duracion_segundos:activeQuiz.preguntas?.[0]?.tiempo_segundos || 90},true)}{actionButton("Cerrar sala",Square,"deshabilitar")}</>}
+                  {state==="en_pregunta" && <>{actionButton("Terminar tiempo de la pregunta",Square,"tiempo_agotado",{},true)}{actionButton("Finalizar prueba",Square,"finalizar")}</>}
+                  {state==="esperando_siguiente" && <>{currentQIdx<totalPreguntas-1?actionButton(`Iniciar pregunta ${currentQIdx+2}${currentQIdx+1===5?" · Bonus":""}`,SkipForward,"siguiente_pregunta",{duracion_segundos:activeQuiz.preguntas?.[currentQIdx+1]?.tiempo_segundos || 90},true):actionButton("Finalizar y recoger entregas",CheckCircle2,"finalizar",{},true)}{currentQIdx<totalPreguntas-1 && actionButton("Finalizar prueba",Square,"finalizar")}</>}
+                  {state==="finalizada" && actionButton("Deshabilitar sesión",Lock,"deshabilitar")}
+                </div>
+              </section>
+              {currentQuestion && !["inactiva","lobby","conectando"].includes(state) && <section className="live-quiz-panel__question" aria-labelledby="live-current-question"><header><h3 id="live-current-question">Pregunta {currentQIdx+1}{isBonusQuestion?" · Bonus":""}</h3><span>{Number(currentQuestion.puntos ?? 1).toFixed(3)} puntos · {formatTimer(questionDuration)}</span></header>
+                {currentQuestion.imagen_url && <img src={currentQuestion.imagen_url} alt={`Imagen de la pregunta ${currentQIdx+1}`} loading="lazy" />}
+                {currentQuestion.enunciado && <p>{currentQuestion.enunciado}</p>}
+                {!currentQuestion.items?.length && <p className="live-quiz-panel__notice">Pregunta de respuesta directa.</p>}
+                {(currentQuestion.items || []).map((item,index)=><div className="live-quiz-panel__item" key={item.id || index}><strong>{index+1}. {item.instruccion || quizItemLabel(item)}</strong>{item.tipo==="completacion" && <p>{item.texto_completar}</p>}<small>{quizItemLabel(item)} · {Number(item.puntos ?? 0).toFixed(3)} puntos</small></div>)}
+              </section>}
             </div>
-            <div>
-              <div style={{ fontSize: "0.7rem", color: "#64748b", fontWeight: 800, textTransform: "uppercase" }}>
-                Alumnos en Vivo
-              </div>
-              <div style={{ fontSize: "1.15rem", fontWeight: 900, color: "#0284c7" }}>
-                {connectedCount}{" "}
-                <span style={{ fontSize: "0.78rem", color: "#94a3b8", fontWeight: 700 }}>
-                  / {studentsList.length}
-                </span>
-              </div>
-            </div>
+            <aside className="live-quiz-panel__students" aria-labelledby="live-students-title">
+              <header><div><h3 id="live-students-title">Estudiantes</h3><p>{connectedCount} conectados de {studentsList.length}</p></div><Users size={20} aria-hidden="true" /></header>
+              <label className="user-directory__search"><Search size={17} aria-hidden="true" /><input type="search" aria-label="Buscar estudiante" placeholder="Nombre o cuenta" value={studentSearch} onChange={event=>setStudentSearch(event.target.value)} /></label>
+              <label className="user-field">Mostrar<select aria-label="Filtrar estudiantes por conexión" value={studentFilter} onChange={event=>setStudentFilter(event.target.value)}><option value="all">Todo el grupo</option><option value="connected">Conectados</option><option value="offline">Sin conexión</option></select></label>
+              {!shownStudents.length?<p className="live-quiz-panel__empty">{studentsList.length?"Ningún estudiante coincide con los filtros.":"Aún no hay estudiantes matriculados."}</p>:<ul>{shownStudents.map(student=><li key={student.key} data-connected={student.connected}><div><strong>{student.nombre_completo || "Estudiante"}</strong><small>{student.key}</small></div><span className="live-quiz-panel__student-state" data-answered={student.answered}>{!student.connected?"Sin conexión":state==="en_pregunta"?student.answered?"Respondió":"Respondiendo":state==="lobby"?"En sala":"Conectado"}</span></li>)}</ul>}
+            </aside>
           </div>
-
-          <button
-            type="button"
-            onClick={syncLiveState}
-            style={{
-              background: "#ffffff",
-              border: "1.5px solid #cbd5e1",
-              color: "#334155",
-              padding: "0.65rem 1rem",
-              borderRadius: "0.75rem",
-              display: "flex",
-              alignItems: "center",
-              gap: "0.45rem",
-              fontSize: "0.84rem",
-              fontWeight: 800,
-              cursor: "pointer",
-              transition: "all 0.15s ease",
-              boxShadow: "0 2px 4px rgba(0,0,0,0.02)"
-            }}
-            title="Forzar actualización de datos"
-          >
-            <RefreshCw size={15} color="#0284c7" />
-            <span>Actualizar</span>
-          </button>
-        </div>
-      </div>
-
-      {/* 2. SELECTOR DE SEMANA O RESTRICCIÓN DE PERMISOS */}
-      {!loading && !hasFullAccess && visibleSemanasConfig.length === 0 ? (
-        <div
-          style={{
-            background: "#ffffff",
-            borderRadius: "1.25rem",
-            padding: "3.5rem 2rem",
-            textAlign: "center",
-            border: "1.5px dashed #cbd5e1",
-            boxShadow: "0 4px 15px rgba(0,0,0,0.03)"
-          }}
-        >
-          <div
-            style={{
-              width: "56px",
-              height: "56px",
-              borderRadius: "50%",
-              background: "#fef2f2",
-              border: "1px solid #fecaca",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              margin: "0 auto 1.25rem",
-              color: "#dc2626"
-            }}
-          >
-            <ShieldAlert size={28} />
-          </div>
-          <h3 style={{ fontSize: "1.2rem", fontWeight: 900, color: "#0f172a", margin: "0 0 0.5rem" }}>
-            No tienes semanas asignadas para control en vivo
-          </h3>
-          <p style={{ margin: "0 auto", maxWidth: "560px", fontSize: "0.86rem", color: "#64748b", lineHeight: 1.5 }}>
-            El control en vivo de las pruebas semanales solo puede ser gestionado por el docente asignado a la
-            creación y revisión de la prueba de cada semana, o por quienes tienen acceso completo a la sección.
-          </p>
-        </div>
-      ) : (
-        <>
-          {/* 2. SELECTOR DE SEMANA */}
-          <div
-            className="glass-panel"
-            style={{
-              background: "#ffffff",
-              borderRadius: "1rem",
-              padding: "1rem 1.5rem",
-              border: "1.5px solid #e2e8f0",
-              display: "flex",
-              flexDirection: "column",
-              gap: "0.75rem"
-            }}
-          >
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "0.5rem" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", flexWrap: "wrap" }}>
-                <span style={{ fontSize: "0.82rem", fontWeight: 800, color: "#334155", textTransform: "uppercase" }}>
-                  Selecciona la Semana Académica a Controlar:
-                </span>
-                {hasFullAccess && (
-                  <span
-                    style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: "0.3rem",
-                      padding: "0.15rem 0.55rem",
-                      borderRadius: "9999px",
-                      background: "#fef3c7",
-                      color: "#b45309",
-                      fontSize: "0.7rem",
-                      fontWeight: 800,
-                      border: "1px solid #fde68a"
-                    }}
-                  >
-                    <Crown size={12} />
-                    <span>Acceso completo</span>
-                  </span>
-                )}
-              </div>
-              <span style={{ fontSize: "0.76rem", color: "#64748b" }}>
-                Los estudiantes solo podrán entrar a la semana que tú habilites en este panel.
-              </span>
-            </div>
-
-            <div style={{ display: "flex", gap: "0.6rem", overflowX: "auto", paddingBottom: "0.3rem" }}>
-              {visibleSemanasConfig.map((w) => {
-                const semNum = Number(w.numero_semana);
-                const isSelected = selectedSemana === semNum;
-                const quizFound = sectionQuizzes.find((q) => Number(q.numero_semana) === semNum);
-                const isPublished = quizFound?.publicada === true || quizFound?.estado === "publicada";
-
-                return (
-                  <button
-                    key={semNum}
-                    type="button"
-                    onClick={() => setSelectedSemana(semNum)}
-                    style={{
-                      flexShrink: 0,
-                      padding: "0.55rem 1rem",
-                      borderRadius: "0.65rem",
-                      border: isSelected ? "2px solid #0284c7" : "1.5px solid #cbd5e1",
-                      background: isSelected ? "#eff6ff" : "#ffffff",
-                      color: isSelected ? "#0284c7" : "#334155",
-                      fontWeight: isSelected ? 900 : 700,
-                      fontSize: "0.82rem",
-                      cursor: "pointer",
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "0.5rem",
-                      transition: "all 0.15s ease",
-                      whiteSpace: "nowrap"
-                    }}
-                    title={getWeekDisplayName(w)}
-                  >
-                    <span>{getWeekDisplayName(w)}</span>
-                    {isPublished ? (
-                      <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#16a34a", flexShrink: 0 }} title="Publicada" />
-                    ) : (
-                      <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#cbd5e1", flexShrink: 0 }} title="Sin publicar" />
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-
-            {selectedSemana && (
-              <div
-                style={{
-                  marginTop: "0.25rem",
-                  paddingTop: "0.6rem",
-                  borderTop: "1px dashed #e2e8f0",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  flexWrap: "wrap",
-                  gap: "0.5rem",
-                  fontSize: "0.76rem"
-                }}
-              >
-                <div style={{ display: "flex", alignItems: "center", gap: "0.45rem", color: "#475569" }}>
-                  <User size={14} color="#0284c7" />
-                  <span>Docente asignado (Crear y Revisar prueba):</span>
-                  <strong style={{ color: assignedTeacherName !== "Sin asignar" ? "#0f172a" : "#dc2626" }}>
-                    {assignedTeacherName}
-                  </strong>
-                </div>
-
-                <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", flexWrap: "wrap" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: "0.35rem", fontSize: "0.72rem", color: "#64748b" }}>
-                    <Clock size={13} color="#0284c7" />
-                    <span>
-                      Horario de clase: <strong>{seccion?.dia || "Día pendiente"} {seccion?.hora_inicio || ""}{seccion?.hora_fin ? ` - ${seccion.hora_fin}` : ""}</strong>
-                    </span>
-                  </div>
-
-                  {!hasFullAccess && (
-                    <span
-                      style={{
-                        padding: "0.15rem 0.55rem",
-                        borderRadius: "9999px",
-                        fontSize: "0.7rem",
-                        fontWeight: 800,
-                        background: scheduleCheck.isWithin ? "#dcfce7" : "#fef3c7",
-                        color: scheduleCheck.isWithin ? "#15803d" : "#b45309",
-                        border: `1px solid ${scheduleCheck.isWithin ? "#86efac" : "#fde68a"}`
-                      }}
-                    >
-                      {scheduleCheck.isWithin ? "🟢 Horario de Clase Activo" : "🔒 Fuera de Horario"}
-                    </span>
-                  )}
-
-                  {hasFullAccess && (
-                    <span style={{ fontSize: "0.7rem", color: "#64748b" }}>
-                      Con acceso completo puedes habilitar y controlar esta prueba en vivo sin restricciones.
-                    </span>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-
-      {/* 3. ESCENARIO MAESTRO DE CONTROL EN VIVO */}
-      {!activeQuiz ? (
-        <div
-          style={{
-            background: "#ffffff",
-            borderRadius: "1.25rem",
-            padding: "3.5rem 2rem",
-            textAlign: "center",
-            border: "2px dashed #cbd5e1"
-          }}
-        >
-          <HelpCircle size={48} color="#94a3b8" style={{ margin: "0 auto 1rem" }} />
-          <h3 style={{ fontSize: "1.2rem", fontWeight: 900, color: "#0f172a", margin: "0 0 0.4rem" }}>
-            No hay prueba creada para la {selectedWeekInfo ? getWeekDisplayName(selectedWeekInfo) : `Semana ${selectedSemana}`}
-          </h3>
-          <p style={{ margin: 0, fontSize: "0.88rem", color: "#64748b" }}>
-            Primero debes elaborar la prueba en el módulo <strong>"Crear prueba semanal"</strong> antes de poder habilitar la sesión en directo.
-          </p>
-        </div>
-      ) : activeQuiz.publicada !== true && activeQuiz.estado !== "publicada" ? (
-        <div
-          style={{
-            background: "#fffbeb",
-            borderRadius: "1.25rem",
-            padding: "2rem",
-            border: "2px solid #fde68a",
-            display: "flex",
-            alignItems: "center",
-            gap: "1.25rem"
-          }}
-        >
-          <AlertTriangle size={36} color="#d97706" style={{ flexShrink: 0 }} />
-          <div>
-            <h4 style={{ margin: "0 0 0.35rem", fontSize: "1.1rem", fontWeight: 900, color: "#92400e" }}>
-              Prueba en modo Borrador ({selectedWeekInfo ? getWeekDisplayName(selectedWeekInfo) : `Semana ${selectedSemana}`})
-            </h4>
-            <p style={{ margin: 0, fontSize: "0.88rem", color: "#b45309", lineHeight: 1.5 }}>
-              Esta prueba aún está guardada como borrador. Para habilitarla en vivo a tus alumnos, entra a <strong>"Crear prueba semanal"</strong> y cámbiala a estado <strong>Publicada</strong>.
-            </p>
-          </div>
-        </div>
-      ) : (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 340px", gap: "1.5rem", alignItems: "start" }}>
-          {/* COLUMNA IZQUIERDA: CONTROLES MAESTROS Y MONITOR DE LA PREGUNTA */}
-          <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
-            {/* TARJETA DE ESTADO Y BOTONES DE MANDO */}
-            <div
-              className="glass-panel"
-              style={{
-                background: "#ffffff",
-                borderRadius: "1.25rem",
-                border: liveSession.habilitada ? "2px solid #ef4444" : "1.5px solid #cbd5e1",
-                padding: "1.75rem 2rem",
-                boxShadow: liveSession.habilitada ? "0 8px 30px rgba(239, 68, 68, 0.12)" : "0 4px 16px rgba(0,0,0,0.04)",
-                display: "flex",
-                flexDirection: "column",
-                gap: "1.25rem"
-              }}
-            >
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "1rem" }}>
-                <div>
-                  <span
-                    style={{
-                      fontSize: "0.78rem",
-                      fontWeight: 900,
-                      textTransform: "uppercase",
-                      letterSpacing: "0.8px",
-                      color: liveSession.habilitada ? "#dc2626" : "#64748b"
-                    }}
-                  >
-                    Estado Actual de la Sesión:
-                  </span>
-                  <h3 style={{ margin: "0.2rem 0 0", fontSize: "1.55rem", fontWeight: 900, color: "#0f172a" }}>
-                    {liveSession.estado === "inactiva" && "⚪ Sesión Inactiva (Alumnos Bloqueados)"}
-                    {liveSession.estado === "lobby" && "🟢 Sala de Espera Activa (Lobby de Datos Generales)"}
-                    {liveSession.estado === "en_pregunta" && `🔴 Pregunta #${currentQIdx + 1} de ${totalPreguntas} en Curso`}
-                    {liveSession.estado === "esperando_siguiente" && "⏳ Tiempo Concluido • Esperando Siguiente Pregunta"}
-                    {liveSession.estado === "finalizada" && "🏁 Prueba Semanal Finalizada"}
-                  </h3>
-                </div>
-
-                {/* TEMPORIZADOR GLOBAL EN VIVO */}
-                {liveSession.estado === "en_pregunta" && (
-                  <div
-                    style={{
-                      background: localSecondsRemaining <= 15 ? "#fef2f2" : "#f0f9ff",
-                      border: `2px solid ${localSecondsRemaining <= 15 ? "#f87171" : "#0284c7"}`,
-                      borderRadius: "1rem",
-                      padding: "0.75rem 1.35rem",
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "0.75rem",
-                      boxShadow: localSecondsRemaining <= 15 ? "0 0 15px rgba(239, 68, 68, 0.3)" : "none"
-                    }}
-                  >
-                    <Clock size={28} color={localSecondsRemaining <= 15 ? "#dc2626" : "#0284c7"} className={localSecondsRemaining <= 15 ? "animate-bounce" : ""} />
-                    <div>
-                      <div style={{ fontSize: "0.72rem", fontWeight: 800, color: localSecondsRemaining <= 15 ? "#dc2626" : "#0369a1", textTransform: "uppercase" }}>
-                        Tiempo Restante Global
-                      </div>
-                      <div style={{ fontSize: "1.75rem", fontWeight: 900, color: localSecondsRemaining <= 15 ? "#dc2626" : "#0284c7", fontFamily: "monospace" }}>
-                        {formatTimer(localSecondsRemaining)}
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* DESCRIPCIÓN DEL ESTADO PARA EL DOCENTE */}
-              <div
-                style={{
-                  background: "#f8fafc",
-                  borderRadius: "0.75rem",
-                  padding: "0.85rem 1.1rem",
-                  border: "1px solid #e2e8f0",
-                  fontSize: "0.85rem",
-                  color: "#475569",
-                  lineHeight: 1.5
-                }}
-              >
-                {liveSession.estado === "inactiva" && (
-                  <span>
-                    La prueba está publicada, por lo que los alumnos pueden verla en su catálogo, pero <strong>el botón de entrar está deshabilitado</strong>. Al hacer clic en <strong>"Habilitar Prueba en Vivo"</strong>, se les permitirá entrar directamente a la pantalla de <strong>Datos Generales de la Prueba</strong> en espera.
-                  </span>
-                )}
-                {liveSession.estado === "lobby" && (
-                  <span>
-                    <strong>Sala de espera abierta:</strong> Los estudiantes que entran están visualizando los Datos Generales y las indicaciones. Cuando estés listo para que todos arranquen al mismo tiempo, haz clic en <strong>"Iniciar Pregunta 1"</strong>.
-                  </span>
-                )}
-                {liveSession.estado === "en_pregunta" && (
-                  <span>
-                    <strong>Pregunta en curso:</strong> El cronómetro de <strong>1:30 min</strong> corre sincronizado para todos los estudiantes de la sección. Si un estudiante entra tarde, saldrá automáticamente en esta pregunta con el tiempo que le quede y las preguntas anteriores quedarán sin responder.
-                  </span>
-                )}
-                {liveSession.estado === "esperando_siguiente" && (
-                  <span>
-                    <strong>Tiempo terminado:</strong> Todos los estudiantes tienen la pregunta bloqueada y están en la pantalla <em>"Esperando la siguiente pregunta..."</em>. Haz clic en <strong>"Lanzar Siguiente Pregunta"</strong> cuando desees continuar.
-                  </span>
-                )}
-                {liveSession.estado === "finalizada" && (
-                  <span>
-                    La prueba ha concluido. Todas las respuestas han sido registradas y los estudiantes tienen su comprobante de entrega. Puedes revisar las notas en el módulo <strong>"Revisar respuestas"</strong>.
-                  </span>
-                )}
-              </div>
-
-              {/* BARRA DE PROGRESO DE RESPUESTAS EN TIEMPO REAL TIPO KAHOOT */}
-              {liveSession.estado === "en_pregunta" && (
-                <div
-                  style={{
-                    background: "#f0fdf4",
-                    border: "1.5px solid #86efac",
-                    borderRadius: "0.85rem",
-                    padding: "1rem 1.25rem",
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: "0.55rem"
-                  }}
-                >
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "0.5rem" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                      <span style={{ fontSize: "0.95rem" }}>📊</span>
-                      <strong style={{ fontSize: "0.88rem", color: "#166534" }}>
-                        Respuestas Recibidas en Tiempo Real:
-                      </strong>
-                    </div>
-                    <span style={{ fontSize: "0.95rem", fontWeight: 900, color: "#15803d" }}>
-                      {liveSession.respuestas_recibidas_count || 0} / {connectedCount} alumnos{" "}
-                      <span style={{ fontSize: "0.78rem", fontWeight: 700, color: "#166534" }}>
-                        ({connectedCount > 0 ? Math.min(100, Math.round(((liveSession.respuestas_recibidas_count || 0) / connectedCount) * 100)) : 0}%)
-                      </span>
-                    </span>
-                  </div>
-
-                  <div style={{ width: "100%", height: "10px", background: "#dcfce7", borderRadius: "9999px", overflow: "hidden" }}>
-                    <div
-                      style={{
-                        width: `${connectedCount > 0 ? Math.min(100, Math.round(((liveSession.respuestas_recibidas_count || 0) / connectedCount) * 100)) : 0}%`,
-                        height: "100%",
-                        background: "linear-gradient(90deg, #16a34a, #22c55e)",
-                        borderRadius: "9999px",
-                        transition: "width 0.4s ease"
-                      }}
-                    />
-                  </div>
-
-                  {liveSession.todos_respondieron && (
-                    <div style={{ fontSize: "0.8rem", fontWeight: 800, color: "#15803d" }}>
-                      🎉 ¡Todos los alumnos conectados ya respondieron esta pregunta!
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* BOTONERA MAESTRA SEGÚN EL ESTADO */}
-              <div style={{ display: "flex", gap: "0.85rem", flexWrap: "wrap", borderTop: "1px solid #f1f5f9", paddingTop: "1.1rem" }}>
-                {/* 1. CASO INACTIVA: BOTÓN HABILITAR */}
-                {liveSession.estado === "inactiva" && (
-                  <div style={{ display: "flex", flexDirection: "column", width: "100%", gap: "0.85rem" }}>
-                    {!hasFullAccess && !scheduleCheck.isWithin && (
-                      <div
-                        style={{
-                          background: "#fffbeb",
-                          border: "1.5px solid #fde68a",
-                          borderRadius: "0.85rem",
-                          padding: "0.95rem 1.25rem",
-                          display: "flex",
-                          alignItems: "flex-start",
-                          gap: "0.85rem",
-                          boxShadow: "0 2px 8px rgba(217, 119, 6, 0.08)"
-                        }}
-                      >
-                        <div
-                          style={{
-                            width: "36px",
-                            height: "36px",
-                            borderRadius: "0.5rem",
-                            background: "#fef3c7",
-                            border: "1px solid #fde68a",
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            color: "#d97706",
-                            flexShrink: 0,
-                            marginTop: "0.1rem"
-                          }}
-                        >
-                          <Lock size={18} />
-                        </div>
-                        <div style={{ display: "flex", flexDirection: "column", gap: "0.3rem", fontSize: "0.85rem" }}>
-                          <strong style={{ color: "#78350f", fontSize: "0.9rem" }}>
-                            Habilitación restringida al horario oficial de la sección:
-                          </strong>
-                          <span style={{ color: "#92400e", lineHeight: 1.45 }}>
-                            Como instructor asignado, únicamente podrás habilitar la prueba en vivo el día <strong>{seccion?.dia}</strong> dentro del rango de tiempo exclusivo (<strong>{seccion?.hora_inicio} - {seccion?.hora_fin || "Fin"}</strong>).
-                          </span>
-                          <span style={{ fontSize: "0.78rem", color: "#b45309", fontWeight: 800, marginTop: "0.15rem" }}>
-                            ⏰ Motivo del bloqueo: {scheduleCheck.reason}
-                          </span>
-                        </div>
-                      </div>
-                    )}
-
-                    <button
-                      type="button"
-                      onClick={() => handleExecuteControl("habilitar", { duracion_segundos: activeQuiz.tiempo_por_pregunta_segundos || 90 })}
-                      disabled={actionLoading || (!hasFullAccess && !scheduleCheck.isWithin)}
-                      style={{
-                        width: "100%",
-                        padding: "0.9rem 1.5rem",
-                        borderRadius: "0.75rem",
-                        border: !hasFullAccess && !scheduleCheck.isWithin ? "1.5px solid #cbd5e1" : "none",
-                        background: !hasFullAccess && !scheduleCheck.isWithin
-                          ? "#f1f5f9"
-                          : "linear-gradient(135deg, #16a34a 0%, #15803d 100%)",
-                        color: !hasFullAccess && !scheduleCheck.isWithin ? "#94a3b8" : "#ffffff",
-                        fontSize: "0.95rem",
-                        fontWeight: 900,
-                        cursor: (!hasFullAccess && !scheduleCheck.isWithin) || actionLoading ? "not-allowed" : "pointer",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        gap: "0.55rem",
-                        boxShadow: !hasFullAccess && !scheduleCheck.isWithin ? "none" : "0 4px 14px rgba(22, 163, 74, 0.35)",
-                        transition: "all 0.15s ease"
-                      }}
-                      title={!hasFullAccess && !scheduleCheck.isWithin ? scheduleCheck.reason : "Habilitar sala en vivo"}
-                    >
-                      {!hasFullAccess && !scheduleCheck.isWithin ? <Lock size={18} /> : <Unlock size={18} />}
-                      <span>
-                        {!hasFullAccess && !scheduleCheck.isWithin
-                          ? `Habilitación Bloqueada (Fuera del Horario: ${seccion?.dia || ""} ${seccion?.hora_inicio || ""})`
-                          : "Habilitar Prueba en Vivo (Abrir Sala de Espera)"}
-                      </span>
-                    </button>
-                  </div>
-                )}
-
-                {/* 2. CASO LOBBY: BOTÓN INICIAR PREGUNTA 1 */}
-                {liveSession.estado === "lobby" && (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => handleExecuteControl("iniciar_pregunta", { pregunta_idx: 0, duracion_segundos: activeQuiz.preguntas?.[0]?.tiempo_segundos || 90 })}
-                      disabled={actionLoading}
-                      style={{
-                        flex: 1.5,
-                        padding: "0.85rem 1.5rem",
-                        borderRadius: "0.75rem",
-                        border: "none",
-                        background: "linear-gradient(135deg, #0284c7 0%, #0369a1 100%)",
-                        color: "#ffffff",
-                        fontSize: "0.95rem",
-                        fontWeight: 900,
-                        cursor: actionLoading ? "not-allowed" : "pointer",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        gap: "0.5rem",
-                        boxShadow: "0 4px 14px rgba(2, 132, 199, 0.35)"
-                      }}
-                    >
-                      <Play size={18} />
-                      <span>Dar Orden: Iniciar Pregunta 1 (1:30 min)</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => handleExecuteControl("deshabilitar")}
-                      disabled={actionLoading}
-                      style={{
-                        padding: "0.85rem 1.25rem",
-                        borderRadius: "0.75rem",
-                        border: "1.5px solid #cbd5e1",
-                        background: "#ffffff",
-                        color: "#64748b",
-                        fontSize: "0.88rem",
-                        fontWeight: 700,
-                        cursor: actionLoading ? "not-allowed" : "pointer"
-                      }}
-                    >
-                      Cancelar / Volver a Inactiva
-                    </button>
-                  </>
-                )}
-
-                {/* 3. CASO EN PREGUNTA: BOTÓN FORZAR PASO A ESPERA */}
-                {liveSession.estado === "en_pregunta" && (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => handleExecuteControl("tiempo_agotado")}
-                      disabled={actionLoading}
-                      style={{
-                        flex: 1,
-                        padding: "0.85rem 1.5rem",
-                        borderRadius: "0.75rem",
-                        border: "none",
-                        background: "linear-gradient(135deg, #f59e0b 0%, #d97706 100%)",
-                        color: "#ffffff",
-                        fontSize: "0.92rem",
-                        fontWeight: 900,
-                        cursor: actionLoading ? "not-allowed" : "pointer",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        gap: "0.5rem",
-                        boxShadow: "0 4px 14px rgba(245, 158, 11, 0.3)"
-                      }}
-                    >
-                      <SkipForward size={18} />
-                      <span>Terminar Tiempo Ahora (Pausar y Bloquear)</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => handleExecuteControl("finalizar")}
-                      disabled={actionLoading}
-                      style={{
-                        padding: "0.85rem 1.25rem",
-                        borderRadius: "0.75rem",
-                        border: "1.5px solid #fecaca",
-                        background: "#fef2f2",
-                        color: "#dc2626",
-                        fontSize: "0.88rem",
-                        fontWeight: 800,
-                        cursor: actionLoading ? "not-allowed" : "pointer"
-                      }}
-                    >
-                      Finalizar Prueba Completa
-                    </button>
-                  </>
-                )}
-
-                {/* 4. CASO ESPERANDO SIGUIENTE: BOTÓN LANZAR SIGUIENTE */}
-                {liveSession.estado === "esperando_siguiente" && (
-                  <>
-                    {currentQIdx + 1 < totalPreguntas ? (
-                      <button
-                        type="button"
-                        onClick={() =>
-                          handleExecuteControl("siguiente_pregunta", {
-                            duracion_segundos: activeQuiz.preguntas?.[currentQIdx + 1]?.tiempo_segundos || 90
-                          })
-                        }
-                        disabled={actionLoading}
-                        style={{
-                          flex: 1.5,
-                          padding: "0.85rem 1.5rem",
-                          borderRadius: "0.75rem",
-                          border: "none",
-                          background: "linear-gradient(135deg, #0284c7 0%, #0369a1 100%)",
-                          color: "#ffffff",
-                          fontSize: "0.95rem",
-                          fontWeight: 900,
-                          cursor: actionLoading ? "not-allowed" : "pointer",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          gap: "0.5rem",
-                          boxShadow: "0 4px 14px rgba(2, 132, 199, 0.35)"
-                        }}
-                      >
-                        <Play size={18} />
-                        <span>
-                          Lanzar Siguiente Pregunta: Pregunta #{currentQIdx + 2} {currentQIdx + 1 === 5 ? "⭐ (BONUS)" : ""} (1:30 min)
-                        </span>
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => handleExecuteControl("finalizar")}
-                        disabled={actionLoading}
-                        style={{
-                          flex: 1.5,
-                          padding: "0.85rem 1.5rem",
-                          borderRadius: "0.75rem",
-                          border: "none",
-                          background: "linear-gradient(135deg, #16a34a 0%, #15803d 100%)",
-                          color: "#ffffff",
-                          fontSize: "0.95rem",
-                          fontWeight: 900,
-                          cursor: actionLoading ? "not-allowed" : "pointer",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          gap: "0.5rem",
-                          boxShadow: "0 4px 14px rgba(22, 163, 74, 0.35)"
-                        }}
-                      >
-                        <CheckCircle2 size={18} />
-                        <span>¡Todas las Preguntas Concluidas! Finalizar Prueba Semanal</span>
-                      </button>
-                    )}
-
-                    <button
-                      type="button"
-                      onClick={() => handleExecuteControl("finalizar")}
-                      disabled={actionLoading}
-                      style={{
-                        padding: "0.85rem 1.25rem",
-                        borderRadius: "0.75rem",
-                        border: "1.5px solid #cbd5e1",
-                        background: "#ffffff",
-                        color: "#64748b",
-                        fontSize: "0.88rem",
-                        fontWeight: 700,
-                        cursor: actionLoading ? "not-allowed" : "pointer"
-                      }}
-                    >
-                      Cerrar y Finalizar
-                    </button>
-                  </>
-                )}
-
-                {/* 5. CASO FINALIZADA */}
-                {liveSession.estado === "finalizada" && (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => handleExecuteControl("deshabilitar")}
-                      disabled={actionLoading}
-                      style={{
-                        padding: "0.85rem 1.5rem",
-                        borderRadius: "0.75rem",
-                        border: "1.5px solid #cbd5e1",
-                        background: "#ffffff",
-                        color: "#334155",
-                        fontSize: "0.9rem",
-                        fontWeight: 800,
-                        cursor: actionLoading ? "not-allowed" : "pointer"
-                      }}
-                    >
-                      Reiniciar Sesión para Nueva Aplicación
-                    </button>
-                  </>
-                )}
-              </div>
-            </div>
-
-            {/* VISUALIZADOR DE LA PREGUNTA ACTIVA QUE VEN LOS ALUMNOS */}
-            {currentQuestion && liveSession.estado !== "inactiva" && (
-              <div
-                className="glass-panel"
-                style={{
-                  background: isBonusQuestion ? "linear-gradient(180deg, #fffdf8 0%, #ffffff 100%)" : "#ffffff",
-                  borderRadius: "1.25rem",
-                  border: isBonusQuestion ? "2px solid #f59e0b" : "1.5px solid #cbd5e1",
-                  padding: "1.75rem",
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: "1.1rem"
-                }}
-              >
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "0.5rem" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                    <span
-                      style={{
-                        width: "30px",
-                        height: "30px",
-                        borderRadius: "50%",
-                        background: isBonusQuestion ? "#f59e0b" : "#0284c7",
-                        color: "#ffffff",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        fontWeight: 900,
-                        fontSize: "0.85rem"
-                      }}
-                    >
-                      {currentQIdx + 1}
-                    </span>
-                    <strong style={{ fontSize: "1.05rem", color: "#0f172a" }}>
-                      Pregunta #{currentQIdx + 1} {isBonusQuestion ? "⭐ (Reactivo Bonus)" : ""}
-                    </strong>
-                  </div>
-
-                  <span style={{ fontSize: "0.78rem", fontWeight: 800, color: "#0369a1", background: "#f0f9ff", border: "1px solid #bae6fd", padding: "0.2rem 0.6rem", borderRadius: "0.4rem" }}>
-                    Valor: {Number(currentQuestion.puntos || 1.0).toFixed(3)} pts • Tiempo: 1:30 min
-                  </span>
-                </div>
-
-                {/* Micrografía histológica si tiene */}
-                {currentQuestion.imagen_url && (
-                  <div style={{ textAlign: "center", background: "#f8fafc", border: "1.5px solid #e2e8f0", padding: "0.65rem", borderRadius: "0.75rem" }}>
-                    <img
-                      src={currentQuestion.imagen_url}
-                      alt={`Pregunta ${currentQIdx + 1}`}
-                      style={{ maxHeight: "280px", maxWidth: "100%", objectFit: "contain", borderRadius: "0.5rem" }}
-                    />
-                  </div>
-                )}
-
-                {/* Apartados que el alumno está respondiendo */}
-                <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-                  <span style={{ fontSize: "0.78rem", fontWeight: 800, color: "#64748b", textTransform: "uppercase" }}>
-                    Apartados e Indicaciones de Respuesta:
-                  </span>
-                  {(currentQuestion.items || []).map((it, idx) => (
-                    <div key={it.id || idx} style={{ background: "#f8fafc", padding: "0.75rem 1rem", borderRadius: "0.6rem", border: "1px solid #e2e8f0" }}>
-                      <div style={{ fontSize: "0.85rem", fontWeight: 800, color: "#334155" }}>
-                        {idx + 1}. {it.instruccion || (it.tipo === "texto_corto" ? "Respuesta corta:" : "Listado:")}
-                      </div>
-                      <span style={{ fontSize: "0.74rem", color: "#64748b" }}>
-                        Tipo: {it.tipo === "texto_corto" ? "Texto directo" : `Lista de ${it.cantidad || 3} elementos`} • Valor: {Number(it.puntos || 0).toFixed(3)} pt
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* COLUMNA DERECHA: MONITOR DE ESTUDIANTES EN VIVO */}
-          <div
-            className="glass-panel"
-            style={{
-              background: "#ffffff",
-              borderRadius: "1.25rem",
-              border: "1.5px solid #e2e8f0",
-              padding: "1.25rem",
-              display: "flex",
-              flexDirection: "column",
-              gap: "1rem"
-            }}
-          >
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "0.45rem" }}>
-                <Users size={18} color="#0284c7" />
-                <h4 style={{ margin: 0, fontSize: "0.95rem", fontWeight: 800, color: "#0f172a" }}>
-                  Alumnos de la Sección
-                </h4>
-              </div>
-              <span
-                style={{
-                  fontSize: "0.75rem",
-                  fontWeight: 900,
-                  background: "#eff6ff",
-                  color: "#0284c7",
-                  padding: "0.15rem 0.5rem",
-                  borderRadius: "9999px"
-                }}
-              >
-                {connectedCount} activos
-              </span>
-            </div>
-
-            <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", maxHeight: "550px", overflowY: "auto" }}>
-              {studentsList.length === 0 ? (
-                <div style={{ padding: "1.5rem", textAlign: "center", color: "#94a3b8", fontSize: "0.8rem" }}>
-                  No hay estudiantes registrados en esta sección.
-                </div>
-              ) : (
-                studentsList.map((est) => {
-                  const cKey = String(est.numero_cuenta || "").trim();
-                  const connInfo = connectedMap[cKey] || connectedMap[String(est.numero_cuenta)];
-                  const isConnected = Boolean(
-                    connInfo && (!connInfo.ultimo_ping || (nowTs - connInfo.ultimo_ping < 60000))
-                  );
-                  const isAnswering = connInfo && typeof connInfo.pregunta_vista === "number" && connInfo.pregunta_vista >= 0;
-
-                  return (
-                    <div
-                      key={cKey}
-                      style={{
-                        padding: "0.6rem 0.8rem",
-                        borderRadius: "0.65rem",
-                        border: isConnected ? "1px solid #86efac" : "1px solid #f1f5f9",
-                        background: isConnected ? "#f0fdf4" : "#ffffff",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "space-between",
-                        gap: "0.5rem"
-                      }}
-                    >
-                      <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
-                        <strong style={{ fontSize: "0.82rem", color: "#0f172a", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                          {est.nombre_completo || "Estudiante"}
-                        </strong>
-                        <span style={{ fontSize: "0.72rem", color: "#64748b" }}>
-                          Cuenta: {cKey}
-                        </span>
-                      </div>
-
-                      {isConnected ? (
-                        <span
-                          style={{
-                            fontSize: "0.68rem",
-                            fontWeight: 800,
-                            padding: "0.2rem 0.55rem",
-                            borderRadius: "9999px",
-                            background:
-                              liveSession.estado === "en_pregunta"
-                                ? connInfo?.ha_respondido
-                                  ? "#dcfce7"
-                                  : "#fef3c7"
-                                : "#dcfce7",
-                            color:
-                              liveSession.estado === "en_pregunta"
-                                ? connInfo?.ha_respondido
-                                  ? "#15803d"
-                                  : "#b45309"
-                                : "#15803d",
-                            border:
-                              liveSession.estado === "en_pregunta"
-                                ? connInfo?.ha_respondido
-                                  ? "1px solid #86efac"
-                                  : "1px solid #fde68a"
-                                : "1px solid #86efac",
-                            whiteSpace: "nowrap",
-                            display: "inline-flex",
-                            alignItems: "center",
-                            gap: "0.25rem"
-                          }}
-                        >
-                          {liveSession.estado === "en_pregunta"
-                            ? connInfo?.ha_respondido
-                              ? "✓ Respondió"
-                              : "⏳ Pensando..."
-                            : liveSession.estado === "lobby"
-                            ? "🟢 En Sala"
-                            : "🟢 Conectado"}
-                        </span>
-                      ) : (
-                        <span
-                          style={{
-                            fontSize: "0.68rem",
-                            fontWeight: 700,
-                            padding: "0.15rem 0.45rem",
-                            borderRadius: "9999px",
-                            background: "#f1f5f9",
-                            color: "#94a3b8",
-                            whiteSpace: "nowrap"
-                          }}
-                        >
-                          Sin entrar
-                        </span>
-                      )}
-                    </div>
-                  );
-                })
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-        </>
-      )}
-    </div>
+        </>}
+      </>}
+    </section>
   );
 }

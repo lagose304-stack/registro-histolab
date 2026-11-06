@@ -1,3 +1,4 @@
+import { getCanonicalExamGrade } from "./academicEngine";
 import ExcelJS from "exceljs";
 import { getStudentDerechoStatus } from "../components/SectionGradebookView";
 
@@ -78,6 +79,7 @@ export async function exportStyledExcel({
     examenes.forEach((ex) => {
       columnsConfig.push({
         key: ex.key,
+        exam: ex,
         header: ex.label,
         width: 8.5,
         align: "center",
@@ -394,6 +396,9 @@ export async function exportStyledExcel({
           cellValue = "—";
           fontColor = "FF94A3B8";
         }
+      } else if (col.exam) {
+        cellValue = getCanonicalExamGrade(est, col.exam.examIndex, col.exam.examWeek);
+        numFormat = "0.000";
       } else if (col.isNumber) {
         const val = Number(
           est.notas?.[col.key] ??

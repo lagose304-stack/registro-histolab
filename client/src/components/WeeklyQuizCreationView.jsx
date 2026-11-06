@@ -1,31 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
-import {
-  HelpCircle,
-  ArrowLeft,
-  Save,
-  RefreshCw,
-  Plus,
-  Trash2,
-  CheckCircle2,
-  AlertCircle,
-  Eye,
-  FileText,
-  Clock,
-  Award,
-  Image as ImageIcon,
-  ListOrdered,
-  Type,
-  ChevronRight,
-  ExternalLink,
-  Check,
-  Calendar,
-  Sparkles,
-  BookOpen,
-  RotateCcw,
-  Radio,
-  User
-} from "lucide-react";
+import { ArrowLeft, Save, Plus, Trash2, CheckCircle2, Eye, FileText, Clock, Award, ListOrdered, Type, ChevronRight, Search, BookOpen, RotateCcw, Radio, User, SlidersHorizontal } from "lucide-react";
 import { api } from "../services/api";
 import {
   hasFullSectionAccess,
@@ -33,6 +8,12 @@ import {
   getAssignedRecordForWeek,
   SECTION_ROLES
 } from "../utils/sectionRoleUtils";
+
+import { displaySectionCode } from "../../../shared/sectionCode.mjs";
+import { QUIZ_ITEM_TYPES, createQuizItem, syncQuizItemAnswerKey, quizPublicationIssues } from "../../../shared/quizItems.mjs";
+import QuizItemResponse from "./QuizItemResponse";
+import QuizItemEditor from "./QuizItemEditor";
+import "./WeeklyQuizCreationView.css";
 
 const createDefaultQuestions = () => [
   { id: "q_1", numero: 1, enunciado: "", puntos: 1.0, es_bonus: false, items: [] },
@@ -98,9 +79,20 @@ export default function WeeklyQuizCreationView({
 }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [loadError, setLoadError] = useState("");
+  const [saveError, setSaveError] = useState("");
+  const [saveErrorLocation, setSaveErrorLocation] = useState("content");
+  const [pendingPublication, setPendingPublication] = useState(null);
+  const [quizLoading, setQuizLoading] = useState(false);
+  const [catalogSearch, setCatalogSearch] = useState("");
+  const [catalogStatus, setCatalogStatus] = useState("all");
+  const resetDialogRef = useRef(null);
   const [resetting, setResetting] = useState(false);
   const [showResetModal, setShowResetModal] = useState(false);
+  const [resetError, setResetError] = useState("");
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [activeQuestion, setActiveQuestion] = useState(0);
+  const [previewAnswers, setPreviewAnswers] = useState({});
   const [viewMode, setViewMode] = useState("builder"); // 'builder' | 'preview'
 
   const notifyRef = useRef(notify);
@@ -109,6 +101,7 @@ export default function WeeklyQuizCreationView({
   // Bloquear el scroll de fondo mientras el modal de reinicio esté abierto (Modal Global)
   useEffect(() => {
     if (showResetModal) {
+      resetDialogRef.current?.showModal();
       const originalOverflow = document.body.style.overflow;
       document.body.style.overflow = "hidden";
       return () => {
@@ -161,13 +154,14 @@ export default function WeeklyQuizCreationView({
   const loadInitialData = useCallback(async () => {
     if (!seccion?.id) return;
     setLoading(true);
+    setLoadError("");
 
     try {
       const [resSemanas, resTemario, resQuizzes, resAsig] = await Promise.all([
-        api.semanas.getConfig(carrera).catch(() => ({ data: [] })),
-        api.temario.getAll({ carrera }).catch(() => ({ data: [] })),
-        api.pruebas.getBySeccion(seccion.id).catch(() => ({ data: [] })),
-        api.asignaciones.getBySeccion(seccion.id).catch(() => ({ data: [] }))
+        api.semanas.getConfig(carrera),
+        api.temario.getAll({ carrera }),
+        api.pruebas.getBySeccion(seccion.id),
+        api.asignaciones.getBySeccion(seccion.id)
       ]);
 
       if (resSemanas?.data) setSemanasConfig(resSemanas.data);
@@ -182,7 +176,7 @@ export default function WeeklyQuizCreationView({
       }
     } catch (err) {
       console.error("Error al cargar datos en Crear prueba semanal:", err);
-      notifyRef.current("Error al cargar la información de la sección", "error");
+      setLoadError("No pudimos cargar las semanas y pruebas de la sección.");
     } finally {
       setLoading(false);
     }
@@ -285,6 +279,10 @@ export default function WeeklyQuizCreationView({
   useEffect(() => {
     if (selectedSemana === null) return;
     let isMounted = true;
+    setQuizLoading(true);
+    setActiveQuestion(0);
+    setPreviewAnswers({});
+    setSaveError("");
 
     const fetchQuiz = async () => {
       try {
@@ -344,7 +342,7 @@ export default function WeeklyQuizCreationView({
       }
     };
 
-    fetchQuiz();
+    fetchQuiz().finally(() => { if (isMounted) setQuizLoading(false); });
 
     return () => {
       isMounted = false;
@@ -365,71 +363,20 @@ export default function WeeklyQuizCreationView({
     refreshSectionQuizzes();
   };
 
-  // Alternar estado entre Borrador y Publicar
-  const handleToggleEstado = () => {
-    const nextState = quizData.estado === "publicada" ? "borrador" : "publicada";
-    setQuizData((prev) => ({ ...prev, estado: nextState }));
-    setHasUnsavedChanges(true);
-    notifyRef.current(
-      nextState === "publicada"
-        ? "Estado cambiado a: PUBLICADA. Los alumnos podrán verla al guardar los cambios."
-        : "Estado cambiado a: BORRADOR. La prueba queda oculta para los alumnos.",
-      "info"
-    );
-  };
-
-  // Agregar nueva pregunta vacía (Valor por defecto 1.0 pt)
-  const handleAddQuestion = () => {
-    const newNum = quizData.preguntas.length + 1;
-    const newQ = {
-      id: "q_" + Date.now(),
-      numero: newNum,
-      enunciado: "",
-      puntos: 1.0,
-      items: [] // Sin items precargados
-    };
-
-    setQuizData((prev) => ({
-      ...prev,
-      preguntas: [...prev.preguntas, newQ]
-    }));
-    setHasUnsavedChanges(true);
-  };
-
-  // Eliminar pregunta
-  const handleRemoveQuestion = (qId) => {
-    setQuizData((prev) => {
-      const filtered = prev.preguntas.filter((q) => q.id !== qId);
-      const renumbered = filtered.map((q, idx) => ({ ...q, numero: idx + 1 }));
-      return { ...prev, preguntas: renumbered };
-    });
-    setHasUnsavedChanges(true);
-  };
-
-  // Modificar campo de una pregunta (restringido a 1.0 pt máximo)
-  const handleUpdateQuestion = (qId, field, value) => {
-    if (field === "es_bonus") return; // La condición de bonus está fija exclusivamente en la Pregunta 6
-    setQuizData((prev) => ({
-      ...prev,
-      preguntas: prev.preguntas.map((q) => {
-        if (q.id !== qId) return q;
-        if (field === "puntos") {
-          const valNum = Math.max(0.05, Math.min(1.0, parseFloat(value) || 0));
-          return { ...q, puntos: parseFloat(valNum.toFixed(3)) };
-        }
-        return { ...q, [field]: value };
-      })
-    }));
-    setHasUnsavedChanges(true);
+  // Cada opción de visibilidad guarda el contenido y confirma el estado en el servidor.
+  const handleSetPublication = async nextState => {
+    if (saving || resetting || quizLoading || (quizData.estado === nextState && !hasUnsavedChanges && quizData.id)) return;
+    setPendingPublication(nextState);
+    try { await handleSaveQuiz(nextState, "publication"); }
+    finally { setPendingPublication(null); }
   };
 
   // Agregar sub-ítem (apartado) a una pregunta con puntaje proporcional
-  const handleAddSubItem = (qId, tipo = "texto_corto", cantidad = 1) => {
+  const handleAddSubItem = (qId, tipo = "texto_corto") => {
     setQuizData((prev) => ({
       ...prev,
       preguntas: prev.preguntas.map((q) => {
         if (q.id !== qId) return q;
-        const cantFinal = tipo === "texto_corto" ? 1 : Math.max(1, Math.min(10, parseInt(cantidad, 10) || 3));
         const currentItems = q.items || [];
         const currentSum = currentItems.reduce((acc, it) => acc + (parseFloat(it.puntos) || 0), 0);
         const remaining = Math.max(0, parseFloat((1.0 - currentSum).toFixed(3)));
@@ -443,16 +390,7 @@ export default function WeeklyQuizCreationView({
           defaultPts = parseFloat((1.0 / (currentItems.length + 1)).toFixed(3));
         }
 
-        const newItem = {
-          id: "item_" + Date.now() + "_" + Math.floor(Math.random() * 1000),
-          tipo,
-          instruccion: "",
-          etiqueta: "",
-          puntos: defaultPts,
-          cantidad: cantFinal,
-          respuesta_modelo: "",
-          respuestas_esperadas: tipo === "texto_corto" ? [] : Array(cantFinal).fill("")
-        };
+        const newItem = { ...createQuizItem(tipo, "item_" + Date.now() + "_" + Math.random().toString(36).slice(2,8)), puntos: defaultPts };
 
         const newItemsList = [...currentItems, newItem];
         const newSum = newItemsList.reduce((acc, it) => acc + (parseFloat(it.puntos) || 0), 0);
@@ -492,86 +430,12 @@ export default function WeeklyQuizCreationView({
     notifyRef.current("Puntos distribuidos equitativamente (1.00 pt en total).", "info");
   };
 
-  // Modificar sub-ítem (apartado)
-  const handleUpdateSubItem = (qId, itemId, field, value) => {
-    setQuizData((prev) => ({
-      ...prev,
-      preguntas: prev.preguntas.map((q) => {
-        if (q.id !== qId) return q;
-        const updatedItems = (q.items || []).map((it) => {
-          if (it.id !== itemId) return it;
-          if (field === "puntos") {
-            const parsed = Math.max(0, Math.min(1.0, parseFloat(value) || 0));
-            return { ...it, puntos: parsed };
-          }
-          if (field === "cantidad") {
-            const newCant = Math.max(1, Math.min(10, parseInt(value, 10) || 1));
-            return { ...it, cantidad: newCant };
-          }
-          if (field === "instruccion") {
-            return { ...it, instruccion: value, etiqueta: value };
-          }
-          return { ...it, [field]: value };
-        });
-
-        // Recalcular puntos de la pregunta como suma de los apartados
-        const sumPts = updatedItems.reduce((acc, it) => acc + (parseFloat(it.puntos) || 0), 0);
-
-        return {
-          ...q,
-          puntos: parseFloat(sumPts.toFixed(3)),
-          items: updatedItems
-        };
-      })
-    }));
-    setHasUnsavedChanges(true);
-  };
-
-  // Modificar texto de respuestas posibles / modelo (en ambas opciones: texto y listado)
-  const handleUpdatePossibleAnswersText = (qId, itemId, text) => {
-    setQuizData((prev) => ({
-      ...prev,
-      preguntas: prev.preguntas.map((q) => {
-        if (q.id !== qId) return q;
-        return {
-          ...q,
-          items: (q.items || []).map((it) => {
-            if (it.id !== itemId) return it;
-            const parsed = text
-              .split(/[\n,]+/)
-              .map((s) => s.trim())
-              .filter(Boolean);
-
-            return {
-              ...it,
-              respuestas_posibles_texto: text,
-              respuesta_modelo: text,
-              respuestas_esperadas: parsed
-            };
-          })
-        };
-      })
-    }));
-    setHasUnsavedChanges(true);
-  };
-
-  // Modificar respuesta esperada en sub-ítem de listado (compatibilidad)
-  const handleUpdateExpectedAnswer = (qId, itemId, index, text) => {
-    setQuizData((prev) => ({
-      ...prev,
-      preguntas: prev.preguntas.map((q) => {
-        if (q.id !== qId) return q;
-        return {
-          ...q,
-          items: (q.items || []).map((it) => {
-            if (it.id !== itemId) return it;
-            const resps = [...(it.respuestas_esperadas || [])];
-            resps[index] = text;
-            return { ...it, respuestas_esperadas: resps };
-          })
-        };
-      })
-    }));
+  const handleReplaceSubItem = (questionId, itemId, replacement) => {
+    setQuizData(previous => ({ ...previous, preguntas: previous.preguntas.map(question => {
+      if (question.id !== questionId) return question;
+      const items = (question.items || []).map(item => item.id === itemId ? syncQuizItemAnswerKey(replacement) : item);
+      return { ...question, items, puntos: Number(items.reduce((sum,item) => sum + (Number(item.puntos)||0),0).toFixed(3)) };
+    }) }));
     setHasUnsavedChanges(true);
   };
 
@@ -596,36 +460,37 @@ export default function WeeklyQuizCreationView({
   };
 
   // Guardar prueba en la base de datos
-  const handleSaveQuiz = async () => {
-    if (!seccion?.id || selectedSemana === null) return;
+  const handleSaveQuiz = async (nextState = quizData.estado, errorLocation = "content") => {
+    if (!seccion?.id || selectedSemana === null || saving || resetting || quizLoading) return;
 
+    setSaveErrorLocation(errorLocation);
+    setSaveError("");
+    if (nextState === "publicada") {
+      const issues = quizPublicationIssues(quizData.preguntas);
+      if (issues.length) { setSaveError(`Antes de publicar: ${issues.slice(0,3).join(" ")}${issues.length > 3 ? ` Hay ${issues.length - 3} detalles adicionales por completar.` : ""}`); return; }
+    }
     // Validación estricta: ninguna pregunta puede valer más de 1.00 pt
     for (let i = 0; i < quizData.preguntas.length; i++) {
       const q = quizData.preguntas[i];
       const qVal = parseFloat(q.puntos) || 0;
       if (qVal > 1.001) {
-        notifyRef.current(
-          `La Pregunta #${i + 1} tiene un valor de ${qVal.toFixed(3)} pts, superando el límite máximo permitido de 1.00 pt. Ajusta sus puntos antes de guardar.`,
-          "error"
-        );
+        setSaveError(`La pregunta ${i + 1} supera 1 punto. Ajusta sus puntos antes de guardar.`);
         return;
       }
       if (q.items && q.items.length > 0) {
         const sumItems = q.items.reduce((acc, it) => acc + (parseFloat(it.puntos) || 0), 0);
         if (sumItems > 1.001) {
-          notifyRef.current(
-            `La suma de los apartados de la Pregunta #${i + 1} (${sumItems.toFixed(3)} pts) excede el máximo permitido de 1.00 pt.`,
-            "error"
-          );
+          setSaveError(`La suma de los apartados de la pregunta ${i + 1} supera 1 punto.`);
           return;
         }
       }
     }
 
     setSaving(true);
+    setSaveError("");
 
     try {
-      const isPublicada = quizData.estado === "publicada";
+      const isPublicada = nextState === "publicada";
       const totalPoints = quizData.preguntas.reduce((acc, q) => acc + (parseFloat(q.puntos) || 0), 0);
       const cleanTotalPoints = parseFloat(totalPoints.toFixed(3));
       const cleanOfficialPoints = Math.min(5.0, cleanTotalPoints);
@@ -653,6 +518,7 @@ export default function WeeklyQuizCreationView({
         tiempo_por_pregunta_segundos: tiempoPorPregunta,
         preguntas: quizData.preguntas.map((q) => ({
           ...q,
+          items: (q.items || []).map(syncQuizItemAnswerKey),
           tiempo_segundos: tiempoPorPregunta
         }))
       };
@@ -668,11 +534,12 @@ export default function WeeklyQuizCreationView({
       setQuizData((prev) => ({
         ...prev,
         id: savedQuiz.id || prev.id,
+        estado: isPublicada ? "publicada" : "borrador",
         puntajeTotal: cleanOfficialPoints
       }));
 
       const key = getStorageKey(selectedSemana);
-      localStorage.setItem(key, JSON.stringify(savedQuiz));
+      try { localStorage.setItem(key, JSON.stringify(savedQuiz)); } catch { /* El guardado en servidor ya fue confirmado. */ }
 
       // Actualizar INMEDIATAMENTE la lista de pruebas de la sección en el estado
       // para que el catálogo cambie al instante de '⚪ Sin crear' a '🟢 Publicada' o '🟡 Borrador'
@@ -683,14 +550,14 @@ export default function WeeklyQuizCreationView({
 
       setHasUnsavedChanges(false);
       notifyRef.current(
-        `¡Prueba de la Semana ${selectedSemana} guardada con éxito (${isPublicada ? "PUBLICADA" : "BORRADOR"} • Oficial: ${cleanOfficialPoints.toFixed(3)} pts / Total con bonus: ${cleanTotalPoints.toFixed(3)} pts)!`,
+        `¡Prueba de la Semana ${selectedSemana} guardada con éxito!`,
         "success"
       );
       // Sincronizar en background
       await refreshSectionQuizzes();
     } catch (err) {
       console.error("Error al guardar prueba:", err);
-      notifyRef.current(err.message || "Error al guardar la prueba semanal", "error");
+      setSaveError(err.message || "No pudimos guardar la prueba. Tus cambios se conservan para reintentar.");
     } finally {
       setSaving(false);
     }
@@ -698,8 +565,9 @@ export default function WeeklyQuizCreationView({
 
   // Reiniciar la prueba completa y borrar todas las preguntas guardadas
   const handleResetQuiz = async () => {
-    if (!seccion?.id || selectedSemana === null) return;
+    if (!seccion?.id || selectedSemana === null || saving || resetting || quizLoading) return;
     setResetting(true);
+    setResetError("");
 
     try {
       const cleanDefaults = createDefaultQuestions();
@@ -736,13 +604,18 @@ export default function WeeklyQuizCreationView({
         descripcion: "",
         instrucciones: "",
         duracionMinutos: 15,
+        tiempoPorPreguntaSegundos: 90,
         puntajeTotal: 5.0,
         estado: "borrador",
         preguntas: cleanDefaults
       });
 
+      setActiveQuestion(0);
+      setViewMode("builder");
+      setPreviewAnswers({});
+      setSaveError("");
       const key = getStorageKey(selectedSemana);
-      localStorage.setItem(key, JSON.stringify(savedQuiz));
+      try { localStorage.setItem(key, JSON.stringify(savedQuiz)); } catch { /* El guardado en servidor ya fue confirmado. */ }
 
       setSectionQuizzes((prev) => {
         const others = (prev || []).filter((q) => Number(q.numero_semana) !== Number(selectedSemana));
@@ -758,1801 +631,168 @@ export default function WeeklyQuizCreationView({
       await refreshSectionQuizzes();
     } catch (err) {
       console.error("Error al reiniciar prueba:", err);
-      notifyRef.current(err.message || "Error al reiniciar la prueba semanal", "error");
+      setResetError(err.message || "No pudimos reiniciar la prueba. Su contenido se conserva; puedes reintentar.");
     } finally {
       setResetting(false);
     }
   };
 
-  if (loading) {
-    return (
-      <div
-        className="glass-panel"
-        style={{
-          padding: "3.5rem",
-          background: "#ffffff",
-          borderRadius: "1rem",
-          border: "1px solid #e2e8f0",
-          textAlign: "center",
-          color: "#64748b",
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          gap: "1rem"
-        }}
-      >
-        <RefreshCw size={28} className="animate-spin" color="#0284c7" />
-        <span style={{ fontSize: "0.95rem", fontWeight: 700 }}>
-          Cargando pruebas semanales de la sección...
-        </span>
+  const quizStatus = quiz => !quiz ? "new" : quiz.publicada || quiz.estado === "publicada" ? "published" : "draft";
+  const statusLabels = { new: "Sin crear", published: "Publicada", draft: "Borrador" };
+  const catalogCounts = visibleWeeks.reduce((counts, week) => {
+    counts[quizStatus(quizzesBySemanaMap.get(week.numero_semana))]++;
+    return counts;
+  }, { new: 0, published: 0, draft: 0 });
+  const filteredWeeks = visibleWeeks.filter(week => {
+    const status = quizStatus(quizzesBySemanaMap.get(week.numero_semana));
+    const text = `${getWeekDisplayName(week)} ${week.parcial}`.toLocaleLowerCase();
+    return (catalogStatus === "all" || status === catalogStatus) && text.includes(catalogSearch.trim().toLocaleLowerCase());
+  });
+  const totalPoints = quizData.preguntas.reduce((sum, question) => sum + (Number(question.puntos) || 0), 0);
+  const basePoints = quizData.preguntas.slice(0, 5).reduce((sum, question) => sum + (Number(question.puntos) || 0), 0);
+  const publicationIssues = quizPublicationIssues(quizData.preguntas);
+  const completeQuestions = quizData.preguntas.filter(question => !quizPublicationIssues([question]).length).length;
+  const busy = saving || resetting || quizLoading;
+
+  const renderHeader = title => (
+    <header className="user-directory__hero"><div>
+      <p className="user-directory__eyebrow"><BookOpen size={18} aria-hidden="true" /> Sección {displaySectionCode(seccion?.codigo)} · {carrera}</p>
+      <h2 id="section-quizzes-title">{title}</h2>
+      <p>{selectedSemana === null ? "Prepara y administra las pruebas de cada semana." : getWeekDisplayName(currentWeekInfo)}</p>
+    </div></header>
+  );
+
+  if (loading || loadError) return (
+    <section className="user-directory section-quizzes" aria-labelledby="section-quizzes-title">
+      {renderHeader("Pruebas semanales de la sección")}
+      {loadError ? <div className="user-directory__state" role="alert"><p>{loadError}</p><button type="button" className="user-button" onClick={loadInitialData}>Reintentar</button></div>
+        : <div className="section-quizzes__skeleton" role="status" aria-label="Cargando pruebas semanales"><span /><span /><span /></div>}
+    </section>
+  );
+
+  if (selectedSemana === null) return (
+    <section className="user-directory section-quizzes" aria-labelledby="section-quizzes-title">
+      {!hideBackButton && <button type="button" className="user-button user-button--back" onClick={onClose}><ArrowLeft size={17} aria-hidden="true" /> Volver a módulos</button>}
+      {renderHeader("Pruebas semanales de la sección")}
+      <dl className="section-quizzes__stats">
+        {[["Semanas disponibles", visibleWeeks.length], ["Publicadas", catalogCounts.published], ["Borradores", catalogCounts.draft], ["Sin crear", catalogCounts.new]].map(([label,value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}
+      </dl>
+      <div className="section-quizzes__filters">
+        <label className="user-directory__search"><Search size={17} aria-hidden="true" /><input type="search" aria-label="Buscar semana o tema" placeholder="Buscar semana o tema" value={catalogSearch} onChange={event => setCatalogSearch(event.target.value)} /></label>
+        <label className="user-field">Estado de la prueba<select value={catalogStatus} onChange={event => setCatalogStatus(event.target.value)}><option value="all">Todos los estados</option><option value="new">Sin crear</option><option value="draft">Borrador</option><option value="published">Publicada</option></select></label>
       </div>
-    );
-  }
-
-  // =========================================================================
-  // PANTALLA 1: CATÁLOGO Y SELECCIÓN DE PRUEBAS SEMANALES (selectedSemana === null)
-  // =========================================================================
-  if (selectedSemana === null) {
-    return (
-      <div style={{ display: "flex", flexDirection: "column", gap: "1.75rem", paddingBottom: "3.5rem" }}>
-        {/* Cabecera del Catálogo */}
-        <div
-          className="glass-panel"
-          style={{
-            padding: "1.75rem 2rem",
-            background: "#ffffff",
-            borderRadius: "1.25rem",
-            border: "1.5px solid #e2e8f0",
-            boxShadow: "0 10px 30px -5px rgba(0, 0, 0, 0.05)",
-            display: "flex",
-            flexDirection: "column",
-            gap: "1.25rem"
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "1rem" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "0.85rem" }}>
-              {!hideBackButton && (
-                <button
-                  type="button"
-                  onClick={onClose}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    width: "38px",
-                    height: "38px",
-                    borderRadius: "0.6rem",
-                    border: "1.5px solid #cbd5e1",
-                    background: "#ffffff",
-                    color: "#334155",
-                    cursor: "pointer"
-                  }}
-                  title="Volver al panel de la sección"
-                >
-                  <ArrowLeft size={20} />
-                </button>
-              )}
-
-              <div
-                style={{
-                  width: "44px",
-                  height: "44px",
-                  borderRadius: "0.75rem",
-                  background: "linear-gradient(135deg, #0284c7 0%, #0369a1 100%)",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  color: "#ffffff",
-                  boxShadow: "0 4px 12px rgba(2, 132, 199, 0.25)"
-                }}
-              >
-                <HelpCircle size={24} />
-              </div>
-
-              <div>
-                <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
-                  <h2 style={{ margin: 0, fontSize: "1.3rem", fontWeight: 900, color: "#0f172a" }}>
-                    Pruebas Semanales de la Sección
-                  </h2>
-                  <span
-                    style={{
-                      background: "#e0f2fe",
-                      color: "#0369a1",
-                      fontWeight: 800,
-                      fontSize: "0.75rem",
-                      padding: "0.2rem 0.6rem",
-                      borderRadius: "0.4rem"
-                    }}
-                  >
-                    {seccion?.codigo}
-                  </span>
-                </div>
-                <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", fontSize: "0.82rem", color: "#64748b", marginTop: "0.2rem" }}>
-                  <span>{carrera}</span>
-                  <span>•</span>
-                  <span>{seccion?.dia} {seccion?.hora_inicio} - {seccion?.hora_fin}</span>
-                  <span>•</span>
-                  <span>Escala Oficial: <strong>5.000 pts c/u</strong></span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div
-            style={{
-              padding: "0.75rem 1rem",
-              borderRadius: "0.65rem",
-              background: "#f8fafc",
-              border: "1px solid #e2e8f0",
-              color: "#475569",
-              fontSize: "0.84rem",
-              display: "flex",
-              alignItems: "center",
-              gap: "0.5rem"
-            }}
-          >
-            <BookOpen size={16} color="#0284c7" style={{ flexShrink: 0 }} />
-            <span>
-              Selecciona la semana en la que deseas redactar reactivos, configurar o publicar la prueba para que los alumnos la contesten desde su portal.
-            </span>
-          </div>
-        </div>
-
-        {/* Grid de Semanas Disponibles */}
-        {visibleWeeks.length === 0 ? (
-          <div
-            style={{
-              background: "#ffffff",
-              border: "1.5px dashed #cbd5e1",
-              borderRadius: "1rem",
-              padding: "3.5rem 2rem",
-              textAlign: "center",
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              gap: "1rem"
-            }}
-          >
-            <div
-              style={{
-                width: "56px",
-                height: "56px",
-                borderRadius: "50%",
-                background: "#f8fafc",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                color: "#64748b",
-                border: "1px solid #e2e8f0"
-              }}
-            >
-              <HelpCircle size={28} />
-            </div>
-            <h3 style={{ margin: 0, fontSize: "1.2rem", fontWeight: 800, color: "#1e293b" }}>
-              No tienes semanas asignadas para crear pruebas
-            </h3>
-            <p style={{ margin: 0, fontSize: "0.88rem", color: "#64748b", maxWidth: "480px", lineHeight: 1.5 }}>
-              En esta sección no tienes asignado el rol oficial de <strong>Crear prueba semanal</strong> en ninguna semana. Si requieres acceso para diseñar reactivos, contacta al titular de sección ({seccion?.coordinador || "Titular de sección"}).
-            </p>
-          </div>
-        ) : (
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))",
-              gap: "1.25rem"
-            }}
-          >
-            {visibleWeeks.map((week) => {
-              const existingQuiz = quizzesBySemanaMap.get(week.numero_semana);
-              const isPublished = existingQuiz?.publicada || existingQuiz?.estado === "publicada";
-              const isDraft = existingQuiz && !isPublished;
-              const hasQuestions = (existingQuiz?.preguntas?.length || 0) > 0;
-              const assignedRecord = getAssignedRecordForWeek(asignaciones, SECTION_ROLES.CREAR_PRUEBA, week.numero_semana);
-              const assignedName = assignedRecord?.instructor_nombre || null;
-
-            return (
-              <div
-                key={week.numero_semana}
-                onClick={() => setSelectedSemana(week.numero_semana)}
-                style={{
-                  background: "#ffffff",
-                  borderRadius: "1rem",
-                  border: isPublished
-                    ? "2px solid #86efac"
-                    : isDraft
-                    ? "2px solid #fde68a"
-                    : "1.5px solid #e2e8f0",
-                  padding: "1.35rem",
-                  display: "flex",
-                  flexDirection: "column",
-                  justifyContent: "space-between",
-                  gap: "1.1rem",
-                  cursor: "pointer",
-                  transition: "all 0.15s ease",
-                  boxShadow: "0 4px 12px -2px rgba(0, 0, 0, 0.04)"
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.transform = "translateY(-3px)";
-                  e.currentTarget.style.boxShadow = "0 10px 20px -3px rgba(0, 0, 0, 0.08)";
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.transform = "translateY(0)";
-                  e.currentTarget.style.boxShadow = "0 4px 12px -2px rgba(0, 0, 0, 0.04)";
-                }}
-              >
-                {/* Header de la Tarjeta */}
-                <div>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "0.5rem" }}>
-                    <span
-                      style={{
-                        fontSize: "0.74rem",
-                        fontWeight: 800,
-                        padding: "0.15rem 0.5rem",
-                        borderRadius: "9999px",
-                        background: "#eff6ff",
-                        color: "#1d4ed8"
-                      }}
-                    >
-                      {week.parcial}
-                    </span>
-
-                    {/* Badge de Estado */}
-                    {isPublished ? (
-                      <span
-                        style={{
-                          fontSize: "0.72rem",
-                          fontWeight: 800,
-                          padding: "0.2rem 0.55rem",
-                          borderRadius: "9999px",
-                          background: "#dcfce7",
-                          color: "#15803d",
-                          border: "1px solid #86efac"
-                        }}
-                      >
-                        🟢 Publicada
-                      </span>
-                    ) : isDraft ? (
-                      <span
-                        style={{
-                          fontSize: "0.72rem",
-                          fontWeight: 800,
-                          padding: "0.2rem 0.55rem",
-                          borderRadius: "9999px",
-                          background: "#fef9c3",
-                          color: "#854d0e",
-                          border: "1px solid #fde047"
-                        }}
-                      >
-                        🟡 Borrador
-                      </span>
-                    ) : (
-                      <span
-                        style={{
-                          fontSize: "0.72rem",
-                          fontWeight: 700,
-                          padding: "0.2rem 0.55rem",
-                          borderRadius: "9999px",
-                          background: "#f1f5f9",
-                          color: "#64748b"
-                        }}
-                      >
-                        ⚪ Sin crear
-                      </span>
-                    )}
-                  </div>
-
-                  <h3 style={{ margin: "0 0 0.35rem 0", fontSize: "1.15rem", fontWeight: 800, color: "#0f172a" }}>
-                    {getWeekDisplayName(week)}
-                  </h3>
-
-                  <p style={{ margin: 0, fontSize: "0.82rem", color: "#64748b", lineHeight: 1.35 }}>
-                    {existingQuiz?.titulo
-                      ? existingQuiz.titulo
-                      : hasQuestions
-                      ? `${existingQuiz.preguntas.length} preguntas redactadas`
-                      : "Prueba semanal sin reactivos diseñados todavía."}
-                  </p>
-
-                  {/* Indicador de Docente Asignado */}
-                  <div
-                    style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: "0.35rem",
-                      fontSize: "0.74rem",
-                      fontWeight: 700,
-                      padding: "0.22rem 0.55rem",
-                      borderRadius: "0.45rem",
-                      background: assignedName ? "#f0f9ff" : "#f8fafc",
-                      color: assignedName ? "#0369a1" : "#94a3b8",
-                      border: `1px solid ${assignedName ? "#bae6fd" : "#e2e8f0"}`,
-                      marginTop: "0.45rem"
-                    }}
-                  >
-                    <User size={13} color={assignedName ? "#0284c7" : "#94a3b8"} />
-                    <span>{assignedName ? `Asignado: ${assignedName}` : "Sin asignar"}</span>
-                  </div>
-                </div>
-
-                {/* Métricas y Botón de Acción */}
-                <div style={{ paddingTop: "0.75rem", borderTop: "1px solid #f1f5f9", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", fontSize: "0.78rem", color: "#64748b", fontWeight: 700 }}>
-                    <FileText size={14} color="#0284c7" />
-                    <span>{existingQuiz?.preguntas?.length || 0} Preguntas</span>
-                  </div>
-
-                  <div
-                    style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: "0.3rem",
-                      fontSize: "0.82rem",
-                      fontWeight: 800,
-                      color: isPublished ? "#15803d" : "#0284c7"
-                    }}
-                  >
-                    <span>{existingQuiz ? "Editar Prueba" : "Diseñar Prueba"}</span>
-                    <ChevronRight size={15} />
-                  </div>
-                </div>
-              </div>
-            );
+      {!visibleWeeks.length ? <div className="user-directory__state"><h3>No tienes semanas asignadas para crear pruebas</h3><p>El titular de sección puede asignarte esta tarea desde Proporcionar asignaciones.</p></div>
+      : !filteredWeeks.length ? <p className="user-directory__state">Ninguna semana coincide con los filtros.</p> : (
+        <div className="section-quizzes__catalog">
+          {filteredWeeks.map(week => {
+            const quiz = quizzesBySemanaMap.get(week.numero_semana);
+            const status = quizStatus(quiz);
+            const assigned = getAssignedRecordForWeek(asignaciones, SECTION_ROLES.CREAR_PRUEBA, week.numero_semana);
+            return <article className="section-quizzes__week" data-status={status} key={week.numero_semana}>
+              <div className="section-quizzes__row"><span className="section-quizzes__partial">{week.parcial}</span><span className="section-quizzes__badge" data-status={status}>{statusLabels[status]}</span></div>
+              <h3>{getWeekDisplayName(week)}</h3>
+              <p><User size={16} aria-hidden="true" /> {assigned?.instructor_nombre || "Sin responsable asignado"}</p>
+              <div className="section-quizzes__week-footer"><small>{quiz ? `${quiz.preguntas?.length || 0} preguntas guardadas` : "Lista para preparar"}</small><button type="button" className="user-button" onClick={() => setSelectedSemana(week.numero_semana)}>{quiz ? "Editar prueba" : "Crear prueba"}<ChevronRight size={16} aria-hidden="true" /></button></div>
+            </article>;
           })}
         </div>
-        )}
-      </div>
-    );
-  }
+      )}
+    </section>
+  );
 
-  // =========================================================================
-  // PANTALLA 2: EDITOR DE LA PRUEBA SELECCIONADA (selectedSemana !== null)
-  // =========================================================================
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "1.75rem", paddingBottom: "3.5rem" }}>
-      {/* 1. Cabecera del Editor */}
-      <div
-        className="glass-panel"
-        style={{
-          padding: "1.75rem 2rem",
-          background: "#ffffff",
-          borderRadius: "1.25rem",
-          border: "1.5px solid #e2e8f0",
-          boxShadow: "0 10px 30px -5px rgba(0, 0, 0, 0.05)",
-          display: "flex",
-          flexDirection: "column",
-          gap: "1.25rem"
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: "1.25rem" }}>
-          <div>
-            {!hideBackButton && (
-              <button
-                type="button"
-                onClick={handleBackToCatalog}
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "0.45rem",
-                  padding: "0.45rem 0.95rem",
-                  borderRadius: "0.55rem",
-                  background: "#f8fafc",
-                  color: "#334155",
-                  border: "1px solid #cbd5e1",
-                  fontSize: "0.82rem",
-                  fontWeight: 700,
-                  cursor: "pointer",
-                  marginBottom: "1rem",
-                  transition: "all 0.15s ease",
-                  boxShadow: "0 1px 3px rgba(0, 0, 0, 0.03)"
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = "#f1f5f9";
-                  e.currentTarget.style.color = "#0f172a";
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = "#f8fafc";
-                  e.currentTarget.style.color = "#334155";
-                }}
-              >
-                <ArrowLeft size={16} />
-                <span>Volver al Catálogo de Pruebas</span>
-              </button>
-            )}
-
-            <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", marginBottom: "0.45rem", flexWrap: "wrap" }}>
-              <span
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "0.35rem",
-                  background: "#eff6ff",
-                  color: "#1d4ed8",
-                  fontSize: "0.76rem",
-                  fontWeight: 800,
-                  padding: "0.25rem 0.75rem",
-                  borderRadius: "9999px",
-                  border: "1px solid #bfdbfe"
-                }}
-              >
-                <Calendar size={13} color="#2563eb" />
-                {currentWeekInfo?.parcial || "I Parcial"}
-              </span>
-
-              <span
-                style={{
-                  background: "#f0fdf4",
-                  color: "#166534",
-                  fontSize: "0.76rem",
-                  fontWeight: 800,
-                  padding: "0.25rem 0.75rem",
-                  borderRadius: "9999px",
-                  border: "1px solid #bbf7d0",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "0.3rem"
-                }}
-              >
-                <CheckCircle2 size={13} color="#16a34a" />
-                Escala Oficial: 5.000 pts máx.
-              </span>
-
-              <span
-                style={{
-                  background: "#fef3c7",
-                  color: "#92400e",
-                  fontSize: "0.76rem",
-                  fontWeight: 800,
-                  padding: "0.25rem 0.75rem",
-                  borderRadius: "9999px",
-                  border: "1px solid #fde68a",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "0.3rem"
-                }}
-              >
-                <Sparkles size={13} color="#d97706" />
-                Pregunta 6 Bonus Fijo (+1.0 pt para Premios)
-              </span>
-            </div>
-
-            <h1
-              style={{
-                margin: "0 0 0.35rem",
-                fontSize: "1.75rem",
-                fontWeight: 900,
-                color: "#0f172a",
-                letterSpacing: "-0.02em",
-                display: "flex",
-                alignItems: "center",
-                gap: "0.75rem"
-              }}
-            >
-              <div
-                style={{
-                  width: "42px",
-                  height: "42px",
-                  borderRadius: "0.75rem",
-                  background: "linear-gradient(135deg, #0284c7 0%, #0369a1 100%)",
-                  color: "#ffffff",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  boxShadow: "0 4px 12px rgba(2, 132, 199, 0.3)",
-                  flexShrink: 0
-                }}
-              >
-                <HelpCircle size={24} />
-              </div>
-              <span>Diseño de Prueba: {getWeekDisplayName(currentWeekInfo)}</span>
-            </h1>
-
-            <div style={{ fontSize: "0.85rem", color: "#64748b", display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap", marginTop: "0.25rem" }}>
-              <span>Sección: <strong style={{ color: "#0f172a" }}>{seccion?.codigo}</strong></span>
-              <span>•</span>
-              <span>Carrera: <strong style={{ color: "#0f172a" }}>{carrera}</strong></span>
-              <span>•</span>
-              <span>Estructura: <strong>6 preguntas fijas (máx. 1.000 pt c/u)</strong></span>
-            </div>
+    <section className="user-directory section-quizzes" aria-labelledby="section-quizzes-title">
+      <button type="button" className="user-button user-button--back" disabled={busy} onClick={handleBackToCatalog}><ArrowLeft size={17} aria-hidden="true" /> Volver a pruebas semanales</button>
+      {renderHeader("Preparar prueba semanal")}
+      {quizLoading ? <div className="section-quizzes__skeleton" role="status" aria-label="Cargando prueba"><span /><span /></div> : <>
+        <div className="section-quizzes__editor-tools">
+          <div className="section-quizzes__modes" role="group" aria-label="Modo de trabajo">
+            <button type="button" aria-pressed={viewMode === "builder"} onClick={() => setViewMode("builder")}><FileText size={17} aria-hidden="true" /> Editar preguntas</button>
+            <button type="button" aria-pressed={viewMode === "preview"} onClick={() => setViewMode("preview")}><Eye size={17} aria-hidden="true" /> Vista del estudiante</button>
           </div>
-
-          {/* Botones de acción principales */}
-          <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}>
-            {/* BOTÓN PROMINENTE DE BORRADOR / PUBLICAR */}
-            <button
-              type="button"
-              onClick={handleToggleEstado}
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "0.55rem",
-                padding: "0.6rem 1.15rem",
-                borderRadius: "0.65rem",
-                fontSize: "0.84rem",
-                fontWeight: 800,
-                cursor: "pointer",
-                border: quizData.estado === "publicada" ? "2px solid #10b981" : "2px solid #f59e0b",
-                background: quizData.estado === "publicada" ? "#ecfdf5" : "#fffbeb",
-                color: quizData.estado === "publicada" ? "#065f46" : "#b45309",
-                boxShadow: "0 2px 6px rgba(0,0,0,0.04)",
-                transition: "all 0.15s ease"
-              }}
-              title="Click para alternar entre Borrador y Publicada"
-            >
-              <span
-                style={{
-                  width: "10px",
-                  height: "10px",
-                  borderRadius: "50%",
-                  background: quizData.estado === "publicada" ? "#10b981" : "#f59e0b"
-                }}
-              />
-              <span>
-                {quizData.estado === "publicada"
-                  ? "🟢 Publicada (Visible para alumnos)"
-                  : "🟡 Borrador (Oculta para alumnos)"}
-              </span>
-            </button>
-
-            {/* Alternar Vista Previa */}
-            <button
-              type="button"
-              onClick={() => setViewMode(viewMode === "builder" ? "preview" : "builder")}
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "0.45rem",
-                padding: "0.6rem 1.1rem",
-                borderRadius: "0.65rem",
-                border: "1.5px solid #cbd5e1",
-                background: viewMode === "preview" ? "#eff6ff" : "#ffffff",
-                color: viewMode === "preview" ? "#0284c7" : "#475569",
-                fontSize: "0.84rem",
-                fontWeight: 700,
-                cursor: "pointer",
-                transition: "all 0.15s ease"
-              }}
-            >
-              <Eye size={16} />
-              <span>{viewMode === "preview" ? "Volver a Edición" : "Vista Previa Alumno"}</span>
-            </button>
-
-            {/* Botón Control en Vivo si la función está disponible */}
-            {onOpenLiveControl && (
-              <button
-                type="button"
-                onClick={() => onOpenLiveControl(selectedSemana)}
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "0.45rem",
-                  padding: "0.6rem 1.1rem",
-                  borderRadius: "0.65rem",
-                  border: "1.5px solid #fca5a5",
-                  background: "#fef2f2",
-                  color: "#dc2626",
-                  fontSize: "0.84rem",
-                  fontWeight: 900,
-                  cursor: "pointer",
-                  transition: "all 0.15s ease"
-                }}
-                title="Abrir el panel de control de transmisión en directo para esta semana"
-              >
-                <Radio size={15} />
-                <span>Control en Vivo</span>
-              </button>
-            )}
-
-            {/* Botón Reiniciar Toda la Prueba */}
-            <button
-              type="button"
-              onClick={() => setShowResetModal(true)}
-              disabled={saving || resetting}
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "0.45rem",
-                padding: "0.6rem 1.1rem",
-                borderRadius: "0.65rem",
-                border: "1.5px solid #fecaca",
-                background: "#fef2f2",
-                color: "#b91c1c",
-                fontSize: "0.84rem",
-                fontWeight: 800,
-                cursor: saving || resetting ? "not-allowed" : "pointer",
-                transition: "all 0.15s ease"
-              }}
-              title="Borrar todas las preguntas guardadas y comenzar desde cero"
-            >
-              <RotateCcw size={15} />
-              <span>Reiniciar Prueba</span>
-            </button>
-
-            {/* Botón Guardar */}
-            <button
-              type="button"
-              onClick={handleSaveQuiz}
-              disabled={saving}
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "0.5rem",
-                padding: "0.6rem 1.35rem",
-                borderRadius: "0.65rem",
-                border: "none",
-                background: hasUnsavedChanges
-                  ? "linear-gradient(135deg, #16a34a 0%, #15803d 100%)"
-                  : "linear-gradient(135deg, #0284c7 0%, #0369a1 100%)",
-                color: "#ffffff",
-                fontSize: "0.86rem",
-                fontWeight: 800,
-                cursor: saving ? "not-allowed" : "pointer",
-                boxShadow: hasUnsavedChanges
-                  ? "0 4px 14px rgba(22, 163, 74, 0.3)"
-                  : "0 4px 14px rgba(2, 132, 199, 0.25)",
-                transition: "all 0.15s ease"
-              }}
-            >
-              {saving ? <RefreshCw size={16} className="animate-spin" /> : <Save size={16} />}
-              <span>{saving ? "Guardando..." : hasUnsavedChanges ? "Guardar Cambios" : "Guardar Prueba"}</span>
-            </button>
-          </div>
+          {onOpenLiveControl && <button type="button" className="user-button" disabled={busy} onClick={() => onOpenLiveControl(selectedSemana)}><Radio size={17} aria-hidden="true" /> Control en vivo</button>}
         </div>
-      </div>
-
-      {/* VISTA PREVIA DEL ESTUDIANTE */}
-      {viewMode === "preview" ? (
-        <div
-          className="glass-panel"
-          style={{
-            background: "#ffffff",
-            borderRadius: "1.25rem",
-            border: "1.5px solid #e2e8f0",
-            padding: "2rem",
-            boxShadow: "0 4px 20px -2px rgba(0, 0, 0, 0.04)",
-            display: "flex",
-            flexDirection: "column",
-            gap: "1.5rem"
-          }}
-        >
-          <div style={{ borderBottom: "1.5px solid #e2e8f0", paddingBottom: "1rem" }}>
-            <span style={{ fontSize: "0.74rem", fontWeight: 800, color: "#0284c7", textTransform: "uppercase" }}>
-              Vista Previa • Portal del Estudiante
-            </span>
-            <h3 style={{ margin: "0.35rem 0", fontSize: "1.35rem", fontWeight: 900, color: "#0f172a" }}>
-              {getWeekDisplayName(currentWeekInfo) || `Prueba Semanal — Semana ${selectedSemana}`}
-            </h3>
-          </div>
-
-          {quizData.preguntas.map((q, idx) => {
-            const isBonus = Boolean(q.es_bonus || idx === 5);
-
-            return (
-              <React.Fragment key={q.id}>
-                {idx > 0 && (
-                  <div style={{ display: "flex", alignItems: "center", gap: "1rem", margin: "0.6rem 0" }}>
-                    <div style={{ flex: 1, height: "1.5px", background: "linear-gradient(to right, transparent, #cbd5e1, transparent)" }} />
-                    <span style={{ fontSize: "0.74rem", fontWeight: 800, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.08em" }}>
-                      • Reactivo {idx + 1} de {quizData.preguntas.length} •
-                    </span>
-                    <div style={{ flex: 1, height: "1.5px", background: "linear-gradient(to right, transparent, #cbd5e1, transparent)" }} />
-                  </div>
-                )}
-
-                <div
-                  style={{
-                    borderRadius: "1rem",
-                    border: isBonus ? "2px solid #fde68a" : "2px solid #cbd5e1",
-                    borderLeft: isBonus ? "7px solid #f59e0b" : "7px solid #0284c7",
-                    background: "#ffffff",
-                    boxShadow: isBonus
-                      ? "0 8px 24px -4px rgba(245, 158, 11, 0.15)"
-                      : "0 8px 24px -4px rgba(15, 23, 42, 0.08)",
-                    overflow: "hidden",
-                    display: "flex",
-                    flexDirection: "column"
-                  }}
-                >
-                  {/* Barra de Título / Identificador Superior de la Pregunta */}
-                  <div
-                    style={{
-                      padding: "0.8rem 1.25rem",
-                      background: isBonus
-                        ? "linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%)"
-                        : "linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)",
-                      borderBottom: isBonus ? "1.5px solid #fde68a" : "1.5px solid #e2e8f0",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      flexWrap: "wrap",
-                      gap: "0.6rem"
-                    }}
-                  >
-                    <div style={{ display: "flex", alignItems: "center", gap: "0.65rem", flexWrap: "wrap" }}>
-                      <span
-                        style={{
-                          background: isBonus ? "#d97706" : "#0284c7",
-                          color: "#ffffff",
-                          fontWeight: 900,
-                          fontSize: "0.82rem",
-                          padding: "0.25rem 0.75rem",
-                          borderRadius: "0.5rem",
-                          letterSpacing: "0.04em",
-                          textTransform: "uppercase",
-                          boxShadow: isBonus
-                            ? "0 2px 6px rgba(217, 119, 6, 0.3)"
-                            : "0 2px 6px rgba(2, 132, 199, 0.3)"
-                        }}
-                      >
-                        {isBonus ? "⭐ PREGUNTA BONUS" : `PREGUNTA ${idx + 1}`}
-                      </span>
-
-                      <span style={{ fontSize: "0.82rem", fontWeight: 800, color: isBonus ? "#92400e" : "#475569" }}>
-                        Valor: {Number(q.puntos).toFixed(2)} pts {isBonus ? "(Extra)" : ""}
-                      </span>
-                    </div>
-
-                    <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                      <span
-                        style={{
-                          fontSize: "0.78rem",
-                          fontWeight: 800,
-                          color: "#64748b",
-                          background: "#ffffff",
-                          padding: "0.2rem 0.6rem",
-                          borderRadius: "0.4rem",
-                          border: "1px solid #cbd5e1"
-                        }}
-                      >
-                        Reactivo {idx + 1} de {quizData.preguntas.length}
-                      </span>
-
-                      {isBonus && (
-                        <span
-                          style={{
-                            display: "inline-flex",
-                            alignItems: "center",
-                            gap: "0.25rem",
-                            background: "#ffffff",
-                            color: "#b45309",
-                            border: "1px solid #fde68a",
-                            padding: "0.2rem 0.55rem",
-                            borderRadius: "9999px",
-                            fontSize: "0.72rem",
-                            fontWeight: 900
-                          }}
-                        >
-                          +1.0 pt para Premios
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Cuerpo de la Pregunta en Vista Previa */}
-                  <div style={{ padding: "1.25rem", display: "flex", flexDirection: "column", gap: "1rem" }}>
-
-              {q.enunciado ? (
-                <p style={{ margin: "0 0 1rem 0", fontSize: "0.92rem", fontWeight: 700, color: "#1e293b" }}>
-                  {q.enunciado}
-                </p>
-              ) : null}
-
-              <div style={{ display: "flex", flexDirection: "column", gap: "0.85rem" }}>
-                {(q.items || []).map((item, iIdx) => (
-                  <div key={item.id || iIdx} style={{ background: "#ffffff", border: "1px solid #cbd5e1", borderRadius: "0.55rem", padding: "0.85rem" }}>
-                    <label style={{ display: "block", fontSize: "0.82rem", fontWeight: 800, color: "#334155", marginBottom: "0.45rem" }}>
-                      {item.instruccion || (item.tipo === "texto_corto" ? "Respuesta corta:" : "Listado:")}
-                    </label>
-
-                    {item.tipo === "texto_corto" ? (
-                      <input
-                        type="text"
-                        disabled
-                        placeholder="El estudiante escribirá su respuesta aquí..."
-                        style={{
-                          width: "100%",
-                          padding: "0.5rem 0.75rem",
-                          borderRadius: "0.45rem",
-                          border: "1px solid #cbd5e1",
-                          background: "#f8fafc",
-                          fontSize: "0.85rem"
-                        }}
-                      />
-                    ) : (
-                      <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
-                        {Array.from({ length: item.cantidad || 3 }).map((_, slotIdx) => (
-                          <div key={slotIdx} style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                            <span style={{ fontSize: "0.8rem", fontWeight: 800, color: "#0284c7", width: "20px" }}>
-                              {slotIdx + 1}.
-                            </span>
-                            <input
-                              type="text"
-                              disabled
-                              placeholder={`Elemento #${slotIdx + 1}...`}
-                              style={{
-                                flex: 1,
-                                padding: "0.45rem 0.75rem",
-                                borderRadius: "0.45rem",
-                                border: "1px solid #cbd5e1",
-                                background: "#f8fafc",
-                                fontSize: "0.85rem"
-                              }}
-                            />
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ))}
+        <fieldset disabled={busy} className="section-quizzes__fieldset">
+          <div className="section-quizzes__settings">
+            <label className="user-field">Tiempo por pregunta
+              <select value={quizData.tiempoPorPreguntaSegundos || 90} onChange={event => {
+                const seconds = Number(event.target.value);
+                setQuizData(previous => ({ ...previous, tiempoPorPreguntaSegundos: seconds, duracionMinutos: Math.ceil(6 * seconds / 60) }));
+                setHasUnsavedChanges(true);
+              }}>{[[60,"1 minuto"],[90,"1 minuto 30 segundos"],[120,"2 minutos"],[150,"2 minutos 30 segundos"],[180,"3 minutos"]].map(([value,label]) => <option key={value} value={value}>{label}</option>)}</select>
+              <small>Duración estimada: {Math.ceil(6 * (quizData.tiempoPorPreguntaSegundos || 90) / 60)} minutos.</small>
+            </label>
+            <section className="section-quizzes__publication" aria-labelledby="quiz-publication-title">
+              <div><h3 id="quiz-publication-title">Publicación de la prueba</h3><p>Elige si los estudiantes pueden verla.</p></div>
+              <div className="section-quizzes__visibility" role="group" aria-label="Visibilidad de la prueba">
+                <button type="button" aria-label="Mantener en borrador" aria-pressed={quizData.estado !== "publicada"} onClick={() => handleSetPublication("borrador")}>
+                  <Clock size={20} aria-hidden="true" /><strong>Borrador</strong><small>{saving && pendingPublication === "borrador" ? "Guardando borrador…" : "Oculta para estudiantes"}</small>
+                </button>
+                <button type="button" aria-label="Publicar para estudiantes" aria-pressed={quizData.estado === "publicada"} onClick={() => handleSetPublication("publicada")}>
+                  <CheckCircle2 size={20} aria-hidden="true" /><strong>Publicada</strong><small>{saving && pendingPublication === "publicada" ? "Publicando…" : "Visible para estudiantes"}</small>
+                </button>
               </div>
-            </div>
+              <p className="section-quizzes__publication-guide">Al pulsar una opción se guardan el estado y los cambios actuales de la prueba.</p>
+              {saveError && saveErrorLocation === "publication" && <p className="user-dialog__error" role="alert">{saveError}</p>}
+              <span className="section-quizzes__saved-visibility" role="status">{quizStatus(quizzesBySemanaMap.get(selectedSemana)) === "new" ? "Todavía no se ha guardado esta prueba." : quizStatus(quizzesBySemanaMap.get(selectedSemana)) === "published" ? "Estado guardado: Publicada" : "Estado guardado: Borrador"}</span>
+            </section>
+            <div className="section-quizzes__scores"><span>Nota oficial <b>{Math.min(5,basePoints).toFixed(3)} / 5.000</b></span><span>Con bonus <b>{totalPoints.toFixed(3)} puntos</b></span></div>
           </div>
-        </React.Fragment>
-      );
-    })}
-  </div>
-) : (
-  /* MODO EDITOR DE REACTIVOS */
-        <div style={{ display: "flex", flexDirection: "column", gap: "1.75rem" }}>
-          {/* 2. Datos Generales de la Prueba */}
-          <div
-            className="glass-panel"
-            style={{
-              padding: "1.75rem 2rem",
-              background: "#ffffff",
-              borderRadius: "1.25rem",
-              border: "1.5px solid #e2e8f0",
-              boxShadow: "0 4px 20px -2px rgba(0,0,0,0.03)",
-              display: "flex",
-              flexDirection: "column",
-              gap: "1.25rem"
-            }}
-          >
-            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-              <FileText size={20} color="#0284c7" />
-              <h3 style={{ margin: 0, fontSize: "1.1rem", fontWeight: 800, color: "#0f172a" }}>
-                Datos Generales de la Prueba
-              </h3>
-            </div>
-
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: "1.25rem" }}>
-              <div>
-                <label style={{ display: "block", fontSize: "0.8rem", fontWeight: 800, color: "#334155", marginBottom: "0.35rem" }}>
-                  Título de la Prueba Semanal:
-                </label>
-                <div
-                  style={{
-                    width: "100%",
-                    boxSizing: "border-box",
-                    padding: "0.65rem 0.85rem",
-                    borderRadius: "0.55rem",
-                    border: "1.5px solid #cbd5e1",
-                    fontSize: "0.88rem",
-                    fontWeight: 800,
-                    color: "#1e293b",
-                    background: "#f8fafc",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    gap: "0.5rem"
-                  }}
-                >
-                  <span>{getWeekDisplayName(currentWeekInfo) || `Prueba Semanal — Semana ${selectedSemana}`}</span>
-                  <span style={{ fontSize: "0.72rem", color: "#64748b", fontWeight: 700, background: "#e2e8f0", padding: "0.15rem 0.5rem", borderRadius: "0.35rem" }}>
-                    Fijo por Semana
-                  </span>
-                </div>
+        </fieldset>
+        {viewMode === "preview" ? (
+          <section className="section-quizzes__preview" aria-label="Vista previa del estudiante">
+            <p className="section-quizzes__hint">Prueba los controles como estudiante. Estas respuestas son de demostración y no se guardan como entregas.</p>
+            {quizData.preguntas.map((question,index) => <article className="section-quizzes__question" data-bonus={index === 5} key={question.id}>
+              <header><h3>{index === 5 ? "Pregunta 6 · Bonus" : `Pregunta ${index + 1}`}</h3><span>{Number(question.puntos).toFixed(3)} puntos</span></header>
+              <div className="section-quizzes__question-body">{question.enunciado && <p>{question.enunciado}</p>}
+                {!question.items?.length && <p className="section-quizzes__hint">Sin apartados de respuesta configurados.</p>}
+                {(question.items || []).map((item,itemIndex) => <div className="section-quizzes__preview-item" key={item.id || itemIndex}><strong>{item.instruccion || item.etiqueta || `Apartado ${itemIndex + 1}`}</strong>
+                  <QuizItemResponse item={item} value={previewAnswers[item.id]} onChange={value => setPreviewAnswers(previous => ({...previous,[item.id]:value}))} />
+                </div>)}
               </div>
-
-              <div>
-                <label style={{ display: "block", fontSize: "0.8rem", fontWeight: 800, color: "#334155", marginBottom: "0.35rem" }}>
-                  Tiempo individual por pregunta (sincronizado en vivo):
-                </label>
-                <select
-                  value={quizData.tiempoPorPreguntaSegundos || 90}
-                  onChange={(e) => {
-                    const sec = parseInt(e.target.value, 10) || 90;
-                    const estMins = Math.ceil((6 * sec) / 60);
-                    setQuizData((prev) => ({
-                      ...prev,
-                      tiempoPorPreguntaSegundos: sec,
-                      duracionMinutos: estMins
-                    }));
-                    setHasUnsavedChanges(true);
-                  }}
-                  style={{
-                    width: "100%",
-                    padding: "0.65rem 0.85rem",
-                    borderRadius: "0.55rem",
-                    border: "1.5px solid #0284c7",
-                    fontSize: "0.88rem",
-                    fontWeight: 800,
-                    background: "#f0f9ff",
-                    color: "#0369a1",
-                    outline: "none"
-                  }}
-                >
-                  <option value={60}>1:00 min (60 segundos por pregunta)</option>
-                  <option value={90}>1:30 min (90 segundos por pregunta) — [Por defecto reglamentario]</option>
-                  <option value={120}>2:00 min (120 segundos por pregunta)</option>
-                  <option value={150}>2:30 min (150 segundos por pregunta)</option>
-                  <option value={180}>3:00 min (180 segundos por pregunta)</option>
-                </select>
-                <div style={{ fontSize: "0.74rem", color: "#64748b", marginTop: "0.35rem" }}>
-                  Duración total estimada: {Math.ceil((6 * (quizData.tiempoPorPreguntaSegundos || 90)) / 60)} min (6 preguntas × {((quizData.tiempoPorPreguntaSegundos || 90) / 60).toFixed(1)} min)
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* 3. Listado de 6 Preguntas Fijas */}
-          <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                flexWrap: "wrap",
-                gap: "1rem",
-                padding: "0.25rem 0.5rem"
-              }}
-            >
-              <div>
-                <div style={{ display: "flex", alignItems: "center", gap: "0.6rem" }}>
-                  <h3 style={{ margin: 0, fontSize: "1.2rem", fontWeight: 900, color: "#0f172a" }}>
-                    Preguntas de la Prueba ({quizData.preguntas.length} Preguntas Fijas)
-                  </h3>
-                  <span
-                    style={{
-                      background: "#f1f5f9",
-                      color: "#475569",
-                      fontSize: "0.74rem",
-                      fontWeight: 800,
-                      padding: "0.2rem 0.65rem",
-                      borderRadius: "9999px",
-                      border: "1px solid #cbd5e1"
-                    }}
-                  >
-                    Estructura Fija
-                  </span>
-                </div>
-                <p style={{ margin: "0.3rem 0 0", fontSize: "0.84rem", color: "#64748b", maxWidth: "800px", lineHeight: 1.45 }}>
-                  La prueba tiene 6 preguntas fijas (cada una de 1.000 pt máx.). Las preguntas 1 a 5 corresponden a la nota oficial regular (hasta 5.000 pts) y la Pregunta 6 es exclusivamente el reactivo bonus (+1.000 pt adicional para Premios de la Sección).
-                </p>
-              </div>
-
-              {/* Badges de estado general */}
-              <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                <span
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: "0.35rem",
-                    padding: "0.4rem 0.8rem",
-                    borderRadius: "0.6rem",
-                    background: "#f0fdf4",
-                    color: "#166534",
-                    border: "1px solid #bbf7d0",
-                    fontSize: "0.78rem",
-                    fontWeight: 800
-                  }}
-                >
-                  <Award size={14} color="#16a34a" />
-                  Suma Base: {Math.min(5.0, quizData.preguntas.reduce((acc, q) => acc + (parseFloat(q.puntos) || 0), 0)).toFixed(3)} / 5.000 pts
-                </span>
-
-                <span
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: "0.35rem",
-                    padding: "0.4rem 0.8rem",
-                    borderRadius: "0.6rem",
-                    background: "#fef3c7",
-                    color: "#92400e",
-                    border: "1px solid #fde68a",
-                    fontSize: "0.78rem",
-                    fontWeight: 800
-                  }}
-                >
-                  <Sparkles size={14} color="#d97706" />
-                  Total c/ Bonus: {quizData.preguntas.reduce((acc, q) => acc + (parseFloat(q.puntos) || 0), 0).toFixed(3)} pts
-                </span>
-              </div>
-            </div>
-
-            {/* Renderizado de las 6 Preguntas */}
-            {quizData.preguntas.map((pregunta, qIdx) => {
-              const isBonus = qIdx === 5;
-
-              return (
-                <React.Fragment key={pregunta.id}>
-                  {qIdx > 0 && (
-                    <div style={{ display: "flex", alignItems: "center", gap: "1rem", margin: "0.6rem 0" }}>
-                      <div style={{ flex: 1, height: "1.5px", background: "linear-gradient(to right, transparent, #cbd5e1, transparent)" }} />
-                      <span style={{ fontSize: "0.74rem", fontWeight: 800, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.08em" }}>
-                        • Reactivo {qIdx + 1} de {quizData.preguntas.length} •
-                      </span>
-                      <div style={{ flex: 1, height: "1.5px", background: "linear-gradient(to right, transparent, #cbd5e1, transparent)" }} />
-                    </div>
-                  )}
-
-                  <div
-                    style={{
-                      borderRadius: "1rem",
-                      border: isBonus ? "2px solid #fde68a" : "2px solid #cbd5e1",
-                      borderLeft: isBonus ? "7px solid #f59e0b" : "7px solid #0284c7",
-                      background: "#ffffff",
-                      boxShadow: isBonus
-                        ? "0 8px 24px -4px rgba(245, 158, 11, 0.15)"
-                        : "0 8px 24px -4px rgba(15, 23, 42, 0.08)",
-                      overflow: "hidden",
-                      display: "flex",
-                      flexDirection: "column",
-                      transition: "all 0.2s ease"
-                    }}
-                  >
-                    {/* Barra de Título / Identificador Superior de la Pregunta */}
-                    <div
-                      style={{
-                        padding: "0.85rem 1.35rem",
-                        background: isBonus
-                          ? "linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%)"
-                          : "linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)",
-                        borderBottom: isBonus ? "1.5px solid #fde68a" : "1.5px solid #e2e8f0",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "space-between",
-                        flexWrap: "wrap",
-                        gap: "0.75rem"
-                      }}
-                    >
-                      <div style={{ display: "flex", alignItems: "center", gap: "0.65rem", flexWrap: "wrap" }}>
-                        <span
-                          style={{
-                            background: isBonus ? "#d97706" : "#0284c7",
-                            color: "#ffffff",
-                            fontWeight: 900,
-                            fontSize: "0.82rem",
-                            padding: "0.25rem 0.75rem",
-                            borderRadius: "0.5rem",
-                            letterSpacing: "0.04em",
-                            textTransform: "uppercase",
-                            boxShadow: isBonus
-                              ? "0 2px 6px rgba(217, 119, 6, 0.3)"
-                              : "0 2px 6px rgba(2, 132, 199, 0.3)"
-                          }}
-                        >
-                          {isBonus ? "⭐ PREGUNTA BONUS" : `PREGUNTA ${qIdx + 1}`}
-                        </span>
-
-                        <span style={{ fontSize: "0.82rem", fontWeight: 800, color: isBonus ? "#92400e" : "#475569" }}>
-                          Valor: {Number(pregunta.puntos).toFixed(2)} pts {isBonus ? "(Extra)" : ""}
-                        </span>
-
-                        <span
-                          style={{
-                            fontSize: "0.78rem",
-                            fontWeight: 800,
-                            color: "#64748b",
-                            background: "#ffffff",
-                            padding: "0.2rem 0.6rem",
-                            borderRadius: "0.4rem",
-                            border: "1px solid #cbd5e1"
-                          }}
-                        >
-                          Reactivo {qIdx + 1} de {quizData.preguntas.length}
-                        </span>
-
-                        {isBonus && (
-                          <span
-                            style={{
-                              display: "inline-flex",
-                              alignItems: "center",
-                              gap: "0.25rem",
-                              background: "#ffffff",
-                              color: "#b45309",
-                              border: "1px solid #fde68a",
-                              padding: "0.2rem 0.55rem",
-                              borderRadius: "9999px",
-                              fontSize: "0.72rem",
-                              fontWeight: 900
-                            }}
-                          >
-                            +1.0 pt para Premios
-                          </span>
-                        )}
-                      </div>
-
-                      <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}>
-                        {/* Puntaje de la pregunta */}
-                        <div style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
-                          <span style={{ fontSize: "0.78rem", fontWeight: 700, color: "#64748b" }}>Puntaje:</span>
-                          {pregunta.items && pregunta.items.length > 0 ? (
-                            <div
-                              style={{
-                                display: "inline-flex",
-                                alignItems: "center",
-                                gap: "0.3rem",
-                                padding: "0.3rem 0.65rem",
-                                borderRadius: "0.5rem",
-                                background: Number(pregunta.puntos) > 1.001 ? "#fee2e2" : "#f0fdf4",
-                                border: `1.5px solid ${Number(pregunta.puntos) > 1.001 ? "#fca5a5" : "#86efac"}`,
-                                color: Number(pregunta.puntos) > 1.001 ? "#dc2626" : "#166534",
-                                fontSize: "0.84rem",
-                                fontWeight: 900
-                              }}
-                              title="El puntaje de esta pregunta se calcula sumando sus apartados (máx 1.000 pt)"
-                            >
-                              <span>Σ {Number(pregunta.puntos).toFixed(3)} / 1.000 pt</span>
-                            </div>
-                          ) : (
-                            <div style={{ display: "inline-flex", alignItems: "center", gap: "0.3rem" }}>
-                              <input
-                                type="number"
-                                step="0.05"
-                                min="0.05"
-                                max="1"
-                                value={pregunta.puntos}
-                                onChange={(e) => {
-                                  const val = parseFloat(e.target.value) || 0;
-                                  handleUpdateQuestion(pregunta.id, "puntos", Math.min(1.0, Math.max(0, val)));
-                                }}
-                                style={{
-                                  width: "68px",
-                                  padding: "0.35rem 0.5rem",
-                                  borderRadius: "0.45rem",
-                                  border: "1.5px solid #0284c7",
-                                  fontSize: "0.84rem",
-                                  fontWeight: 800,
-                                  textAlign: "center",
-                                  background: "#f0f9ff",
-                                  color: "#0369a1"
-                                }}
-                              />
-                              <span style={{ fontSize: "0.78rem", color: "#64748b", fontWeight: 700 }}>/ 1.000 pt</span>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Cuerpo de la Pregunta en el Editor */}
-                    <div style={{ padding: "1.5rem", display: "flex", flexDirection: "column", gap: "1.25rem" }}>
-
-                  {isBonus && (
-                    <div
-                      style={{
-                        padding: "0.55rem 0.9rem",
-                        borderRadius: "0.6rem",
-                        background: "#fffbeb",
-                        border: "1px solid #fde68a",
-                        color: "#92400e",
-                        fontSize: "0.8rem",
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "0.45rem"
-                      }}
-                    >
-                      <Sparkles size={15} color="#d97706" style={{ flexShrink: 0 }} />
-                      <span>
-                        <strong>Reactivo Bonus Activo:</strong> Esta pregunta sumará hasta 1.000 pt extra acumulable directamente para el ranking de <strong>Premios de la Sección</strong>. En la nota oficial regular se mantendrá el tope máximo normativo de 5.000 pts.
-                      </span>
-                    </div>
-                  )}
-
-                  {/* Sub-reactivos de la pregunta (Apartados / Incisos) */}
-                  <div
-                    style={{
-                      background: "#f8fafc",
-                      borderRadius: "0.85rem",
-                      border: "1.5px solid #e2e8f0",
-                      padding: "1.25rem 1.5rem",
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: "1rem"
-                    }}
-                  >
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "0.75rem" }}>
-                      <div>
-                        <span style={{ fontSize: "0.82rem", fontWeight: 800, color: "#334155", textTransform: "uppercase" }}>
-                          Apartados / Sub-reactivos de respuesta:
-                        </span>
-                        <p style={{ margin: "0.2rem 0 0 0", fontSize: "0.74rem", color: "#64748b" }}>
-                          Cada apartado puede tener diferente puntaje. La suma total no debe superar 1.000 pt.
-                        </p>
-                      </div>
-
-                      {/* Botones para añadir campo de texto o lista y distribución equitativa */}
-                      <div style={{ display: "flex", alignItems: "center", gap: "0.45rem", flexWrap: "wrap" }}>
-                        {pregunta.items && pregunta.items.length > 0 && (
-                          <button
-                            type="button"
-                            onClick={() => handleDistributeSubItemPoints(pregunta.id)}
-                            style={{
-                              display: "inline-flex",
-                              alignItems: "center",
-                              gap: "0.35rem",
-                              padding: "0.4rem 0.75rem",
-                              borderRadius: "0.5rem",
-                              background: "#fef3c7",
-                              border: "1.5px solid #f59e0b",
-                              color: "#b45309",
-                              fontSize: "0.76rem",
-                              fontWeight: 800,
-                              cursor: "pointer"
-                            }}
-                            title="Reparte automáticamente 1.000 pt en partes iguales entre los apartados"
-                          >
-                            <span>⚡ Distribuir 1.0 pt</span>
-                          </button>
-                        )}
-
-                        <button
-                          type="button"
-                          onClick={() => handleAddSubItem(pregunta.id, "texto_corto", 1)}
-                          style={{
-                            display: "inline-flex",
-                            alignItems: "center",
-                            gap: "0.35rem",
-                            padding: "0.4rem 0.75rem",
-                            borderRadius: "0.5rem",
-                            background: "#ffffff",
-                            border: "1.5px solid #38bdf8",
-                            color: "#0284c7",
-                            fontSize: "0.76rem",
-                            fontWeight: 800,
-                            cursor: "pointer"
-                          }}
-                        >
-                          <Type size={13} />
-                          <span>+ Campo Texto</span>
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => handleAddSubItem(pregunta.id, "listado", 3)}
-                          style={{
-                            display: "inline-flex",
-                            alignItems: "center",
-                            gap: "0.35rem",
-                            padding: "0.4rem 0.75rem",
-                            borderRadius: "0.5rem",
-                            background: "#ffffff",
-                            border: "1.5px solid #a855f7",
-                            color: "#7e22ce",
-                            fontSize: "0.76rem",
-                            fontWeight: 800,
-                            cursor: "pointer"
-                          }}
-                        >
-                          <ListOrdered size={13} />
-                          <span>+ Listado (N casillas)</span>
-                        </button>
-                      </div>
-                    </div>
-
-                    {pregunta.items && pregunta.items.length > 0 && Number(pregunta.puntos) > 1.001 && (
-                      <div
-                        style={{
-                          padding: "0.55rem 0.85rem",
-                          borderRadius: "0.55rem",
-                          background: "#fef2f2",
-                          border: "1px solid #fca5a5",
-                          color: "#b91c1c",
-                          fontSize: "0.78rem",
-                          fontWeight: 700
-                        }}
-                      >
-                        ⚠️ La suma de los apartados ({pregunta.puntos} pts) supera el máximo de 1.000 pt permitido para la pregunta. Ajusta los valores individuales o presiona "⚡ Distribuir 1.0 pt".
-                      </div>
-                    )}
-
-                    {(!pregunta.items || pregunta.items.length === 0) ? (
-                      <div style={{ textAlign: "center", padding: "1.5rem", color: "#94a3b8", fontSize: "0.84rem" }}>
-                        Sin apartados secundarios. La pregunta se responderá en un único bloque de 1.000 pt (o el valor asignado arriba).
-                      </div>
-                    ) : (
-                      pregunta.items.map((item, itemIdx) => {
-                        const rawAnswersText =
-                          item.respuestas_posibles_texto !== undefined
-                            ? item.respuestas_posibles_texto
-                            : Array.isArray(item.respuestas_esperadas) && item.respuestas_esperadas.length > 0
-                            ? item.respuestas_esperadas.join("\n")
-                            : (item.respuesta_modelo || "");
-
-                        const detectedOptions = rawAnswersText
-                          .split(/[\n,]+/)
-                          .map((s) => s.trim())
-                          .filter(Boolean);
-
-                        const cantCasillas = parseInt(item.cantidad, 10) || 3;
-                        const itemPts = parseFloat(item.puntos) || 0;
-                        const ptPorCasilla = item.tipo === "texto_corto" ? itemPts : (itemPts / (cantCasillas || 1));
-
-                        return (
-                          <div
-                            key={item.id || itemIdx}
-                            style={{
-                              background: "#ffffff",
-                              borderRadius: "0.85rem",
-                              border: "1.5px solid #cbd5e1",
-                              padding: "1.15rem 1.25rem",
-                              display: "flex",
-                              flexDirection: "column",
-                              gap: "1rem",
-                              boxShadow: "0 2px 8px -2px rgba(0,0,0,0.04)"
-                            }}
-                          >
-                            {/* Cabecera del Apartado */}
-                            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "0.6rem", borderBottom: "1px solid #f1f5f9", paddingBottom: "0.75rem" }}>
-                              <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", flexWrap: "wrap" }}>
-                                <span
-                                  style={{
-                                    fontSize: "0.76rem",
-                                    fontWeight: 900,
-                                    padding: "0.2rem 0.65rem",
-                                    borderRadius: "9999px",
-                                    background: item.tipo === "texto_corto" ? "#e0f2fe" : "#f3e8ff",
-                                    color: item.tipo === "texto_corto" ? "#0369a1" : "#7e22ce",
-                                    border: `1px solid ${item.tipo === "texto_corto" ? "#bae6fd" : "#e9d5ff"}`
-                                  }}
-                                >
-                                  Apartado #{itemIdx + 1} • {item.tipo === "texto_corto" ? "Texto Abierto" : `Listado (${cantCasillas} casillas)`}
-                                </span>
-
-                                <div style={{ display: "inline-flex", alignItems: "center", gap: "0.35rem" }}>
-                                  <span style={{ fontSize: "0.74rem", fontWeight: 700, color: "#475569" }}>Valor del apartado:</span>
-                                  <input
-                                    type="number"
-                                    step="0.05"
-                                    min="0.01"
-                                    max="1"
-                                    value={item.puntos !== undefined ? item.puntos : 0.5}
-                                    onChange={(e) => handleUpdateSubItem(pregunta.id, item.id, "puntos", parseFloat(e.target.value) || 0)}
-                                    style={{
-                                      width: "65px",
-                                      padding: "0.25rem 0.4rem",
-                                      borderRadius: "0.4rem",
-                                      border: "1.5px solid #0284c7",
-                                      background: "#f0f9ff",
-                                      fontSize: "0.82rem",
-                                      fontWeight: 800,
-                                      color: "#0369a1",
-                                      textAlign: "center"
-                                    }}
-                                  />
-                                  <span style={{ fontSize: "0.74rem", fontWeight: 800, color: "#0369a1" }}>pt(s)</span>
-                                </div>
-                              </div>
-
-                              <button
-                                type="button"
-                                onClick={() => handleRemoveSubItem(pregunta.id, item.id)}
-                                style={{
-                                  background: "none",
-                                  border: "none",
-                                  color: "#ef4444",
-                                  cursor: "pointer",
-                                  fontSize: "0.76rem",
-                                  fontWeight: 700,
-                                  display: "inline-flex",
-                                  alignItems: "center",
-                                  gap: "0.25rem",
-                                  padding: "0.25rem 0.5rem",
-                                  borderRadius: "0.35rem",
-                                  transition: "background 0.15s ease"
-                                }}
-                                onMouseEnter={(e) => (e.currentTarget.style.background = "#fee2e2")}
-                                onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
-                              >
-                                <Trash2 size={13} />
-                                <span>Eliminar Apartado</span>
-                              </button>
-                            </div>
-
-                            {/* Separación en dos columnas: Izquierda (Configuración Alumno) | Derecha (Respuestas Posibles Docente) */}
-                            <div
-                              style={{
-                                display: "grid",
-                                gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
-                                gap: "1.25rem",
-                                alignItems: "stretch"
-                              }}
-                            >
-                              {/* COLUMNA IZQUIERDA: Lo que responderá el alumno */}
-                              <div
-                                style={{
-                                  background: "#f8fafc",
-                                  border: "1.5px solid #e2e8f0",
-                                  borderRadius: "0.75rem",
-                                  padding: "1rem 1.15rem",
-                                  display: "flex",
-                                  flexDirection: "column",
-                                  gap: "0.85rem"
-                                }}
-                              >
-                                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid #e2e8f0", paddingBottom: "0.5rem" }}>
-                                  <strong style={{ fontSize: "0.82rem", color: "#1e293b", display: "flex", alignItems: "center", gap: "0.35rem" }}>
-                                    <span>📝</span> Configuración para el Estudiante
-                                  </strong>
-                                  <span
-                                    style={{
-                                      fontSize: "0.72rem",
-                                      color: item.tipo === "texto_corto" ? "#0369a1" : "#7e22ce",
-                                      fontWeight: 800,
-                                      background: item.tipo === "texto_corto" ? "#e0f2fe" : "#f3e8ff",
-                                      padding: "0.15rem 0.55rem",
-                                      borderRadius: "0.35rem",
-                                      border: `1px solid ${item.tipo === "texto_corto" ? "#bae6fd" : "#e9d5ff"}`
-                                    }}
-                                  >
-                                    {item.tipo === "texto_corto" ? "Texto Corto (1 campo)" : `Listado (${cantCasillas} casillas)`}
-                                  </span>
-                                </div>
-
-                                {/* Nota contextual según el tipo ya elegido */}
-                                {item.tipo === "texto_corto" ? (
-                                  <div style={{ background: "#ffffff", padding: "0.6rem 0.8rem", borderRadius: "0.55rem", border: "1.5px solid #bae6fd", fontSize: "0.75rem", color: "#0369a1", fontWeight: 600 }}>
-                                    💡 El estudiante dispondrá de una casilla de texto único para responder (Valor: <strong>{itemPts.toFixed(3)} pt</strong>).
-                                  </div>
-                                ) : (
-                                  <div style={{ background: "#ffffff", padding: "0.65rem 0.85rem", borderRadius: "0.55rem", border: "1.5px solid #e9d5ff", display: "flex", flexDirection: "column", gap: "0.35rem" }}>
-                                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "0.4rem" }}>
-                                      <label style={{ fontSize: "0.76rem", fontWeight: 800, color: "#6b21a8" }}>
-                                        Casillas a rellenar por el alumno:
-                                      </label>
-                                      <div style={{ display: "flex", alignItems: "center", gap: "0.35rem" }}>
-                                        <input
-                                          type="number"
-                                          min="1"
-                                          max="10"
-                                          value={item.cantidad || 3}
-                                          onChange={(e) => handleUpdateSubItem(pregunta.id, item.id, "cantidad", e.target.value)}
-                                          style={{
-                                            width: "55px",
-                                            padding: "0.25rem 0.4rem",
-                                            borderRadius: "0.4rem",
-                                            border: "1.5px solid #a855f7",
-                                            fontSize: "0.82rem",
-                                            fontWeight: 900,
-                                            textAlign: "center",
-                                            color: "#6b21a8",
-                                            background: "#faf5ff"
-                                          }}
-                                        />
-                                        <span style={{ fontSize: "0.75rem", fontWeight: 800, color: "#6b21a8" }}>casillas</span>
-                                      </div>
-                                    </div>
-                                    <div style={{ fontSize: "0.72rem", color: "#7e22ce", fontWeight: 600 }}>
-                                      💡 Cada casilla acertada sumará <strong>{ptPorCasilla.toFixed(3)} pt</strong> (las falladas restan dicho valor al calificar).
-                                    </div>
-                                  </div>
-                                )}
-
-                                {/* Instrucción o pregunta que ve el alumno */}
-                                <div>
-                                  <label style={{ display: "block", fontSize: "0.75rem", fontWeight: 700, color: "#475569", marginBottom: "0.3rem" }}>
-                                    Instrucción o pregunta para el alumno:
-                                  </label>
-                                  <input
-                                    type="text"
-                                    value={item.instruccion || ""}
-                                    onChange={(e) => handleUpdateSubItem(pregunta.id, item.id, "instruccion", e.target.value)}
-                                    placeholder={
-                                      item.tipo === "texto_corto"
-                                        ? "Ej: Identifique el órgano o tipo de epitelio enfocado"
-                                        : "Ej: Mencione 3 capas o estructuras morfológicas señaladas"
-                                    }
-                                    style={{
-                                      width: "100%",
-                                      boxSizing: "border-box",
-                                      padding: "0.55rem 0.8rem",
-                                      borderRadius: "0.5rem",
-                                      border: "1.5px solid #cbd5e1",
-                                      fontSize: "0.84rem",
-                                      fontWeight: 600,
-                                      outline: "none",
-                                      background: "#ffffff"
-                                    }}
-                                  />
-                                </div>
-                              </div>
-
-                              {/* COLUMNA DERECHA: Respuestas posibles / Modelo para el Docente */}
-                              <div
-                                style={{
-                                  background: "#f0fdf4",
-                                  border: "1.5px solid #bbf7d0",
-                                  borderRadius: "0.75rem",
-                                  padding: "1rem 1.15rem",
-                                  display: "flex",
-                                  flexDirection: "column",
-                                  gap: "0.75rem"
-                                }}
-                              >
-                                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid #bbf7d0", paddingBottom: "0.5rem" }}>
-                                  <strong style={{ fontSize: "0.82rem", color: "#166534", display: "flex", alignItems: "center", gap: "0.35rem" }}>
-                                    <span>💡</span> Respuestas Posibles / Modelo (Docente)
-                                  </strong>
-                                  <span
-                                    style={{
-                                      fontSize: "0.72rem",
-                                      fontWeight: 800,
-                                      padding: "0.15rem 0.5rem",
-                                      borderRadius: "9999px",
-                                      background: detectedOptions.length > 0 ? "#dcfce7" : "#ffffff",
-                                      color: detectedOptions.length > 0 ? "#15803d" : "#94a3b8",
-                                      border: "1px solid #86efac"
-                                    }}
-                                  >
-                                    {detectedOptions.length} opción(es) detectada(s)
-                                  </span>
-                                </div>
-
-                                {/* Campo de texto libre para escribir todas las opciones posibles */}
-                                <textarea
-                                  rows={4}
-                                  value={rawAnswersText}
-                                  onChange={(e) => handleUpdatePossibleAnswersText(pregunta.id, item.id, e.target.value)}
-                                  placeholder={
-                                    item.tipo === "texto_corto"
-                                      ? "Ej:\nEpitelio cilíndrico simple\nEpitelio cilíndrico con microvellosidades"
-                                      : "Ej (una por línea o con coma):\nEstrato basal\nEstrato espinoso\nEstrato granuloso\nEstrato lúcido\nEstrato córneo"
-                                  }
-                                  style={{
-                                    width: "100%",
-                                    boxSizing: "border-box",
-                                    padding: "0.6rem 0.8rem",
-                                    borderRadius: "0.55rem",
-                                    border: "1.5px solid #86efac",
-                                    background: "#ffffff",
-                                    fontSize: "0.84rem",
-                                    lineHeight: 1.45,
-                                    fontWeight: 600,
-                                    color: "#0f172a",
-                                    outline: "none",
-                                    resize: "vertical",
-                                    minHeight: "95px",
-                                    fontFamily: "inherit"
-                                  }}
-                                />
-
-                                {/* Previsualización de Chips de Opciones Detectadas */}
-                                {detectedOptions.length > 0 && (
-                                  <div style={{ display: "flex", flexDirection: "column", gap: "0.35rem" }}>
-                                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: "0.71rem", color: "#166534", fontWeight: 700 }}>
-                                      <span>Opciones válidas guardadas para calificar:</span>
-                                      {item.tipo !== "texto_corto" && (
-                                        <span style={{ color: detectedOptions.length < cantCasillas ? "#dc2626" : "#15803d" }}>
-                                          {detectedOptions.length < cantCasillas
-                                            ? `⚠️ Tienes ${detectedOptions.length} opciones para ${cantCasillas} casillas`
-                                            : `✓ ${detectedOptions.length} opciones disponibles para ${cantCasillas} casillas`}
-                                        </span>
-                                      )}
-                                    </div>
-                                    <div style={{ display: "flex", flexWrap: "wrap", gap: "0.3rem", maxHeight: "80px", overflowY: "auto" }}>
-                                      {detectedOptions.map((opt, oIdx) => (
-                                        <span
-                                          key={oIdx}
-                                          style={{
-                                            fontSize: "0.72rem",
-                                            fontWeight: 700,
-                                            padding: "0.15rem 0.5rem",
-                                            borderRadius: "0.35rem",
-                                            background: "#ffffff",
-                                            color: "#166534",
-                                            border: "1px solid #86efac"
-                                          }}
-                                        >
-                                          {opt}
-                                        </span>
-                                      ))}
-                                    </div>
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })
-                    )}
-                  </div>
-                </div>
-              </div>
-            </React.Fragment>
-          );
-        })}
-          </div>
-          {/* Barra inferior de guardado */}
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "0.75rem", paddingTop: "1rem", marginTop: "0.5rem", flexWrap: "wrap" }}>
-            <button
-              type="button"
-              onClick={() => setShowResetModal(true)}
-              disabled={saving || resetting}
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "0.45rem",
-                padding: "0.75rem 1.25rem",
-                borderRadius: "0.65rem",
-                border: "1.5px solid #fecaca",
-                background: "#fef2f2",
-                color: "#b91c1c",
-                fontSize: "0.88rem",
-                fontWeight: 800,
-                cursor: saving || resetting ? "not-allowed" : "pointer",
-                transition: "all 0.15s ease"
-              }}
-              title="Borrar todas las preguntas guardadas y comenzar desde cero"
-            >
-              <RotateCcw size={16} />
-              <span>Reiniciar Toda la Prueba</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={handleSaveQuiz}
-              disabled={saving}
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "0.5rem",
-                padding: "0.75rem 1.75rem",
-                borderRadius: "0.65rem",
-                border: "none",
-                background: hasUnsavedChanges
-                  ? "linear-gradient(135deg, #16a34a 0%, #15803d 100%)"
-                  : "linear-gradient(135deg, #0284c7 0%, #0369a1 100%)",
-                color: "#ffffff",
-                fontSize: "0.92rem",
-                fontWeight: 800,
-                cursor: saving ? "not-allowed" : "pointer",
-                boxShadow: "0 4px 14px rgba(2, 132, 199, 0.25)"
-              }}
-            >
-              {saving ? <RefreshCw size={16} className="animate-spin" /> : <Save size={16} />}
-              <span>{saving ? "Guardando..." : "Guardar Prueba Semanal"}</span>
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL GLOBAL DE CONFIRMACIÓN PARA REINICIAR LA PRUEBA (PORTAL EN BODY CON SCROLL BLOQUEADO) */}
-      {showResetModal && createPortal(
-        <div
-          className="animate-fade-in"
-          style={{
-            position: "fixed",
-            inset: 0,
-            width: "100vw",
-            height: "100vh",
-            zIndex: 9999999,
-            background: "rgba(15, 23, 42, 0.78)",
-            backdropFilter: "blur(6px)",
-            WebkitBackdropFilter: "blur(6px)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: "1.25rem",
-            boxSizing: "border-box"
-          }}
-          onClick={(e) => {
-            if (e.target === e.currentTarget && !resetting) setShowResetModal(false);
-          }}
-        >
-          <div
-            className="animate-scale-in"
-            style={{
-              background: "#ffffff",
-              borderRadius: "1.25rem",
-              border: "2px solid #fee2e2",
-              maxWidth: "480px",
-              width: "100%",
-              padding: "2rem",
-              boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.45)",
-              textAlign: "center",
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              gap: "1.1rem"
-            }}
-          >
-            <div
-              style={{
-                width: "60px",
-                height: "60px",
-                borderRadius: "50%",
-                background: "#fee2e2",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                color: "#dc2626"
-              }}
-            >
-              <RotateCcw size={30} />
-            </div>
-
-            <div>
-              <span
-                style={{
-                  fontSize: "0.78rem",
-                  fontWeight: 900,
-                  textTransform: "uppercase",
-                  letterSpacing: "1px",
-                  color: "#dc2626"
-                }}
-              >
-                Acción Irreversible
-              </span>
-              <h3 style={{ margin: "0.3rem 0 0", fontSize: "1.35rem", fontWeight: 900, color: "#0f172a" }}>
-                ¿Reiniciar toda la prueba?
-              </h3>
-              <p style={{ margin: "0.35rem 0 0", fontSize: "0.88rem", color: "#64748b", fontWeight: 600 }}>
-                Semana {selectedSemana} • Sección {seccion?.codigo || ""}
-              </p>
-            </div>
-
-            <p style={{ margin: 0, fontSize: "0.9rem", color: "#475569", lineHeight: 1.55 }}>
-              Esta acción eliminará todos los apartados, respuestas modelo y configuraciones guardadas de esta semana. La prueba quedará vacía (6 preguntas en blanco) para que puedas elaborarla de nuevo desde cero.
-            </p>
-
-            <div
-              style={{
-                display: "flex",
-                gap: "0.75rem",
-                width: "100%",
-                marginTop: "0.5rem"
-              }}
-            >
-              <button
-                type="button"
-                onClick={() => setShowResetModal(false)}
-                disabled={resetting}
-                style={{
-                  flex: 1,
-                  padding: "0.75rem",
-                  borderRadius: "0.7rem",
-                  border: "1.5px solid #cbd5e1",
-                  background: "#ffffff",
-                  color: "#475569",
-                  fontSize: "0.9rem",
-                  fontWeight: 700,
-                  cursor: resetting ? "not-allowed" : "pointer"
-                }}
-              >
-                Cancelar
-              </button>
-
-              <button
-                type="button"
-                onClick={handleResetQuiz}
-                disabled={resetting}
-                style={{
-                  flex: 1.3,
-                  padding: "0.75rem",
-                  borderRadius: "0.7rem",
-                  border: "none",
-                  background: "linear-gradient(135deg, #dc2626 0%, #b91c1c 100%)",
-                  color: "#ffffff",
-                  fontSize: "0.9rem",
-                  fontWeight: 900,
-                  cursor: resetting ? "not-allowed" : "pointer",
-                  boxShadow: "0 4px 14px rgba(220, 38, 38, 0.35)",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  gap: "0.45rem"
-                }}
-              >
-                {resetting ? <RefreshCw size={17} className="animate-spin" /> : <RotateCcw size={17} />}
-                <span>{resetting ? "Reiniciando..." : "Sí, Reiniciar Todo"}</span>
-              </button>
-            </div>
-          </div>
-        </div>,
-        document.body
-      )}
-    </div>
+            </article>)}
+          </section>
+        ) : <div className="quiz-builder">
+          <nav className="quiz-builder__nav" aria-label="Preguntas de la prueba">
+            <div><h3>Preguntas</h3><p>{completeQuestions} de 6 completas</p><progress max="6" value={completeQuestions} aria-label="Preguntas completas" /></div>
+            <div className="quiz-builder__steps">{quizData.preguntas.map((question,index) => {
+              const complete = !quizPublicationIssues([question]).length;
+              return <button type="button" key={question.id} disabled={busy} aria-current={activeQuestion === index ? "step" : undefined} aria-label={`${index === 5 ? "Bonus" : `Pregunta ${index + 1}`} · ${complete ? "Completa" : "Por completar"}`} data-complete={complete} data-bonus={index === 5} onClick={() => setActiveQuestion(index)}>
+                <b>{index + 1}</b><span>{index === 5 ? "Bonus" : `Pregunta ${index + 1}`}<small>{complete ? "Completa" : question.items?.length ? "Por completar" : "Sin preparar"}</small></span>{complete && <CheckCircle2 size={16} aria-hidden="true" />}
+              </button>;
+            })}</div>
+          </nav>
+          <fieldset className="section-quizzes__fieldset quiz-builder__workspace" disabled={busy}>
+            {quizData.preguntas.filter((_,index)=>index===activeQuestion).map(question => <div key={question.id} className="quiz-builder__question">
+              <header><div><p className="user-directory__eyebrow">Paso {activeQuestion + 1} de 6</p><h3>{activeQuestion === 5 ? "Pregunta 6 · Bonus" : `Pregunta ${activeQuestion + 1}`}</h3></div><span className="section-quizzes__badge">{Number(question.puntos).toFixed(3)} / 1.000 punto</span></header>
+              {activeQuestion === 5 && <p className="section-quizzes__bonus-note">Esta pregunta aporta hasta 1 punto extra a Premios de la sección.</p>}
+              <div className="quiz-builder__items-heading"><div><h4>Configura tus apartados</h4><p>Cada apartado tiene su instrucción, formato y puntos.</p></div>{question.items?.length > 0 && <button type="button" className="user-button" onClick={()=>handleDistributeSubItemPoints(question.id)}><SlidersHorizontal size={16} aria-hidden="true" /> Repartir 1 punto</button>}</div>
+              {Number(question.puntos)>1.001 && <p className="user-dialog__error" role="alert">La suma supera 1 punto. Ajusta los valores o usa Repartir 1 punto.</p>}
+              {(question.items || []).map((item,index) => <QuizItemEditor key={item.id} item={item} index={index} onChange={replacement=>handleReplaceSubItem(question.id,item.id,replacement)} onRemove={()=>handleRemoveSubItem(question.id,item.id)} />)}
+              <section className="quiz-builder__type-picker" aria-label="Añadir apartado">
+                <h4>{question.items?.length ? "Añadir otro apartado" : "Elige cómo responderá el estudiante"}</h4>
+                <p>Puedes combinar distintos tipos dentro de una pregunta.</p>
+                <div>{QUIZ_ITEM_TYPES.map(type=><button type="button" key={type.id} onClick={()=>handleAddSubItem(question.id,type.id)}><span><Plus size={17} aria-hidden="true" /><b>{type.label}</b></span><small>{type.description}</small></button>)}</div>
+              </section>
+              <div className="quiz-builder__next"><button type="button" className="user-button" disabled={activeQuestion===0} onClick={()=>setActiveQuestion(index=>index-1)}><ArrowLeft size={16} aria-hidden="true" /> Anterior</button><button type="button" className="user-button" onClick={()=>activeQuestion===5 ? setViewMode("preview") : setActiveQuestion(index=>index+1)}>{activeQuestion===5 ? "Ver prueba completa" : "Siguiente pregunta"}<ChevronRight size={16} aria-hidden="true" /></button></div>
+            </div>)}
+          </fieldset>
+        </div>}
+        {publicationIssues.length > 0 && <div className="quiz-builder__readiness"><strong>{publicationIssues.length} detalles por completar antes de publicar</strong><p>Puedes guardar un borrador y continuar después. Abre cada pregunta para revisar lo que falta.</p></div>}
+        <footer className="section-quizzes__save">
+          {saveError && saveErrorLocation !== "publication" && <p className="user-dialog__error" role="alert">{saveError}</p>}
+          <div><p role="status">{hasUnsavedChanges ? "Cambios sin guardar" : "Sin cambios pendientes"}</p><div>
+            <button type="button" className="user-button user-button--danger" disabled={busy} onClick={() => {setResetError("");setShowResetModal(true);}}><RotateCcw size={17} aria-hidden="true" /> Reiniciar prueba</button>
+            <button type="button" className="user-button user-button--primary" disabled={busy} onClick={() => handleSaveQuiz()}><Save size={17} aria-hidden="true" />{saving ? "Guardando…" : "Guardar cambios"}</button>
+          </div></div>
+        </footer>
+      </>}
+      {showResetModal && createPortal(<dialog className="section-quiz-reset" ref={resetDialogRef} aria-labelledby="quiz-reset-title" onCancel={event => { if (resetting) event.preventDefault(); else setShowResetModal(false); }}>
+        <h3 id="quiz-reset-title">¿Reiniciar toda la prueba?</h3><p>Semana {selectedSemana} · Sección {displaySectionCode(seccion?.codigo)}</p>
+        <p>Se eliminarán todos los apartados y respuestas modelo guardados. La prueba volverá a borrador con seis preguntas vacías.</p>
+        {resetError && <p className="user-dialog__error" role="alert">{resetError}</p>}
+        <div><button type="button" className="user-button" autoFocus disabled={resetting} onClick={() => setShowResetModal(false)}>Cancelar</button><button type="button" className="user-button user-button--danger" disabled={resetting} onClick={handleResetQuiz}>{resetting ? "Reiniciando…" : "Sí, reiniciar prueba"}</button></div>
+      </dialog>,document.body)}
+    </section>
   );
 }

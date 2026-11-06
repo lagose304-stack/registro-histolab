@@ -134,6 +134,14 @@ export default function DashboardInstructor({ instructor, notify = () => {}, adm
       const res = await api.secciones.getAll();
       const visibleSections = (res?.data || []).filter(section => canViewSection(instructor, section));
       setSections(visibleSections);
+      const navigation=getNavState();
+      const currentSection=navigation.selectedCoordinatorSeccion;
+      if (currentSection && !visibleSections.some(section=>section.id===currentSection.id)) {
+        setSelectedCoordinatorSeccion(null);
+        setNavState({coordinatorSectionModule:null});
+      }
+      const currentInstructorSection=navigation.selectedInstructorSeccion;
+      if (currentInstructorSection && !visibleSections.some(section=>section.id===currentInstructorSection.id)) setSelectedInstructorSeccion(null);
       safeStorage.setSession(cacheKey, JSON.stringify(visibleSections));
     } catch (err) {
       console.warn("Error al cargar mis secciones:", err);
