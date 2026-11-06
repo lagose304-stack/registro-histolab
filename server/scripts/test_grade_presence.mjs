@@ -1,0 +1,25 @@
+import assert from "node:assert/strict";
+import { formatGrade, getCanonicalExamGrade, getCanonicalManualGrade, getCanonicalQuizGrade, calculateStudentAcademicSummary } from "../../client/src/utils/academicEngine.js";
+import { sanitizeNotasPayload } from "../src/controllers/estudiantes.controller.js";
+
+const topic = { id: "presence-topic", numero_tema: 1, titulo: "Tema de verificación", semana: 1 };
+const week = { numero_semana: 5, es_examen: true, parcial: "I Parcial" };
+const notas = sanitizeNotasPayload({ manual_presence: null, manual_empty: "", "manual_presence-topic": 0, prueba_1: 0, examen_semana_5: 0 });
+assert.equal(notas["manual_presence-topic"], 0);
+assert.equal(notas.prueba_1, 0);
+assert.equal(notas.examen_semana_5, 0);
+assert.equal("manual_empty" in notas, false);
+assert.equal(formatGrade(0), "0");
+assert.equal(formatGrade("0"), "0");
+for (const value of [undefined, null, "", false, NaN]) assert.equal(formatGrade(value), "—");
+assert.equal(getCanonicalManualGrade(notas, topic), 0);
+assert.equal(getCanonicalManualGrade({}, topic), null);
+assert.equal(getCanonicalQuizGrade(notas, 1), 0);
+assert.equal(getCanonicalQuizGrade({}, 1), null);
+assert.equal(getCanonicalExamGrade({ notas }, 0, week), 0);
+assert.equal(getCanonicalExamGrade({ notas: {}, primer_examen: 0 }, 0, week), null, "Un cero predeterminado de una columna antigua no implica una nota ingresada");
+const summary = calculateStudentAcademicSummary({ notas }, {}, [topic], [{ numero_semana: 1 }, week]);
+assert.equal(summary.manualesList[0].nota, 0);
+assert.equal(summary.pruebasList[0].nota, 0);
+assert.equal(summary.examenesList[0].nota, 0);
+console.log("PASS: cero explícito guardado y leído como nota; ausencias conservadas como pendientes en manuales, pruebas y exámenes.");

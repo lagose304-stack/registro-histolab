@@ -276,9 +276,9 @@ export function calculateStudentAcademicSummary(student = {}, configPuntajes = {
     });
   });
 
-  // Tomar notas de manuales huérfanas en el objeto notas si existen (excluyendo aliases legacy manual_tema_)
+  // Compatibilidad sin configuración: con una programación vigente solo cuentan sus temas.
   Object.entries(notas).forEach(([k, v]) => {
-    if (k.startsWith("manual_") && !k.startsWith("manual_tema_") && !processedManualKeys.has(k)) {
+    if (!temario.length && !semanasConfig.length && k.startsWith("manual_") && !k.startsWith("manual_tema_") && !processedManualKeys.has(k)) {
       const numVal = Number(v) || 0;
       sumaBrutaManuales += numVal;
       manualesList.push({
@@ -324,19 +324,19 @@ export function calculateStudentAcademicSummary(student = {}, configPuntajes = {
     });
   });
 
-  // Pruebas huérfanas en notas
+  // Compatibilidad sin configuración; los sufijos de bonus nunca son notas oficiales.
   Object.entries(notas).forEach(([k, v]) => {
-    if (k.startsWith("prueba_") || k.startsWith("examencito_")) {
+    if (!semanasConfig.length && !temario.length && /^(prueba_|examencito_)\d+$/.test(k)) {
       const semNum = parseInt(k.replace(/^(prueba_|examencito_)/, ""), 10);
       if (semNum && !processedPruebasWeeks.has(semNum)) {
         processedPruebasWeeks.add(semNum);
-        const numVal = Number(v) || 0;
+        const numVal = getCanonicalQuizGrade(notas, semNum, student) ?? 0;
         sumaBrutaPruebas += numVal;
         pruebasList.push({
           key: `prueba_${semNum}`,
           semana: semNum,
           label: `Semana ${semNum}`,
-          nota: v,
+          nota: getCanonicalQuizGrade(notas, semNum, student),
           ptsMax: 5.0
         });
       }
@@ -381,8 +381,8 @@ export function calculateStudentAcademicSummary(student = {}, configPuntajes = {
         ptsMax: ptsMax
       });
     });
-  } else {
-    // Fallback: exámenes tradicionales I, II y III
+  } else if (!semanasConfig.length) {
+    // Compatibilidad histórica solo cuando aún no hay programación académica.
     for (let index = 0; index < 3; index++) {
       const grade = getCanonicalExamGrade(student, index, null, customNotas);
       sumaExamenes += grade || 0;

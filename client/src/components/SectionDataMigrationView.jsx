@@ -401,6 +401,9 @@ export default function SectionDataMigrationView({
   };
 
   const currentExamInfo = examColMap[selectedExamParcial] || examColMap.examen_I;
+  const currentExamIndex = ["examen_I", "examen_II", "examen_III"].indexOf(selectedExamParcial);
+  const currentExamWeek = availableWeeks.filter(week => week.esExamen)[currentExamIndex] || null;
+  const currentExamWeekKey = currentExamWeek ? `examen_semana_${currentExamWeek.numero_semana}` : null;
 
   // Puntaje máximo reglamentario para el examen actualmente seleccionado según la carrera
   const currentExamMaxPoints = useMemo(() => {
@@ -429,7 +432,10 @@ export default function SectionDataMigrationView({
 
   const getStudentExamGrade = (est) => {
     const colKey = currentExamInfo.col;
-    const val = est[colKey] ?? est?.notas?.[colKey] ?? est?.notas?.[selectedExamParcial];
+    // Conservar un decimal que aún se escribe, pero no mostrar como ingresado
+    // el cero que las columnas históricas reciben automáticamente.
+    if (typeof est[colKey] === "string" && (est[colKey] === "" || est[colKey].endsWith("."))) return est[colKey];
+    const val = getCanonicalExamGrade(est, currentExamIndex, currentExamWeek);
     if (val === undefined || val === null || val === "") return "";
     return val;
   };
@@ -443,7 +449,7 @@ export default function SectionDataMigrationView({
         const val = est[colKey];
         if (typeof val === "string" && val.endsWith(".")) {
           const fixed = Number(val.slice(0, -1));
-          const currentNotas = { ...(est.notas || {}), [colKey]: fixed, [selectedExamParcial]: fixed };
+          const currentNotas = { ...(est.notas || {}), [colKey]: fixed, [selectedExamParcial]: fixed, ...(currentExamWeekKey ? { [currentExamWeekKey]: fixed } : {}) };
           const updatedExamCols = { [colKey]: fixed };
           const nextTotal = recalculateTotal(est, currentNotas, updatedExamCols);
           return { ...est, [colKey]: fixed, notas: currentNotas, total: nextTotal };
@@ -464,6 +470,10 @@ export default function SectionDataMigrationView({
           const currentNotas = { ...(est.notas || {}) };
           delete currentNotas[colKey];
           delete currentNotas[selectedExamParcial];
+          if (currentExamWeekKey) {
+            delete currentNotas[currentExamWeekKey];
+            delete currentNotas[`examen_${currentExamWeek.numero_semana}`];
+          }
           const updatedExamCols = { [colKey]: 0 };
           const nextTotal = recalculateTotal(est, currentNotas, updatedExamCols);
           return {
@@ -499,7 +509,8 @@ export default function SectionDataMigrationView({
         const updatedNotas = {
           ...currentNotas,
           [colKey]: storedVal,
-          [selectedExamParcial]: storedVal
+          [selectedExamParcial]: storedVal,
+          ...(currentExamWeekKey ? { [currentExamWeekKey]: storedVal } : {})
         };
         const updatedExamCols = { [colKey]: storedVal };
         const nextTotal = recalculateTotal(est, updatedNotas, updatedExamCols);
@@ -1469,7 +1480,7 @@ export default function SectionDataMigrationView({
                             value={gradeVal}
                             onChange={(e) => handleExamGradeChange(est.numero_cuenta, e.target.value)}
                             onBlur={() => handleExamGradeBlur(est.numero_cuenta)}
-                            placeholder="0.000"
+                            placeholder="Sin nota"
                             title={`Calificación del ${currentExamInfo.label}: máximo ${currentExamMaxPoints}.000 puntos`}
                             style={{
                               width: "100%",

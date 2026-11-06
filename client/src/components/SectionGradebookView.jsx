@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   ArrowLeft,
   FileSpreadsheet,
@@ -29,91 +29,13 @@ import { exportStyledExcel } from "../utils/exportExcel";
 import { getNavState, setNavState } from "../utils/navigationState";
 import {
   isExamWeek as isExamWeekCore,
-  calculateStudentAcademicSummary, getExamMetadata, getCanonicalExamGrade
+  calculateStudentAcademicSummary, getExamMetadata, getCanonicalExamGrade, getCanonicalManualGrade, getCanonicalQuizGrade, formatGrade as formatGradeValue
 } from "../utils/academicEngine";
 
-// Helper: Calcula si el estudiante perdió derecho a examen por acumular 2 o más faltas injustificadas en un parcial
-export const getStudentDerechoStatus = (est, parcialId = "TODOS", dynamicParcialesList = []) => {
-  const getAsistVal = (sem) => {
-    return (
-      est?.asistencias?.[`asistencia_${sem}`] ??
-      est?.asistencias?.[`semana_${sem}`] ??
-      est?.[`Asistencia de la semana ${sem}`] ??
-      null
-    );
-  };
-
-  // Extraer lista de parciales reales (excluyendo 'TODOS')
-  const realParciales = (Array.isArray(dynamicParcialesList) ? dynamicParcialesList : []).filter(
-    (p) => p.id !== "TODOS"
-  );
-
-  const parcialesStatus = {};
-  const parcialesPerdidos = [];
-
-  realParciales.forEach((p) => {
-    const faltas = (p.semanas || []).filter(
-      (sem) => getAsistVal(sem) === "Falta injustificada"
-    ).length;
-    const perdio = faltas >= 2;
-
-    const statusObj = { perdio, faltas, label: p.label, semanas: p.semanas };
-    parcialesStatus[p.id] = statusObj;
-    parcialesStatus[p.label] = statusObj;
-    if (p.rawParcialName) parcialesStatus[p.rawParcialName] = statusObj;
-    if (p.parcialKey) parcialesStatus[p.parcialKey] = statusObj;
-
-    if (perdio) {
-      parcialesPerdidos.push(`${p.label} (${faltas} faltas)`);
-    }
-  });
-
-  // Si se consulta un parcial específico
-  if (parcialId !== "TODOS" && parcialesStatus[parcialId]) {
-    const curr = parcialesStatus[parcialId];
-    return {
-      perdioDerecho: curr.perdio,
-      faltasInjustificadas: curr.faltas,
-      parcialesStatus,
-      motivo: curr.perdio
-        ? `Perdió derecho en ${curr.label} (${curr.faltas} faltas injustificadas)`
-        : "Habilitado",
-      badgeText: curr.perdio
-        ? `🚨 Perdió Derecho (${curr.faltas} Faltas Injust.)`
-        : "✓ Habilitado",
-      perdioI: parcialesStatus["I_PARCIAL"]?.perdio || parcialesStatus["I"]?.perdio || false,
-      perdioII: parcialesStatus["II_PARCIAL"]?.perdio || parcialesStatus["II"]?.perdio || false,
-      perdioIII: parcialesStatus["III_PARCIAL"]?.perdio || parcialesStatus["III"]?.perdio || false
-    };
-  }
-
-  const perdioAlguno = parcialesPerdidos.length > 0;
-
-  return {
-    perdioDerecho: perdioAlguno,
-    parcialesStatus,
-    parcialesPerdidos,
-    motivo: perdioAlguno
-      ? `Perdió derecho en: ${parcialesPerdidos.join(", ")}`
-      : "Habilitado en todos los parciales",
-    badgeText: perdioAlguno
-      ? `🚨 Perdió Derecho en ${parcialesPerdidos.length} parcial(es)`
-      : "✓ Habilitado",
-    perdioI: parcialesStatus["I_PARCIAL"]?.perdio || parcialesStatus["I"]?.perdio || false,
-    perdioII: parcialesStatus["II_PARCIAL"]?.perdio || parcialesStatus["II"]?.perdio || false,
-    perdioIII: parcialesStatus["III_PARCIAL"]?.perdio || parcialesStatus["III"]?.perdio || false
-  };
-};
+import { getStudentDerechoStatus } from "../utils/gradebookUtils";
+import "./SectionGradebookView.css";
 
 // Helper que escribe en el espacio disponible de la primera línea y crea un segundo renglón vertical centrado con el resto del texto completo
-// Helper para formatear calificaciones con hasta 3 decimales
-const formatGradeValue = (val) => {
-  if (val === undefined || val === null || val === "" || Number(val) === 0) return "—";
-  const num = Number(val);
-  if (isNaN(num)) return "—";
-  return Math.round(num * 1000) / 1000;
-};
-
 const renderVerticalHeaderAutoWrap = (title, maxCharsFirstLine = 28) => {
   if (!title) return null;
 
@@ -180,7 +102,11 @@ export default function SectionGradebookView({
   const [temario, setTemario] = useState([]);
   const [semanasConfig, setSemanasConfig] = useState([]);
   const [configPuntajes, setConfigPuntajes] = useState(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const loadVersion = useRef(0);
+  const notifyRef = useRef(notify);
+  notifyRef.current = notify;
   const [savingChanges, setSavingChanges] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
@@ -212,59 +138,38 @@ export default function SectionGradebookView({
   // Carrera de la sección
   const carrera = seccion?.carrera || "Medicina";
 
-  // Cargar Temario, Semanas Académicas y Configuración de Puntajes de la Carrera
-  const loadAcademicConfig = useCallback(async () => {
-    try {
-      const [resTemario, resSemanas, resPuntajes] = await Promise.all([
-        api.temario.getAll({ carrera }),
-        api.semanas.getConfig(carrera),
-        api.temario.getPuntajes(carrera).catch(() => ({ data: null }))
-      ]);
-
-      if (resTemario?.data) {
-        const sortedTemas = [...resTemario.data].sort((a, b) => {
-          const semA = Number(a.semana) || 999;
-          const semB = Number(b.semana) || 999;
-          if (semA !== semB) return semA - semB;
-          return (Number(a.numero_tema) || 999) - (Number(b.numero_tema) || 999);
-        });
-        setTemario(sortedTemas);
-      }
-      if (resSemanas?.data) {
-        const sortedSemanas = [...resSemanas.data].sort(
-          (a, b) => Number(a.numero_semana) - Number(b.numero_semana)
-        );
-        setSemanasConfig(sortedSemanas);
-      }
-      if (resPuntajes?.data) {
-        setConfigPuntajes(resPuntajes.data);
-      }
-    } catch (err) {
-      console.warn("Aviso al cargar configuración académica de carrera:", err);
-    }
-  }, [carrera]);
-
-  // Cargar estudiantes de la sección
+  // Publicar un conjunto coherente de datos; nunca calcular con una carga parcial.
   const loadEstudiantes = useCallback(async () => {
+    const version = ++loadVersion.current;
     if (!seccion?.id) return;
     setLoading(true);
+    setLoadError("");
     try {
-      await loadAcademicConfig();
-      const res = await api.estudiantes.getBySeccion(seccion.id, carrera);
-      if (res?.data) {
-        setEstudiantes(res.data);
-        setHasUnsavedChanges(false);
+      const [topics, weeks, scores, students] = await Promise.all([
+        api.temario.getAll({ carrera }), api.semanas.getConfig(carrera),
+        api.temario.getPuntajes(carrera), api.estudiantes.getBySeccion(seccion.id, carrera)
+      ]);
+      if (version !== loadVersion.current) return;
+      if (!Array.isArray(topics?.data) || !Array.isArray(weeks?.data) || !Array.isArray(students?.data)) {
+        throw new Error("La información académica está incompleta");
       }
+      setTemario([...topics.data].sort((a, b) => (Number(a.semana) - Number(b.semana)) || (Number(a.numero_tema) - Number(b.numero_tema))));
+      setSemanasConfig([...weeks.data].sort((a, b) => Number(a.numero_semana) - Number(b.numero_semana)));
+      setConfigPuntajes(scores?.data || null);
+      setEstudiantes(students.data);
+      setHasUnsavedChanges(false);
     } catch (err) {
-      console.error("Error al cargar datos de la sección:", err);
-      notify("Error al cargar la información de la sección", "error");
+      if (version !== loadVersion.current) return;
+      setLoadError("No se pudo cargar el cuadro completo. Recarga los datos para consultar notas y totales actualizados.");
+      notifyRef.current("Error al cargar la información de la sección", "error");
     } finally {
-      setLoading(false);
+      if (version === loadVersion.current) setLoading(false);
     }
-  }, [seccion?.id, carrera, loadAcademicConfig, notify]);
+  }, [seccion?.id, carrera]);
 
   useEffect(() => {
     loadEstudiantes();
+    return () => { loadVersion.current++; };
   }, [loadEstudiantes]);
 
   // Construcción 100% DINÁMICA de Parciales según los temas y semanas de la carrera
@@ -341,7 +246,7 @@ export default function SectionGradebookView({
 
         return {
           key: `asistencia_examen_${ex.semana}`,
-          legacyKey: ex.parcialKey === "I" ? "Asistencia Primer Examen" : ex.parcialKey === "II" ? "Asistencia Segundo Examen" : "Asistencia Tercer Examen",
+          legacyKey: ex.parcialKey === "I" ? "Asistencia Primer Examen" : ex.parcialKey === "II" ? "Asistencia Segundo Examen" : ex.parcialKey === "III" ? "Asistencia Tercer Examen" : null,
           label: `Asistencia ${cleanExamTitle}`,
           shortLabel: `Asist. ${cleanExamTitle}`,
           semana: ex.semana,
@@ -452,6 +357,12 @@ export default function SectionGradebookView({
     return dynamicParcialesConfig.find((p) => p.id === selectedParcial) || dynamicParcialesConfig[0];
   }, [dynamicParcialesConfig, selectedParcial]);
 
+  useEffect(() => {
+    if (!loading && !loadError && !dynamicParcialesConfig.some(p => p.id === selectedParcial)) {
+      setSelectedParcial("TODOS");
+    }
+  }, [loading, loadError, dynamicParcialesConfig, selectedParcial]);
+
   // Mapa de Título de Semanas para Cabeceras
   const semanasTemasMap = useMemo(() => {
     const map = {};
@@ -467,45 +378,42 @@ export default function SectionGradebookView({
     return result;
   }, [temario]);
 
-  // Helper para leer valor de nota de un estudiante
-  const getStudentGrade = (est, key, defaultVal = 0) => {
-    if (!est) return defaultVal;
-    if (est.notas && est.notas[key] !== undefined) return Number(est.notas[key]);
-    if (est[key] !== undefined && est[key] !== null) return Number(est[key]);
-    return defaultVal;
-  };
-
   // Helper para leer valor de asistencia de un estudiante
   const getStudentAsistencia = (est, key) => {
     if (!est) return null;
     if (est.asistencias && est.asistencias[key] !== undefined) return est.asistencias[key];
     if (est[key] !== undefined && est[key] !== null) return est[key];
-    return null;
+    const week = /^asistencia_(\d+)$/.exec(key || "")?.[1];
+    return week ? est.asistencias?.[`semana_${week}`] ?? est[`Asistencia de la semana ${week}`] ?? null : null;
   };
+
+  const summaries = useMemo(() => new Map(estudiantes.map(est => [est,
+    calculateStudentAcademicSummary(est, configPuntajes, temario, semanasConfig)
+  ])), [estudiantes, configPuntajes, temario, semanasConfig]);
 
   // Resumen y cálculos dinámicos de Puntos Oro basados en el motor académico centralizado
   const calcularNotaOroManuales = useCallback(
     (est, customNotas = null) => {
-      const summary = calculateStudentAcademicSummary(est, configPuntajes, temario, semanasConfig, customNotas);
+      const summary = !customNotas && summaries.get(est) || calculateStudentAcademicSummary(est, configPuntajes, temario, semanasConfig, customNotas);
       return summary.notaOroManuales;
     },
-    [temario, configPuntajes, semanasConfig]
+    [summaries, temario, configPuntajes, semanasConfig]
   );
 
   const calcularNotaOroPruebas = useCallback(
     (est, customNotas = null) => {
-      const summary = calculateStudentAcademicSummary(est, configPuntajes, temario, semanasConfig, customNotas);
+      const summary = !customNotas && summaries.get(est) || calculateStudentAcademicSummary(est, configPuntajes, temario, semanasConfig, customNotas);
       return summary.notaOroPruebas;
     },
-    [temario, configPuntajes, semanasConfig]
+    [summaries, temario, configPuntajes, semanasConfig]
   );
 
   const getStudentCalculatedTotal = useCallback(
     (est, customNotas = null) => {
-      const summary = calculateStudentAcademicSummary(est, configPuntajes, temario, semanasConfig, customNotas);
+      const summary = !customNotas && summaries.get(est) || calculateStudentAcademicSummary(est, configPuntajes, temario, semanasConfig, customNotas);
       return summary.total;
     },
-    [temario, configPuntajes, semanasConfig]
+    [summaries, temario, configPuntajes, semanasConfig]
   );
 
   // Actualizar calificación de un estudiante en el estado
@@ -637,7 +545,7 @@ export default function SectionGradebookView({
       await exportStyledExcel({
         viewType,
         seccion,
-        estudiantes: estudiantes.map((e) => ({
+        estudiantes: filteredEstudiantes.map((e) => ({
           ...e,
           total: getStudentCalculatedTotal(e),
           nota_oro_manuales: calcularNotaOroManuales(e),
@@ -645,7 +553,9 @@ export default function SectionGradebookView({
         })),
         currentParcialConfig,
         selectedParcial,
-        semanasTemasMap
+        semanasTemasMap,
+        activeCategory,
+        dynamicParcialesConfig
       });
       notify(
         `Archivo Excel (.xlsx) de ${viewType === "notas" ? "calificaciones" : "asistencias"} (${currentParcialConfig.label}) exportado con éxito`,
@@ -731,7 +641,7 @@ export default function SectionGradebookView({
   };
 
   return (
-    <div className="animate-fade-in" style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
+    <div className="animate-fade-in gradebook-view" style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
       {/* =================================================================== */}
       {/* 📋 ENCABEZADO PRINCIPAL */}
       {/* =================================================================== */}
@@ -868,7 +778,7 @@ export default function SectionGradebookView({
 
             <button
               onClick={handleExportExcel}
-              disabled={exporting}
+              disabled={exporting || loading || !!loadError || !filteredEstudiantes.length}
               style={{
                 display: "inline-flex",
                 alignItems: "center",
@@ -1145,7 +1055,8 @@ export default function SectionGradebookView({
         {/* =================================================================== */}
         {/* 📑 TABLA: MODO CALIFICACIONES */}
         {/* =================================================================== */}
-        {loading ? (
+        <p className="gradebook-scroll-hint">Desliza el cuadro para ver todas las columnas. —: pendiente · 0: nota registrada · Oro: acumulado del periodo.</p>
+        {loadError ? (<div role="alert" className="gradebook-error">{loadError}<button type="button" onClick={loadEstudiantes}>Reintentar</button></div>) : loading ? (
           <div style={{ padding: "4rem", textAlign: "center", color: "#64748b", fontSize: "0.95rem" }}>
             Cargando información académica...
           </div>
@@ -1170,6 +1081,10 @@ export default function SectionGradebookView({
           </div>
         ) : viewType === "notas" ? (
           <div
+            className="gradebook-scroll"
+            role="region"
+            aria-label={viewType === "notas" ? "Cuadro de notas: desliza para ver todas las columnas" : "Asistencias: desliza para ver todas las columnas"}
+            tabIndex={0}
             style={{
               overflowX: "auto",
               border: "1px solid #e2e8f0",
@@ -1286,7 +1201,7 @@ export default function SectionGradebookView({
                         verticalAlign: "middle",
                         textAlign: "center"
                       }}
-                      title={`Nota Oro de Manuales (Ponderado: ${configPuntajes?.nota_total_manuales ?? "—"} pts oro)`}
+                      title={`Acumulado de todo el periodo. Nota Oro de Manuales (Ponderado: ${configPuntajes?.nota_total_manuales ?? "—"} pts oro)`}
                     >
                       <div
                         style={{
@@ -1304,7 +1219,7 @@ export default function SectionGradebookView({
                           maxHeight: "165px"
                         }}
                       >
-                        Nota Oro Manuales
+                        Oro Manuales · periodo
                       </div>
                     </th>
                   )}
@@ -1324,7 +1239,7 @@ export default function SectionGradebookView({
                         verticalAlign: "middle",
                         textAlign: "center"
                       }}
-                      title={`Nota Oro de Pruebas (Ponderado: ${configPuntajes?.nota_total_pruebas ?? "—"} pts oro)`}
+                      title={`Acumulado de todo el periodo. Nota Oro de Pruebas (Ponderado: ${configPuntajes?.nota_total_pruebas ?? "—"} pts oro)`}
                     >
                       <div
                         style={{
@@ -1342,7 +1257,7 @@ export default function SectionGradebookView({
                           maxHeight: "165px"
                         }}
                       >
-                        Nota Oro Pruebas
+                        Oro Pruebas · periodo
                       </div>
                     </th>
                   )}
@@ -1653,13 +1568,13 @@ export default function SectionGradebookView({
                               }}
                             >
                               {perdioEsteExamen ? (
-                                <span style={{ color: "#dc2626", fontSize: "0.75rem", fontWeight: 800 }}>SDE</span>
+                                <span style={{ color: "#dc2626", fontSize: "0.75rem", fontWeight: 800 }} title="Sin derecho a examen por inasistencias. Se conserva la nota registrada.">{formatGradeValue(gradeVal)}<small style={{ display: "block" }}>SDE</small></span>
                               ) : (
                                 <span
                                   style={{
                                     fontSize: "0.82rem",
                                     fontWeight: 800,
-                                    color: gradeVal > 0 ? "#1e293b" : "#94a3b8"
+                                    color: gradeVal !== null ? "#1e293b" : "#94a3b8"
                                   }}
                                 >
                                   {formatGradeValue(gradeVal)}
@@ -1672,20 +1587,7 @@ export default function SectionGradebookView({
                       {/* Temas / Manuales dinámicos */}
                       {(activeCategory === "TODAS" || activeCategory === "MANUALES") &&
                         currentParcialConfig.temas.map((tema) => {
-                          const key = `manual_${tema.id}`;
-                          const gradeVal = getStudentGrade(
-                            est,
-                            key,
-                            getStudentGrade(
-                              est,
-                              tema.id,
-                              getStudentGrade(
-                                est,
-                                `Manual de ${tema.titulo}`,
-                                !tema.id ? getStudentGrade(est, `manual_tema_${tema.numero_tema}`, 0) : 0
-                              )
-                            )
-                          );
+                          const gradeVal = getCanonicalManualGrade(est.notas || {}, tema, est);
 
                           return (
                             <td
@@ -1701,7 +1603,7 @@ export default function SectionGradebookView({
                                 style={{
                                   fontSize: "0.82rem",
                                   fontWeight: 700,
-                                  color: gradeVal > 0 ? "#0369a1" : "#94a3b8"
+                                  color: gradeVal !== null ? "#0369a1" : "#94a3b8"
                                 }}
                               >
                                 {formatGradeValue(gradeVal)}
@@ -1713,16 +1615,7 @@ export default function SectionGradebookView({
                       {/* Pruebas semanales (excluyendo semanas de examen) */}
                       {(activeCategory === "TODAS" || activeCategory === "EXAMENCITOS") &&
                         currentParcialConfig.semanasPruebas.map((sem) => {
-                          const key = `prueba_${sem}`;
-                          const gradeVal = getStudentGrade(
-                            est,
-                            key,
-                            getStudentGrade(
-                              est,
-                              `examencito_${sem}`,
-                              getStudentGrade(est, `Prueba de la semana ${sem}`, getStudentGrade(est, `Examencito de la semana ${sem}`, 0))
-                            )
-                          );
+                          const gradeVal = getCanonicalQuizGrade(est.notas || {}, sem, est);
 
                           return (
                             <td
@@ -1738,7 +1631,7 @@ export default function SectionGradebookView({
                                 style={{
                                   fontSize: "0.82rem",
                                   fontWeight: 700,
-                                  color: gradeVal > 0 ? "#7c3aed" : "#94a3b8"
+                                  color: gradeVal !== null ? "#7c3aed" : "#94a3b8"
                                 }}
                               >
                                 {formatGradeValue(gradeVal)}
@@ -1757,6 +1650,10 @@ export default function SectionGradebookView({
           /* 📋 TABLA: MODO LISTA DE ASISTENCIA */
           /* =================================================================== */
           <div
+            className="gradebook-scroll"
+            role="region"
+            aria-label={viewType === "notas" ? "Cuadro de notas: desliza para ver todas las columnas" : "Asistencias: desliza para ver todas las columnas"}
+            tabIndex={0}
             style={{
               overflowX: "auto",
               border: "1px solid #e2e8f0",

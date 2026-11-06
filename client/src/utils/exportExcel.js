@@ -1,6 +1,6 @@
-import { getCanonicalExamGrade } from "./academicEngine";
+import { getCanonicalExamGrade, getCanonicalManualGrade, getCanonicalQuizGrade } from "./academicEngine";
 import ExcelJS from "exceljs";
-import { getStudentDerechoStatus } from "../components/SectionGradebookView";
+import { getStudentDerechoStatus } from "./gradebookUtils";
 
 /**
  * Exporta el Cuadro de Calificaciones o la Lista de Asistencia a un archivo .xlsx con diseño idéntico al sitio.
@@ -11,6 +11,8 @@ export async function exportStyledExcel({
   estudiantes,
   currentParcialConfig,
   selectedParcial,
+  activeCategory = "TODAS",
+  dynamicParcialesConfig = [],
   semanasTemasMap = {}
 }) {
   if (!estudiantes || estudiantes.length === 0) {
@@ -42,7 +44,7 @@ export async function exportStyledExcel({
 
   if (isNotas) {
     // Total (solo en vista TODOS)
-    if (selectedParcial === "TODOS") {
+    if (selectedParcial === "TODOS" && ["TODAS", "EXAMENES"].includes(activeCategory)) {
       columnsConfig.push({
         key: "total",
         header: "Total",
@@ -53,9 +55,11 @@ export async function exportStyledExcel({
         rotate: true,
         isNumber: true
       });
+    }
+    if (["TODAS", "MANUALES"].includes(activeCategory)) {
       columnsConfig.push({
         key: "nota_oro_manuales",
-        header: "Nota Oro Manuales",
+        header: "Oro Manuales · periodo",
         width: 9.5,
         align: "center",
         fill: "EFF6FF",
@@ -63,9 +67,11 @@ export async function exportStyledExcel({
         rotate: true,
         isNumber: true
       });
+    }
+    if (["TODAS", "EXAMENCITOS"].includes(activeCategory)) {
       columnsConfig.push({
         key: "nota_oro_pruebas",
-        header: "Nota Oro Pruebas",
+        header: "Oro Pruebas · periodo",
         width: 9.5,
         align: "center",
         fill: "F0FDF4",
@@ -76,7 +82,7 @@ export async function exportStyledExcel({
     }
 
     // Exámenes
-    examenes.forEach((ex) => {
+    (["TODAS", "EXAMENES"].includes(activeCategory) ? examenes : []).forEach((ex) => {
       columnsConfig.push({
         key: ex.key,
         exam: ex,
@@ -92,12 +98,13 @@ export async function exportStyledExcel({
     });
 
     // Temas / Manuales
-    temas.forEach((t, idx) => {
+    (["TODAS", "MANUALES"].includes(activeCategory) ? temas : []).forEach((t, idx) => {
       const numPrefix = t.numero_tema ? `#${t.numero_tema} ` : "";
       const displayTitle = `${numPrefix}Manual - ${t.titulo}`;
 
       columnsConfig.push({
         key: `manual_${t.id}`,
+        manual: t,
         altKey: t.id ? undefined : `manual_tema_${t.numero_tema}`,
         secondAltKey: t.id,
         legacyKey: `Manual de ${t.titulo}`,
@@ -113,10 +120,11 @@ export async function exportStyledExcel({
 
     // Pruebas Semanales (solo semanas que no son de examen)
     const semanasParaPruebas = currentParcialConfig.semanasPruebas || semanas;
-    semanasParaPruebas.forEach((sem) => {
+    (["TODAS", "EXAMENCITOS"].includes(activeCategory) ? semanasParaPruebas : []).forEach((sem) => {
       const fullTitle = `Prueba - ${semanasTemasMap[sem] || `Semana ${sem}`}`;
       columnsConfig.push({
         key: `prueba_${sem}`,
+        quizWeek: sem,
         altKey: `examencito_${sem}`,
         legacyKey: `Prueba de la semana ${sem}`,
         header: fullTitle,
@@ -154,6 +162,8 @@ export async function exportStyledExcel({
     (currentParcialConfig.asistenciasExamenes || []).forEach((ae) => {
       columnsConfig.push({
         key: ae.key,
+        legacyKey: ae.legacyKey,
+        attendanceWeek: ae.semana,
         header: ae.label,
         width: 8.5,
         align: "center",
@@ -302,7 +312,7 @@ export async function exportStyledExcel({
 
     const isEven = index % 2 === 0;
     const defaultBg = isEven ? "FFFFFFFF" : "FFF8FAFC";
-    const derecho = getStudentDerechoStatus(est, selectedParcial, currentParcialConfig);
+    const derecho = getStudentDerechoStatus(est, selectedParcial, dynamicParcialesConfig.length ? dynamicParcialesConfig : [currentParcialConfig]);
 
     // Calcular datos de asistencia sobre las semanas de clase regulares
     const regularSemanasForCount =
@@ -311,7 +321,7 @@ export async function exportStyledExcel({
 
     let countAsist = 0;
     regularSemanasForCount.forEach((sem) => {
-      const val = est.asistencias?.[`asistencia_${sem}`] ?? est[`Asistencia de la semana ${sem}`];
+      const val = est.asistencias?.[`asistencia_${sem}`] ?? est.asistencias?.[`semana_${sem}`] ?? est[`Asistencia de la semana ${sem}`];
       if (val === "Asistio") {
         countAsist++;
       }
@@ -374,9 +384,12 @@ export async function exportStyledExcel({
       } else if (col.key.startsWith("asistencia_") || col.key.startsWith("Asistencia")) {
         const val =
           est.asistencias?.[col.key] ??
+          est.asistencias?.[col.key.replace(/^asistencia_(\d+)$/, "semana_$1")] ??
           est.asistencias?.[col.legacyKey] ??
+          est.asistencias?.[`asistencia_${col.attendanceWeek}`] ??
+          est.asistencias?.[`semana_${col.attendanceWeek}`] ??
           est[col.key] ??
-          est[col.legacyKey];
+          est[col.legacyKey] ?? est[`Asistencia de la semana ${col.attendanceWeek}`];
 
         if (val === "Asistio") {
           cellValue = "✓";
@@ -397,7 +410,18 @@ export async function exportStyledExcel({
           fontColor = "FF94A3B8";
         }
       } else if (col.exam) {
-        cellValue = getCanonicalExamGrade(est, col.exam.examIndex, col.exam.examWeek);
+        cellValue = getCanonicalExamGrade(est, col.exam.examIndex, col.exam.examWeek) ?? "—";
+        numFormat = "0.000";
+        if (derecho.parcialesStatus[col.exam.parcialName]?.perdio || derecho.parcialesStatus[col.exam.parcialKey]?.perdio) {
+          bg = "FFFEE2E2";
+          fontColor = "FFB91C1C";
+          cell.note = "Sin derecho a examen por inasistencias. Nota registrada conservada.";
+        }
+      } else if (col.manual) {
+        cellValue = getCanonicalManualGrade(est.notas || {}, col.manual, est) ?? "—";
+        numFormat = "0.000";
+      } else if (col.quizWeek !== undefined) {
+        cellValue = getCanonicalQuizGrade(est.notas || {}, col.quizWeek, est) ?? "—";
         numFormat = "0.000";
       } else if (col.isNumber) {
         const val = Number(
