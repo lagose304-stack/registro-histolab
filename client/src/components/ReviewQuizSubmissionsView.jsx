@@ -29,6 +29,7 @@ import {
   Trophy
 } from "lucide-react";
 import { api } from "../services/api";
+import "./ReviewQuizSubmissionsView.css";
 import { safeStorage } from "../utils/safeStorage";
 import {
   hasFullSectionAccess,
@@ -46,6 +47,9 @@ export default function ReviewQuizSubmissionsView({
 }) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [initialError, setInitialError] = useState("");
+  const [weekError, setWeekError] = useState("");
+  const weekRequestRef = useRef(0);
   const [selectedSemana, setSelectedSemana] = useState(1);
   const [searchTerm, setSearchTerm] = useState("");
   const [filterStatus, setFilterStatus] = useState("todos"); // 'todos' | 'pendientes' | 'calificados'
@@ -93,17 +97,44 @@ export default function ReviewQuizSubmissionsView({
     }
   }, [selectedEntrega, showQuickReviewModal]);
 
+  const reviewOpen = Boolean(selectedEntrega || showQuickReviewModal);
+  useEffect(() => {
+    if (!reviewOpen) return;
+    const previousFocus = document.activeElement;
+    const dialog = document.querySelector(".quiz-review-dialog");
+    dialog?.focus();
+    const trapFocus = event => {
+      if (event.key !== "Tab" || !dialog) return;
+      const controls = [...dialog.querySelectorAll('button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [tabindex="0"]')]
+        .filter(element => element.getClientRects().length > 0);
+      const first = controls[0];
+      const last = controls[controls.length - 1];
+      if (!first) { event.preventDefault(); dialog.focus(); return; }
+      if (event.shiftKey && (document.activeElement === first || document.activeElement === dialog)) {
+        event.preventDefault(); last.focus();
+      } else if (!event.shiftKey && (document.activeElement === last || document.activeElement === dialog)) {
+        event.preventDefault(); first.focus();
+      }
+    };
+    document.addEventListener("keydown", trapFocus);
+    return () => {
+      document.removeEventListener("keydown", trapFocus);
+      if (previousFocus?.isConnected) previousFocus.focus();
+    };
+  }, [reviewOpen]);
+
   const carrera = seccion?.carrera || "Medicina";
 
   // Cargar semanas configuradas y pruebas creadas de la sección
   const loadInitialData = useCallback(async () => {
     if (!seccion?.id) return;
     setLoading(true);
+    setInitialError("");
     try {
       const [resSemanas, resQuizzes, resAsig] = await Promise.all([
-        api.semanas.getConfig(carrera).catch(() => ({ data: [] })),
-        api.pruebas.getBySeccion(seccion.id).catch(() => ({ data: [] })),
-        api.asignaciones.getBySeccion(seccion.id).catch(() => ({ data: [] }))
+        api.semanas.getConfig(carrera),
+        api.pruebas.getBySeccion(seccion.id),
+        api.asignaciones.getBySeccion(seccion.id)
       ]);
 
       if (resSemanas?.data) setSemanasConfig(resSemanas.data);
@@ -122,7 +153,7 @@ export default function ReviewQuizSubmissionsView({
       }
     } catch (err) {
       console.error("Error al cargar datos en Revisar Respuestas:", err);
-      notifyRef.current("Error al cargar la información inicial", "error");
+      setInitialError("No se pudo cargar la información de revisión. Comprueba tu conexión e inténtalo de nuevo.");
     } finally {
       setLoading(false);
     }
@@ -135,36 +166,26 @@ export default function ReviewQuizSubmissionsView({
   // Cargar entregas y detalle del cuestionario para la semana seleccionada
   const loadEntregasForSemana = useCallback(async (semana) => {
     if (!seccion?.id || !semana) return;
+    const request = ++weekRequestRef.current;
     setRefreshing(true);
+    setWeekError("");
+    setEntregasSemana([]);
+    setQuizSemanal(null);
     try {
       const [resEntregas, resQuiz] = await Promise.all([
-        api.pruebas.getEntregas(seccion.id, semana).catch(() => ({ data: [] })),
-        api.pruebas.getBySemana(seccion.id, semana).catch(() => ({ data: null }))
+        api.pruebas.getEntregas(seccion.id, semana),
+        api.pruebas.getBySemana(seccion.id, semana)
       ]);
-
-      if (resEntregas?.data && Array.isArray(resEntregas.data)) {
-        setEntregasSemana(resEntregas.data);
-      } else {
-        setEntregasSemana([]);
-      }
-
-      if (resQuiz?.data) {
-        setQuizSemanal(resQuiz.data);
-      } else {
-        setQuizSemanal(null);
-      }
+      if (request !== weekRequestRef.current) return;
+      setEntregasSemana(Array.isArray(resEntregas?.data) ? resEntregas.data : []);
+      setQuizSemanal(resQuiz?.data || null);
     } catch (err) {
-      console.warn("Aviso al consultar entregas de la semana:", err.message);
+      if (request !== weekRequestRef.current) return;
+      setWeekError("No se pudieron cargar la prueba y sus entregas. Intenta actualizar de nuevo.");
     } finally {
-      setRefreshing(false);
+      if (request === weekRequestRef.current) setRefreshing(false);
     }
   }, [seccion?.id]);
-
-  useEffect(() => {
-    if (selectedSemana) {
-      loadEntregasForSemana(selectedSemana);
-    }
-  }, [selectedSemana, loadEntregasForSemana]);
 
   // Semanas disponibles con prueba creada o configurada (todas)
   const allAvailableWeeks = useMemo(() => {
@@ -219,6 +240,14 @@ export default function ReviewQuizSubmissionsView({
       )
     );
   }, [allAvailableWeeks, hasFullAccess, asignaciones, currentUser, seccion]);
+
+  const selectedWeekAllowed = availableWeeks.some(w => w.numero_semana === selectedSemana);
+  useEffect(() => {
+    if (!loading && !initialError && selectedWeekAllowed) {
+      loadEntregasForSemana(selectedSemana);
+    }
+    return () => { weekRequestRef.current += 1; };
+  }, [selectedSemana, selectedWeekAllowed, loadEntregasForSemana, loading, initialError]);
 
   // Asegurar que la semana seleccionada pertenezca a availableWeeks
   useEffect(() => {
@@ -473,7 +502,7 @@ export default function ReviewQuizSubmissionsView({
         nota_obtenida: cleanNotaOficial,
         nota_real: cleanNotaReal,
         nota_con_bonus: cleanNotaReal,
-        comentarios: (selectedEntrega?.comentarios || ""),
+        comentarios: comentariosInput.trim(),
         calificado_por: instructorName,
         carrera: seccion?.carrera || "Medicina",
         evaluaciones_incisos: evaluaciones
@@ -867,500 +896,71 @@ export default function ReviewQuizSubmissionsView({
     }
   };
 
-  if (loading) {
-    return (
-      <div
-        className="glass-panel"
-        style={{
-          padding: "3.5rem",
-          background: "#ffffff",
-          borderRadius: "1rem",
-          border: "1px solid #e2e8f0",
-          textAlign: "center",
-          color: "#64748b",
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          gap: "1rem"
-        }}
-      >
-        <RefreshCw size={28} className="animate-spin" color="#0284c7" />
-        <span style={{ fontSize: "0.95rem", fontWeight: 700 }}>
-          Cargando módulo de revisión de respuestas...
-        </span>
-      </div>
-    );
-  }
+  const assignedName = getAssignedRecordForWeek(asignaciones,
+    [SECTION_ROLES.PRUEBAS, SECTION_ROLES.PRUEBAS_LEGACY], selectedSemana)?.instructor_nombre;
+  const progress = stats.total ? Math.round(stats.calificados / stats.total * 100) : 0;
 
   return (
-    <div className="glass-panel animate-fade-in" style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
-      {/* 1. Cabecera Principal */}
-      <div
-        style={{
-          padding: "1.5rem 1.75rem",
-          background: "#ffffff",
-          borderRadius: "1.1rem",
-          border: "1px solid #e2e8f0",
-          boxShadow: "0 4px 20px -2px rgba(0, 0, 0, 0.05)",
-          display: "flex",
-          flexDirection: "column",
-          gap: "1.25rem"
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "1rem" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "0.85rem" }}>
-            {!hideBackButton && (
-              <button
-                type="button"
-                onClick={onClose}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  width: "38px",
-                  height: "38px",
-                  borderRadius: "0.6rem",
-                  border: "1.5px solid #cbd5e1",
-                  background: "#ffffff",
-                  color: "#334155",
-                  cursor: "pointer",
-                  transition: "all 0.15s ease"
-                }}
-                title="Volver al panel de la sección"
-              >
-                <ArrowLeft size={20} />
-              </button>
-            )}
-
-            <div
-              style={{
-                width: "44px",
-                height: "44px",
-                borderRadius: "0.75rem",
-                background: "linear-gradient(135deg, #10b981 0%, #059669 100%)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                color: "#ffffff",
-                boxShadow: "0 4px 12px rgba(16, 185, 129, 0.25)"
-              }}
-            >
-              <Award size={24} />
-            </div>
-
-            <div>
-              <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
-                <h2 style={{ margin: 0, fontSize: "1.3rem", fontWeight: 900, color: "#0f172a" }}>
-                  Revisar Respuestas de Pruebas Semanales
-                </h2>
-                <span
-                  style={{
-                    background: "#ecfdf5",
-                    color: "#047857",
-                    fontWeight: 800,
-                    fontSize: "0.75rem",
-                    padding: "0.2rem 0.6rem",
-                    borderRadius: "0.4rem",
-                    border: "1px solid #a7f3d0"
-                  }}
-                >
-                  {seccion?.codigo}
-                </span>
-              </div>
-              <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", fontSize: "0.82rem", color: "#64748b", marginTop: "0.2rem" }}>
-                <span>{carrera}</span>
-                <span>•</span>
-                <span>Escala Oficial: <strong>0.000 a 5.000 pts</strong></span>
-                <span>•</span>
-                <span>La nota asignada se sincroniza al instante en el portal del alumno y el libro de calificaciones</span>
-              </div>
-            </div>
-          </div>
-
-          <button
-            type="button"
-            onClick={() => loadEntregasForSemana(selectedSemana)}
-            disabled={refreshing}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "0.4rem",
-              padding: "0.5rem 1rem",
-              borderRadius: "0.6rem",
-              border: "1.5px solid #cbd5e1",
-              background: "#ffffff",
-              color: "#334155",
-              fontSize: "0.82rem",
-              fontWeight: 700,
-              cursor: refreshing ? "not-allowed" : "pointer"
-            }}
-          >
-            <RefreshCw size={15} className={refreshing ? "animate-spin" : ""} />
-            <span>{refreshing ? "Actualizando..." : "Refrescar Entregas"}</span>
-          </button>
-        </div>
-
-        {availableWeeks.length === 0 ? (
-          <div
-            style={{
-              background: "#ffffff",
-              border: "1.5px dashed #cbd5e1",
-              borderRadius: "1rem",
-              padding: "3.5rem 2rem",
-              textAlign: "center",
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              gap: "1rem"
-            }}
-          >
-            <div
-              style={{
-                width: "56px",
-                height: "56px",
-                borderRadius: "50%",
-                background: "#f8fafc",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                color: "#64748b",
-                border: "1px solid #e2e8f0"
-              }}
-            >
-              <HelpCircle size={28} />
-            </div>
-            <h3 style={{ margin: 0, fontSize: "1.2rem", fontWeight: 800, color: "#1e293b" }}>
-              No tienes semanas asignadas para revisar pruebas
-            </h3>
-            <p style={{ margin: 0, fontSize: "0.88rem", color: "#64748b", maxWidth: "480px", lineHeight: 1.5 }}>
-              En esta sección no tienes asignado el rol oficial de <strong>Revisión de prueba semanal</strong> en ninguna semana. Si requieres acceso para revisar y calificar respuestas, contacta al titular de sección ({seccion?.coordinador || "Titular de sección"}).
-            </p>
-          </div>
-        ) : (
-          <>
-            {/* Selector de Semana en Formato Pills */}
-            <div>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "0.5rem", marginBottom: "0.5rem" }}>
-                <span style={{ fontSize: "0.76rem", fontWeight: 800, color: "#64748b", textTransform: "uppercase" }}>
-                  Selecciona la Semana a Revisar:
-                </span>
-
-                {/* Docente asignado a la revisión de esta semana */}
-                {(() => {
-                  const assignedRecord = getAssignedRecordForWeek(
-                    asignaciones,
-                    [SECTION_ROLES.PRUEBAS, SECTION_ROLES.PRUEBAS_LEGACY],
-                    selectedSemana
-                  );
-                  const assignedName = assignedRecord?.instructor_nombre || null;
-                  return (
-                    <div
-                      style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: "0.35rem",
-                        fontSize: "0.74rem",
-                        fontWeight: 800,
-                        padding: "0.2rem 0.65rem",
-                        borderRadius: "9999px",
-                        background: assignedName ? "#ecfdf5" : "#f8fafc",
-                        color: assignedName ? "#047857" : "#64748b",
-                        border: `1px solid ${assignedName ? "#a7f3d0" : "#e2e8f0"}`
-                      }}
-                    >
-                      <User size={13} color={assignedName ? "#059669" : "#94a3b8"} />
-                      <span>{assignedName ? `Docente asignado: ${assignedName}` : "Sin docente asignado"}</span>
-                    </div>
-                  );
-                })()}
-              </div>
-
-              <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", overflowX: "auto", paddingBottom: "0.25rem" }}>
-            {availableWeeks.map((w) => {
-              const isSelected = selectedSemana === w.numero_semana;
-              return (
-                <button
-                  key={w.numero_semana}
-                  type="button"
-                  onClick={() => setSelectedSemana(w.numero_semana)}
-                  style={{
-                    padding: "0.55rem 1rem",
-                    borderRadius: "0.6rem",
-                    border: isSelected ? "2px solid #10b981" : "1.5px solid #e2e8f0",
-                    background: isSelected ? "#ecfdf5" : "#ffffff",
-                    color: isSelected ? "#065f46" : "#334155",
-                    fontSize: "0.85rem",
-                    fontWeight: isSelected ? 900 : 700,
-                    cursor: "pointer",
-                    whiteSpace: "nowrap",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "0.45rem",
-                    transition: "all 0.15s ease",
-                    boxShadow: isSelected ? "0 2px 8px rgba(16, 185, 129, 0.15)" : "none"
-                  }}
-                >
-                  <span>{w.nombre_semana}</span>
-                  {w.tienePrueba && (
-                    <span
-                      style={{
-                        fontSize: "0.65rem",
-                        padding: "0.1rem 0.35rem",
-                        borderRadius: "9999px",
-                        background: isSelected ? "#059669" : "#e2e8f0",
-                        color: isSelected ? "#ffffff" : "#475569",
-                        fontWeight: 800
-                      }}
-                    >
-                      Prueba
-                    </span>
-                  )}
-                </button>
-              );
-            })}
+    <section className="user-directory quiz-review" aria-labelledby="quiz-review-title">
+      <header className="quiz-review__header">
+        <div className="quiz-review__heading">
+          {!hideBackButton && <button type="button" className="user-button" onClick={onClose} aria-label="Volver al panel de la sección"><ArrowLeft size={18} /></button>}
+          <div>
+            <span className="quiz-review__eyebrow">EVALUACIÓN SEMANAL · {seccion?.codigo} · {carrera}</span>
+            <h2 id="quiz-review-title">Revisar respuestas de pruebas semanales</h2>
+            <p>Revisa las respuestas y acompaña el avance de tu sección.</p>
           </div>
         </div>
+        <button type="button" className="user-button" disabled={loading || refreshing || (!initialError && !selectedWeekAllowed)} onClick={() => initialError ? loadInitialData() : loadEntregasForSemana(selectedSemana)}>
+          <RefreshCw size={17} className={loading || refreshing ? "animate-spin" : ""} />
+          {refreshing ? "Actualizando…" : "Actualizar entregas"}
+        </button>
+      </header>
 
-        {/* Métricas de la Semana Seleccionada */}
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-            gap: "0.85rem"
-          }}
-        >
-          <div style={{ padding: "0.85rem 1.1rem", borderRadius: "0.75rem", background: "#f8fafc", border: "1px solid #e2e8f0" }}>
-            <span style={{ fontSize: "0.72rem", color: "#64748b", fontWeight: 700, textTransform: "uppercase" }}>
-              Total Entregas Recibidas
-            </span>
-            <div style={{ fontSize: "1.4rem", fontWeight: 900, color: "#0f172a", marginTop: "0.15rem" }}>
-              {stats.total} {stats.total === 1 ? "alumno" : "alumnos"}
+      {loading ? <div className="quiz-review__empty" role="status"><RefreshCw size={26} className="animate-spin" /><h3>Cargando revisión de respuestas…</h3></div>
+      : initialError ? <div className="quiz-review__error" role="alert"><AlertCircle size={22} /><p>{initialError}</p><button type="button" className="user-button" onClick={loadInitialData}>Reintentar</button></div>
+      : availableWeeks.length === 0 ? <div className="quiz-review__empty"><Calendar size={30} /><h3>No tienes semanas asignadas para revisar</h3><p>Solicita la asignación de revisión de prueba semanal al titular de la sección ({seccion?.coordinador || "Titular de sección"}).</p></div>
+      : <>
+        <div className="quiz-review__selection">
+          <label htmlFor="quiz-review-week">Semana a revisar
+            <select id="quiz-review-week" value={selectedSemana} onChange={e => setSelectedSemana(Number(e.target.value))}>
+              {availableWeeks.map(w => <option key={w.numero_semana} value={w.numero_semana}>{w.nombre_semana}{w.tienePrueba ? " · Con prueba" : " · Sin prueba creada"}</option>)}
+            </select>
+          </label>
+          <div><span className="quiz-review__eyebrow">RESPONSABLE DE REVISIÓN</span><p><User size={16} />{assignedName || "Sin docente asignado"}</p></div>
+          <p className="quiz-review__scale"><Award size={19} /><span>Escala oficial <strong>0.000 – 5.000 pts</strong><small>Las notas guardadas se sincronizan con el portal y el libro.</small></span></p>
+        </div>
+        {refreshing ? <div className="quiz-review__empty" role="status"><RefreshCw size={26} className="animate-spin" /><h3>Cargando entregas de la semana {selectedSemana}…</h3></div>
+        : weekError ? <div className="quiz-review__error" role="alert"><AlertCircle size={22} /><p>{weekError}</p><button type="button" className="user-button" onClick={() => loadEntregasForSemana(selectedSemana)}>Reintentar</button></div>
+        : <>
+          <dl className="quiz-review__stats">
+            <div><dt><FileText size={17} />Entregas recibidas</dt><dd>{stats.total}<small>estudiantes</small></dd></div>
+            <div><dt><Clock size={17} />Pendientes de calificar</dt><dd>{stats.pendientes}<small>por revisar</small></dd></div>
+            <div><dt><CheckCircle2 size={17} />Calificadas</dt><dd>{stats.calificados}<small>de {stats.total} entregas</small></dd></div>
+          </dl>
+          <div className="quiz-review__progress"><span>Avance de revisión <strong>{progress}%</strong></span><progress value={stats.calificados} max={stats.total || 1} aria-label="Avance de revisión" /></div>
+          {entregasSemana.length > 0 && <aside className="quiz-review__quick">
+            <div className="quiz-review__quick-icon"><Zap size={24} /></div>
+            <div><h3>Revisión rápida por pregunta</h3><p>Revisa la misma pregunta para todos los estudiantes y continúa con la siguiente, incluido el bonus.</p><small>Incluye las {stats.total} entregas de esta semana, sin aplicar los filtros del listado.</small></div>
+            <button type="button" className="user-button user-button--primary" disabled={!quizSemanal?.preguntas?.length} onClick={handleOpenQuickReview}>Iniciar revisión rápida<ChevronRight size={17} /></button>
+          </aside>}
+          <div className="quiz-review__filters">
+            <label className="quiz-review__search" htmlFor="quiz-review-search"><span>Buscar estudiante</span><div><Search size={18} /><input id="quiz-review-search" type="search" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} placeholder="Nombre o número de cuenta" /></div></label>
+            <div className="quiz-review__tabs" role="group" aria-label="Filtrar entregas por estado">
+              {[["todos", "Todos", stats.total], ["pendientes", "Pendientes", stats.pendientes], ["calificados", "Calificados", stats.calificados]].map(([value, label, count]) => <button type="button" key={value} aria-pressed={filterStatus === value} onClick={() => setFilterStatus(value)}>{label}<span>{count}</span></button>)}
             </div>
           </div>
-
-          <div style={{ padding: "0.85rem 1.1rem", borderRadius: "0.75rem", background: "#fffbeb", border: "1px solid #fde68a" }}>
-            <span style={{ fontSize: "0.72rem", color: "#b45309", fontWeight: 800, textTransform: "uppercase" }}>
-              ⏳ Pendientes de Calificar
-            </span>
-            <div style={{ fontSize: "1.4rem", fontWeight: 900, color: "#b45309", marginTop: "0.15rem" }}>
-              {stats.pendientes}
-            </div>
-          </div>
-
-          <div style={{ padding: "0.85rem 1.1rem", borderRadius: "0.75rem", background: "#ecfdf5", border: "1px solid #a7f3d0" }}>
-            <span style={{ fontSize: "0.72rem", color: "#047857", fontWeight: 800, textTransform: "uppercase" }}>
-              ✅ Pruebas Calificadas
-            </span>
-            <div style={{ fontSize: "1.4rem", fontWeight: 900, color: "#047857", marginTop: "0.15rem" }}>
-              {stats.calificados}
-            </div>
-          </div>
-        </div>
-        </>
-        )}
-      </div>
-
-      {availableWeeks.length > 0 && (
-      <>
-      {/* 2. Filtros y Búsqueda */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          flexWrap: "wrap",
-          gap: "1rem",
-          background: "#ffffff",
-          padding: "1rem 1.25rem",
-          borderRadius: "0.9rem",
-          border: "1px solid #e2e8f0"
-        }}
-      >
-        <div style={{ position: "relative", minWidth: "260px", flex: 1 }}>
-          <Search size={16} color="#94a3b8" style={{ position: "absolute", left: "0.75rem", top: "50%", transform: "translateY(-50%)" }} />
-          <input
-            type="text"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            placeholder="Buscar estudiante por nombre o número de cuenta..."
-            style={{
-              width: "100%",
-              padding: "0.55rem 0.75rem 0.55rem 2.2rem",
-              borderRadius: "0.55rem",
-              border: "1.5px solid #cbd5e1",
-              fontSize: "0.85rem",
-              outline: "none"
-            }}
-          />
-        </div>
-
-        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-          <button
-            type="button"
-            onClick={() => setFilterStatus("todos")}
-            style={{
-              padding: "0.45rem 0.85rem",
-              borderRadius: "0.5rem",
-              border: filterStatus === "todos" ? "1.5px solid #0284c7" : "1px solid #cbd5e1",
-              background: filterStatus === "todos" ? "#f0f9ff" : "#ffffff",
-              color: filterStatus === "todos" ? "#0284c7" : "#475569",
-              fontSize: "0.8rem",
-              fontWeight: 800,
-              cursor: "pointer"
-            }}
-          >
-            Todos ({stats.total})
-          </button>
-          <button
-            type="button"
-            onClick={() => setFilterStatus("pendientes")}
-            style={{
-              padding: "0.45rem 0.85rem",
-              borderRadius: "0.5rem",
-              border: filterStatus === "pendientes" ? "1.5px solid #f59e0b" : "1px solid #cbd5e1",
-              background: filterStatus === "pendientes" ? "#fffbeb" : "#ffffff",
-              color: filterStatus === "pendientes" ? "#b45309" : "#475569",
-              fontSize: "0.8rem",
-              fontWeight: 800,
-              cursor: "pointer"
-            }}
-          >
-            Pendientes ({stats.pendientes})
-          </button>
-          <button
-            type="button"
-            onClick={() => setFilterStatus("calificados")}
-            style={{
-              padding: "0.45rem 0.85rem",
-              borderRadius: "0.5rem",
-              border: filterStatus === "calificados" ? "1.5px solid #10b981" : "1px solid #cbd5e1",
-              background: filterStatus === "calificados" ? "#ecfdf5" : "#ffffff",
-              color: filterStatus === "calificados" ? "#047857" : "#475569",
-              fontSize: "0.8rem",
-              fontWeight: 800,
-              cursor: "pointer"
-            }}
-          >
-            Calificados ({stats.calificados})
-          </button>
-        </div>
-      </div>
-
-      {/* 3. Listado de Entregas */}
-      {filteredEntregas.length === 0 ? (
-        <div
-          style={{
-            padding: "3.5rem",
-            background: "#ffffff",
-            borderRadius: "1rem",
-            border: "1px solid #e2e8f0",
-            textAlign: "center",
-            color: "#64748b"
-          }}
-        >
-          <HelpCircle size={38} color="#94a3b8" style={{ margin: "0 auto 0.75rem" }} />
-          <h4 style={{ margin: "0 0 0.35rem", fontSize: "1.05rem", fontWeight: 800, color: "#0f172a" }}>
-            No se encontraron entregas de estudiantes
-          </h4>
-          <p style={{ margin: 0, fontSize: "0.85rem" }}>
-            {entregasSemana.length === 0
-              ? `Aún ningún alumno ha enviado la prueba de la Semana ${selectedSemana}.`
-              : "No hay entregas que coincidan con los filtros aplicados."}
-          </p>
-        </div>
-      ) : (
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))",
-            gap: "1.25rem"
-          }}
-        >
-          {/* TARJETA DESTACADA: REVISIÓN RÁPIDA POR REACTIVO (DISEÑO MODO CLARO) */}
-          <div
-            style={{
-              background: "linear-gradient(135deg, #f0f9ff 0%, #ffffff 100%)",
-              borderRadius: "1rem",
-              border: "2px solid #38bdf8",
-              boxShadow: "0 4px 20px -2px rgba(2, 132, 199, 0.12)",
-              padding: "1.4rem",
-              display: "flex",
-              flexDirection: "column",
-              justifyContent: "space-between",
-              gap: "1.1rem",
-              position: "relative",
-              overflow: "hidden"
-            }}
-          >
-            <div>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "0.6rem" }}>
-                <span
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: "0.3rem",
-                    fontSize: "0.72rem",
-                    fontWeight: 900,
-                    padding: "0.2rem 0.6rem",
-                    borderRadius: "9999px",
-                    background: "#e0f2fe",
-                    color: "#0284c7",
-                    border: "1px solid #bae6fd",
-                    letterSpacing: "0.05em",
-                    textTransform: "uppercase"
-                  }}
-                >
-                  <Zap size={13} color="#0284c7" />
-                  Modo Continuo
-                </span>
-                <span style={{ fontSize: "0.74rem", color: "#64748b", fontWeight: 700 }}>
-                  {entregasSemana.length} {entregasSemana.length === 1 ? "entrega" : "entregas"}
-                </span>
-              </div>
-
-              <h3 style={{ margin: "0 0 0.4rem", fontSize: "1.25rem", fontWeight: 900, color: "#0f172a" }}>
-                ⚡ Revisión Rápida
-              </h3>
-              <p style={{ margin: 0, fontSize: "0.84rem", color: "#475569", lineHeight: 1.45 }}>
-                Califica la misma pregunta para todos los estudiantes de forma ágil y consecutiva: primero la Pregunta 1 a todos, luego la 2, 3, 4, 5 y por último el reactivo Bonus.
-              </p>
-            </div>
-
-            <button
-              type="button"
-              onClick={handleOpenQuickReview}
-              disabled={entregasSemana.length === 0}
-              style={{
-                width: "100%",
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: "0.5rem",
-                padding: "0.75rem",
-                borderRadius: "0.7rem",
-                border: "none",
-                background: entregasSemana.length > 0
-                  ? "linear-gradient(135deg, #0284c7 0%, #0369a1 100%)"
-                  : "#cbd5e1",
-                color: "#ffffff",
-                fontSize: "0.88rem",
-                fontWeight: 800,
-                cursor: entregasSemana.length > 0 ? "pointer" : "not-allowed",
-                boxShadow: entregasSemana.length > 0 ? "0 4px 14px rgba(2, 132, 199, 0.28)" : "none",
-                transition: "all 0.15s ease"
-              }}
-            >
-              <Zap size={16} />
-              <span>{entregasSemana.length > 0 ? "Iniciar Revisión Rápida" : "Sin entregas para revisar"}</span>
-            </button>
-          </div>
-
+          <div className="quiz-review__list-heading"><h3>Entregas · Semana {selectedSemana}</h3><span role="status">{filteredEntregas.length} de {stats.total} entregas</span></div>
+          {filteredEntregas.length === 0 ? <div className="quiz-review__empty"><Search size={30} /><h3>{entregasSemana.length ? "No hay coincidencias" : quizSemanal ? "Aún no hay entregas" : "No hay prueba creada para esta semana"}</h3><p>{entregasSemana.length ? "Prueba con otro nombre, cuenta o estado." : quizSemanal ? "Las respuestas aparecerán aquí cuando los estudiantes envíen su prueba." : "Cuando se cree la prueba y se reciban respuestas podrás revisarlas aquí."}</p>{entregasSemana.length > 0 && <button type="button" className="user-button" onClick={() => { setSearchTerm(""); setFilterStatus("todos"); }}>Limpiar filtros</button>}</div> : (
+        <div className="quiz-review__list">
           {filteredEntregas.map((entrega) => {
             const isGraded = entrega.estado === "calificado";
 
             return (
               <div
                 key={entrega.id}
+                className="quiz-review__card"
+                data-graded={isGraded}
                 style={{
                   background: "#ffffff",
                   borderRadius: "1rem",
@@ -1466,7 +1066,7 @@ export default function ReviewQuizSubmissionsView({
                           title="Sin salidas de pantalla ni infracciones detectadas"
                         >
                           <CheckCircle2 size={12} />
-                          <span>100% Limpio (Sin salidas)</span>
+                          <span>Sin salidas de pantalla</span>
                         </span>
                       )}
 
@@ -1594,15 +1194,15 @@ export default function ReviewQuizSubmissionsView({
           })}
         </div>
       )}
-      </>
-      )}
+        </>}
+      </>}
 
       {/* =================================================================== */}
       {/* 4. MODAL INTERACTIVO DE REVISIÓN Y CALIFICACIÓN (PORTAL GLOBAL)      */}
       {/* =================================================================== */}
       {selectedEntrega && createPortal(
         <div
-          className="animate-fade-in"
+          className="quiz-review-overlay animate-fade-in"
           style={{
             position: "fixed",
             inset: 0,
@@ -1623,6 +1223,8 @@ export default function ReviewQuizSubmissionsView({
           }}
         >
           <div
+            className="quiz-review-dialog quiz-review-dialog--individual"
+            role="dialog" aria-modal="true" aria-label={`Revisión de prueba de ${selectedEntrega.nombre_completo || "Estudiante"}`} tabIndex={-1}
             style={{
               background: "#ffffff",
               borderRadius: "1.2rem",
@@ -1687,6 +1289,7 @@ export default function ReviewQuizSubmissionsView({
 
               <button
                 type="button"
+                aria-label="Cerrar revisión"
                 onClick={handleCloseGradeModal}
                 disabled={savingGrade}
                 style={{
@@ -2670,6 +2273,7 @@ export default function ReviewQuizSubmissionsView({
 
             {/* Footer / Panel de Calificación */}
             <form
+              className="quiz-review-dialog__grade"
               onSubmit={handleSaveGrade}
               style={{
                 padding: "1.25rem 1.5rem",
@@ -2681,7 +2285,7 @@ export default function ReviewQuizSubmissionsView({
               }}
             >
               {gradeError && (
-                <div
+                <div role="alert"
                   style={{
                     padding: "0.6rem 0.9rem",
                     borderRadius: "0.5rem",
@@ -2700,7 +2304,7 @@ export default function ReviewQuizSubmissionsView({
               <div
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "1fr 1fr",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 240px), 1fr))",
                   gap: "0.65rem"
                 }}
               >
@@ -2799,6 +2403,10 @@ export default function ReviewQuizSubmissionsView({
                 </div>
               </div>
 
+              <label className="quiz-review-dialog__feedback" htmlFor="quiz-review-feedback">
+                Comentarios para el estudiante
+                <textarea id="quiz-review-feedback" rows={3} value={comentariosInput} onChange={event => setComentariosInput(event.target.value)} disabled={savingGrade} placeholder="Añade una observación sobre esta entrega (opcional)" />
+              </label>
               {/* Botones de acción */}
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "0.75rem", borderTop: "1px solid #e2e8f0", paddingTop: "0.55rem" }}>
                 <button
@@ -2878,7 +2486,7 @@ export default function ReviewQuizSubmissionsView({
       {/* =================================================================== */}
       {showQuickReviewModal && createPortal(
         <div
-          className="animate-fade-in"
+          className="quiz-review-overlay animate-fade-in"
           style={{
             position: "fixed",
             inset: 0,
@@ -2896,7 +2504,8 @@ export default function ReviewQuizSubmissionsView({
           }}
         >
           <div
-            className="animate-scale-in"
+            className="quiz-review-dialog quiz-review-dialog--quick animate-scale-in"
+            role="dialog" aria-modal="true" aria-label="Revisión rápida por pregunta" tabIndex={-1}
             style={{
               background: "#ffffff",
               borderRadius: "1.25rem",
@@ -3168,7 +2777,7 @@ export default function ReviewQuizSubmissionsView({
                         </span>
 
                         {/* Pills de Preguntas (Navegables) */}
-                        <div style={{ display: "flex", alignItems: "center", gap: "0.3rem", marginLeft: "0.5rem" }}>
+                        <div className="quiz-review-dialog__questions" style={{ display: "flex", alignItems: "center", gap: "0.3rem", marginLeft: "0.5rem" }}>
                           {(quizSemanal?.preguntas || []).map((q, idx) => {
                             const isCur = idx === quickQuestionIdx;
                             const isPast = idx < quickQuestionIdx;
@@ -3314,7 +2923,7 @@ export default function ReviewQuizSubmissionsView({
                     <div
                       style={{
                         display: "grid",
-                        gridTemplateColumns: "repeat(auto-fit, minmax(420px, 1fr))",
+                        gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 420px), 1fr))",
                         gap: "1.25rem",
                         alignItems: "start"
                       }}
@@ -3821,7 +3430,7 @@ export default function ReviewQuizSubmissionsView({
                     </div>
 
                     {/* Botones de Navegación */}
-                    <div style={{ display: "flex", alignItems: "center", gap: "0.6rem" }}>
+                    <div className="quiz-review-dialog__navigation" style={{ display: "flex", alignItems: "center", gap: "0.6rem" }}>
                       <button
                         type="button"
                         onClick={handleQuickPrevious}
@@ -3894,6 +3503,6 @@ export default function ReviewQuizSubmissionsView({
         </div>,
         document.body
       )}
-    </div>
+    </section>
   );
 }
