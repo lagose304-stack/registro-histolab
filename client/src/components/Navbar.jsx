@@ -39,7 +39,7 @@ export default function Navbar({
       boxShadow: "0 1px 3px rgba(0, 0, 0, 0.03)"
     }}>
       <div
-        className="navbar-container"
+        className={`navbar-container${isStudent ? " navbar-container--student" : ""}`}
         style={{
           maxWidth: "1380px",
           margin: "0 auto",

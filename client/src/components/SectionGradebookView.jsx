@@ -1502,7 +1502,7 @@ export default function SectionGradebookView({
                             width: "50px"
                           }}
                         >
-                          {formatGradeValue(getStudentCalculatedTotal(est))}
+                          {formatGradeValue(getStudentCalculatedTotal(est), 2)}
                         </td>
                       )}
 
@@ -1521,7 +1521,7 @@ export default function SectionGradebookView({
                           }}
                           title={`Nota Oro Manuales: ${calcularNotaOroManuales(est)} pts`}
                         >
-                          {formatGradeValue(calcularNotaOroManuales(est))}
+                          {formatGradeValue(calcularNotaOroManuales(est), 2)}
                         </td>
                       )}
 
@@ -1540,7 +1540,7 @@ export default function SectionGradebookView({
                           }}
                           title={`Nota Oro Pruebas: ${calcularNotaOroPruebas(est)} pts`}
                         >
-                          {formatGradeValue(calcularNotaOroPruebas(est))}
+                          {formatGradeValue(calcularNotaOroPruebas(est), 2)}
                         </td>
                       )}
 

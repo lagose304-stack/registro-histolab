@@ -115,3 +115,10 @@ assert.equal(row.estado, "en_pregunta", "Un vencimiento atrasado no cierra la nu
 assert.equal(row.pregunta_actual_idx, 2);
 assert.ok(row.respuestas_globales["pilot-A"], "Los comandos docentes conservan las respuestas");
 console.log("PASS: latido atrasado, respuestas simultáneas y vencimiento concurrente sin retrocesos ni pérdida de respuestas.");
+
+await call(heartbeatLiveQuiz, { numero_cuenta:"pilot-integrity",integridad:{strikes:2,tiempo_fuera_segundos:8} });
+await until(()=>row.alumnos_conectados["pilot-integrity"]?.integridad?.strikes===2);
+await call(heartbeatLiveQuiz, { numero_cuenta:"pilot-integrity",integridad:{strikes:0,tiempo_fuera_segundos:0} });
+await until(()=>row.alumnos_conectados["pilot-integrity"]?.integridad?.strikes===2);
+assert.equal(row.alumnos_conectados["pilot-integrity"].integridad.tiempo_fuera_segundos,8);
+console.log("PASS: un latido posterior no reduce los contadores de integridad respaldados.");

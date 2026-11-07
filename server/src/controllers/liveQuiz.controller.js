@@ -69,7 +69,8 @@ async function fetchSessionFromSupabase(seccion_id, semana) {
       .eq("numero_semana", semNum)
       .maybeSingle();
 
-    if (!error && data) {
+    if (error) throw error;
+    if (data) {
       return {
         seccion_id: String(data.seccion_id),
         numero_semana: Number(data.numero_semana),
@@ -86,6 +87,7 @@ async function fetchSessionFromSupabase(seccion_id, semana) {
     }
   } catch (err) {
     console.warn("Aviso al consultar sesión en vivo de Supabase:", err.message);
+    throw err;
   }
   return null;
 }
@@ -166,7 +168,11 @@ async function persistStudentHeartbeat(session, account) {
     const previousVersion = new Date(data.updated_at).getTime();
     const { data: saved, error: writeError } = await supabase.from("sesiones_pruebas_en_vivo")
       .update({
-        alumnos_conectados: { ...data.alumnos_conectados, [account]: presence },
+        alumnos_conectados: { ...data.alumnos_conectados, [account]: { ...presence, integridad: {
+          ...(presence.integridad || {}),
+          strikes: Math.max(previous?.integridad?.strikes || 0,presence.integridad?.strikes || 0),
+          tiempo_fuera_segundos: Math.max(previous?.integridad?.tiempo_fuera_segundos || 0,presence.integridad?.tiempo_fuera_segundos || 0)
+        } } },
         respuestas_globales: { ...data.respuestas_globales, ...(answers ? { [account]: { ...data.respuestas_globales?.[account], ...answers } } : {}) },
         updated_at: new Date(Math.max(Date.now(), previousVersion + 1)).toISOString()
       }).eq("seccion_id", session.seccion_id).eq("numero_semana", session.numero_semana)
@@ -189,14 +195,16 @@ async function getOrCreateSession(seccion_id, semana) {
 
   if (sbSession) {
     // Si tenemos datos en memoria con pings de alumnos, fusionarlos para no perder latidos recientes
-    const mergedConnected = {
-      ...(sbSession.alumnos_conectados || {}),
-      ...(memSession?.alumnos_conectados || {})
-    };
-    const mergedAnswers = {
-      ...(sbSession.respuestas_globales || {}),
-      ...(memSession?.respuestas_globales || {})
-    };
+    const mergedConnected = { ...(sbSession.alumnos_conectados || {}) };
+    const mergedAnswers = { ...(sbSession.respuestas_globales || {}) };
+    if (sbSession.estado !== "inactiva") {
+      for (const [account,presence] of Object.entries(memSession?.alumnos_conectados || {})) {
+        if (presence?.ultimo_ping > (mergedConnected[account]?.ultimo_ping || 0)) {
+          mergedConnected[account] = presence;
+          if (memSession.respuestas_globales?.[account]) mergedAnswers[account] = memSession.respuestas_globales[account];
+        }
+      }
+    }
 
     liveSessions[key] = {
       ...sbSession,
@@ -207,7 +215,7 @@ async function getOrCreateSession(seccion_id, semana) {
   }
 
   // 2. Si no existe en Supabase pero existe en memoria local
-  if (memSession) {
+  if (memSession && !(isSupabaseConfigured && supabase)) {
     return memSession;
   }
 
@@ -393,6 +401,8 @@ function checkSectionScheduleBackend(sec) {
   return { isWithin: true };
 }
 
+export const getLiveQuizEvidence = (sectionId, week) => getOrCreateSession(sectionId, week);
+
 // 2. Control maestro de la sesión en vivo (Acciones del Docente / Coordinador)
 export const controlLiveQuiz = async (req, res) => {
   try {
@@ -542,7 +552,12 @@ export const heartbeatLiveQuiz = async (req, res) => {
       ultimo_ping: now,
       pregunta_vista: typeof pregunta_vista === "number" ? pregunta_vista : -1,
       ha_respondido: Boolean(ha_respondido),
-      ip: req.headers["x-forwarded-for"] || req.socket?.remoteAddress || "127.0.0.1"
+      ip: req.headers["x-forwarded-for"] || req.socket?.remoteAddress || "127.0.0.1",
+      integridad: {
+        strikes: Math.max(session.alumnos_conectados[cleanAccount]?.integridad?.strikes || 0, Math.min(3, Math.max(0, Number(req.body.integridad?.strikes) || 0))),
+        tiempo_fuera_segundos: Math.max(session.alumnos_conectados[cleanAccount]?.integridad?.tiempo_fuera_segundos || 0, Math.min(86400, Math.max(0, Number(req.body.integridad?.tiempo_fuera_segundos) || 0))),
+        origen: "cliente_no_verificado"
+      }
     };
 
     // Respaldar respuestas parciales si se enviaron
@@ -603,7 +618,8 @@ export const heartbeatLiveQuiz = async (req, res) => {
         total_conectados: activeStudentsList.length,
         respuestas_recibidas_count: respondieronCount,
         todos_respondieron: activeStudentsList.length > 0 && respondieronCount >= activeStudentsList.length,
-        server_time: now
+        server_time: now,
+        integridad: session.alumnos_conectados[cleanAccount].integridad
       }
     });
   } catch (err) {
@@ -625,7 +641,7 @@ export const getActiveLiveQuiz = async (req, res) => {
     const secClean = String(seccion_id).trim();
 
     // 1. Revisar memoria local activa del worker
-    for (const key in liveSessions) {
+    for (const key of (isSupabaseConfigured && supabase ? [] : Object.keys(liveSessions))) {
       const sess = liveSessions[key];
       if (
         sess &&
@@ -654,7 +670,8 @@ export const getActiveLiveQuiz = async (req, res) => {
         .order("updated_at", { ascending: false })
         .limit(1);
 
-      if (!error && data && data.length > 0) {
+      if (error) throw error;
+      if (data && data.length > 0) {
         const row = data[0];
         const session = {
           seccion_id: String(row.seccion_id),
@@ -707,6 +724,6 @@ export const getActiveLiveQuiz = async (req, res) => {
     });
   } catch (err) {
     console.warn("Aviso en getActiveLiveQuiz:", err.message);
-    return res.json({ success: true, activa: false });
+    return res.status(503).json({ success: false, activa: false, message: "No pudimos verificar la sesión en vivo. Reintenta." });
   }
 };

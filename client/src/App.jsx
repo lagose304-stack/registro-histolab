@@ -200,7 +200,7 @@ export default function App() {
   // 1. Si hay sesión de Estudiante activa, mostrar su Portal con la MISMA barra superior
   if (currentStudent) {
     return (
-      <div className="app-container">
+      <div className="app-container app-container--student">
         {/* Barra Superior IDÉNTICA en ambos portales */}
         <Navbar
           currentStudent={currentStudent}

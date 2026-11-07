@@ -1,3 +1,4 @@
+import GradeInput from "./GradeInput";
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { api } from "../services/api";
 
@@ -218,16 +219,16 @@ export default function TemarioScoresWorkspace({ carrera, topics, notify }) {
           <button type="button" className="user-button" onClick={loadData}>Reintentar</button>
         </div>
       ) : (
-        <form className="temario-week-form" onSubmit={handleSave}>
+        <form data-grade-grid className="temario-week-form" onSubmit={handleSave}>
           <fieldset className="temario-week-topics">
             <legend>Trabajo de clase</legend>
             <div className="temario-form-grid">
               <label className="user-field">Total de manuales
-                <input inputMode="decimal" value={notaManuales} onChange={event => handleDecimalChange(event.target.value, setNotaManuales)} />
+                <GradeInput value={notaManuales} onValueChange={value => handleDecimalChange(value, setNotaManuales)} />
                 <small>{temasConManual.length} manuales evaluables{promedioPorManual !== null ? ` · ${promedioPorManual} puntos por manual` : ""}</small>
               </label>
               <label className="user-field">Total de pruebas
-                <input inputMode="decimal" value={notaPruebas} onChange={event => handleDecimalChange(event.target.value, setNotaPruebas)} />
+                <GradeInput value={notaPruebas} onValueChange={value => handleDecimalChange(value, setNotaPruebas)} />
                 <small>{semanasRegulares.length} semanas de clase{promedioPorPrueba !== null ? ` · ${promedioPorPrueba} puntos por prueba` : ""}</small>
               </label>
             </div>
@@ -237,8 +238,8 @@ export default function TemarioScoresWorkspace({ carrera, topics, notify }) {
             {examWeeks.length ? <div className="temario-form-grid">
               {examWeeks.map((week, index) => (
                 <label className="user-field" key={week.numero_semana}>{getExamTitle(week, index)}
-                  <input inputMode="decimal" value={examenesPuntajes[String(week.numero_semana)] ?? ""}
-                    onChange={event => handleExamScoreChange(week.numero_semana, event.target.value)} />
+                  <GradeInput value={examenesPuntajes[String(week.numero_semana)] ?? ""}
+                    onValueChange={value => handleExamScoreChange(week.numero_semana, value)} />
                   <small>Semana {week.numero_semana}{week.parcial ? ` · ${week.parcial}` : ""}</small>
                 </label>
               ))}

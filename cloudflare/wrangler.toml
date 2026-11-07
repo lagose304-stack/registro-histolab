@@ -1,0 +1,7 @@
+name = "registrohistolab"
+pages_build_output_dir = "../.wrangler/pages-site"
+compatibility_date = "2026-08-04"
+
+[[services]]
+binding = "HISTOLAB_API"
+service = "registro-histolab"

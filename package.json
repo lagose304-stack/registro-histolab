@@ -13,8 +13,11 @@
     "dev:client": "npm run dev --prefix client",
     "install:all": "npm install && npm install --prefix server && npm install --prefix client",
     "build": "npm run build --prefix client",
-    "deploy": "npm run build && wrangler deploy",
-    "start": "npm start --prefix server"
+    "deploy": "npm run deploy:worker && node scripts/prepare-pages.mjs && wrangler pages deploy --cwd cloudflare --project-name=registrohistolab --branch=main --commit-dirty=true",
+    "start": "npm start --prefix server",
+    "deploy:worker": "npm run build && wrangler deploy",
+    "build:pages": "npm run build && node scripts/prepare-pages.mjs",
+    "deploy:pages": "npm run build:pages && wrangler pages deploy --cwd cloudflare --project-name=registrohistolab --branch=main --commit-dirty=true"
   },
   "devDependencies": {
     "concurrently": "^9.1.2",

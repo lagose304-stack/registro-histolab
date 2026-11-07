@@ -6,7 +6,7 @@ import { getInstructorByIdOrEmail, getStudentByCuentaAndCarrera, getStudentSessi
 
 dotenv.config();
 
-const JWT_SECRET = process.env.JWT_SECRET || "histolab_default_secret_key_2026";
+const JWT_SECRET = process.env.JWT_SECRET;
 
 export const authenticateInstructor = async (req, res, next) => {
   try {
@@ -30,6 +30,8 @@ export const authenticateInstructor = async (req, res, next) => {
         message: "Tu sesión ha expirado o el token es inválido. Por favor ingresa nuevamente."
       });
     }
+
+    if (decoded.rol === "ESTUDIANTE") return res.status(403).json({success:false,reason:"FORBIDDEN_ROLE",message:"Se requiere una sesión de instructor."});
 
     // Obtener el instructor actual desde la base de datos o memoria
     const instructor = await getInstructorByIdOrEmail(decoded.id, decoded.email);

@@ -1,0 +1,30 @@
+// Controller integration using isolated in-memory storage only.
+import assert from "node:assert/strict";
+import vm from "node:vm";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { build } from "esbuild";
+import { createRequire } from "node:module";
+const require=createRequire(import.meta.url);
+const quizzes=[{id:'manual',seccion_id:'s',numero_semana:1,publicada:true,preguntas:[{id:'q',puntos:1,items:[]}]},{id:'auto',seccion_id:'s',numero_semana:2,publicada:true,preguntas:[{id:'q',items:[{id:'a',tipo:'verdadero_falso',instruccion:'Demo',puntos:1,respuesta_correcta:'Verdadero'}]}]}];
+const gradeUpdates=[];const rows=[];let live={estado:'en_pregunta'};
+const database={from(table){let operation='read',payload,single=false;const filters=[];const query={select(){return query},eq(key,value){filters.push([key,value]);return query},maybeSingle(){single=true;return query},insert(value){operation='insert';payload=structuredClone(value);return query},update(value){operation='update';payload=structuredClone(value);return query},async then(resolve){const data=table==='pruebas_semanales'?quizzes:rows;if(operation==='update'){const selected=data.filter(row=>filters.every(([key,value])=>row[key]===value));selected.forEach(row=>Object.assign(row,payload));return resolve({data:selected,error:null})}if(operation==='insert'){if(rows.some(row=>row.seccion_id===payload.seccion_id&&row.numero_semana===payload.numero_semana&&row.numero_cuenta===payload.numero_cuenta))return resolve({error:{code:'23505'}});rows.push(payload);return resolve({error:null})}const found=data.filter(row=>filters.every(([key,value])=>row[key]===value));return resolve({data:single?structuredClone(found[0]||null):structuredClone(found),error:null})}};return query}};
+const compiled=await build({entryPoints:[fileURLToPath(new URL('../src/controllers/pruebas.controller.js',import.meta.url))],platform:'node',format:'cjs',bundle:true,write:false,logLevel:'silent',plugins:[{name:'isolation',setup(b){b.onResolve({filter:/db\/supabase\.js$/},()=>({path:'db',namespace:'isolate'}));b.onResolve({filter:/estudiantes\.controller\.js$/},()=>({path:'grades',namespace:'isolate'}));b.onResolve({filter:/liveQuiz\.controller\.js$/},()=>({path:'live',namespace:'isolate'}));b.onResolve({filter:/^node:fs$/},()=>({path:'fs',namespace:'isolate'}));b.onLoad({filter:/.*/,namespace:'isolate'},args=>({contents:args.path==='db'?'export const isSupabaseConfigured=true,supabase=globalThis.database;':args.path==='grades'?'export const updateEstudianteGradeDirect=async(...args)=>globalThis.gradeUpdates.push(args);':args.path==='live'?'export const getLiveQuizEvidence=async()=>globalThis.getLive();':'export default {existsSync:()=>false,mkdirSync(){},writeFileSync(){}};',loader:'js'}))}}]});
+const module={exports:{}};vm.runInNewContext(compiled.outputFiles[0].text,{module,exports:module.exports,require,console,database,gradeUpdates,getLive:()=>live,process:{cwd:()=>path.resolve('server')}});
+const {submitPruebaEstudiante}=module.exports;
+async function submit(account,week,answers={q:{respuesta:'Original'}}){let status=200,payload;const req={params:{seccion_id:'s'},student:{numero_cuenta:account},body:{numero_cuenta:account,numero_semana:week,respuestas:answers,auditoria:{nota_real:999,strikes:999,origen_integridad:'servidor'}}};const res={status(value){status=value;return res},json(value){payload=value;return res}};await submitPruebaEstudiante(req,res);return {status,payload};}
+let result=await submit('manual',1);assert.equal(result.status,200);assert.equal(result.payload.data.estado,'enviado');assert.equal(result.payload.data.auditoria.strikes,3);assert.equal(result.payload.data.auditoria.origen_integridad,'declarado_por_cliente_no_prueba_de_fraude');
+result=await submit('manual',1,{q:{respuesta:'Changed'}});assert.equal(result.status,200);assert.equal(result.payload.data.respuestas.q.respuesta,'Original');
+const simultaneous=await Promise.all([submit('race',1,{q:{respuesta:'First'}}),submit('race',1,{q:{respuesta:'Second'}})]);assert(simultaneous.every(item=>item.status===200));assert.equal(rows.filter(row=>row.numero_cuenta==='race').length,1);assert.equal(simultaneous[0].payload.data.respuestas.q.respuesta,simultaneous[1].payload.data.respuestas.q.respuesta);
+result=await submit('auto',2,{q:{a:'Verdadero'}});assert.equal(result.payload.data.nota_obtenida,1);assert.equal(result.payload.data.auditoria.nota_real,1);
+live={estado:'lobby',alumnos_conectados:{early:{}}};assert.equal((await submit('early',1)).status,409);assert(!rows.some(row=>row.numero_cuenta==='early'));
+quizzes[0].publicada=false;live={estado:'en_pregunta'};assert.equal((await submit('draft',1)).status,403);
+console.log('PASS: entrega manual reintentable e inmutable, carrera concurrente, nota calculada en servidor y rechazo de borradores/entregas antes de iniciar.');
+
+async function grade(account,grade,extra={}) {const row=rows.find(item=>item.numero_cuenta===account);let status=200,payload;await module.exports.calificarEntrega({params:{entrega_id:row.id},body:{nota_obtenida:grade,comentarios:'Comentario del instructor',...extra}},{status(value){status=value;return this},json(value){payload=value;return this}});assert.equal(status,200);return payload.data;}
+let graded=await grade('manual',.875,{evaluaciones_incisos:{q___direct:{estado:'regular',puntos_obtenidos:.875}}});
+assert.equal(graded.estado,'calificado');assert.equal(graded.nota_obtenida,.875);assert.equal(graded.comentarios,'Comentario del instructor');
+assert(gradeUpdates.some(args=>args[1]==='manual'&&args[3]==='prueba_1'&&args[4]===.875));
+graded=await grade('auto',5,{evaluaciones_incisos:{q___a:{estado:'mala',puntos_obtenidos:0}}});assert.equal(graded.nota_obtenida,1,'Las correcciones automáticas no se reemplazan al guardar la revisión');
+assert(gradeUpdates.some(args=>args[1]==='auto'&&args[3]==='prueba_2'&&args[4]===1));
+console.log('PASS: revisión del instructor guarda comentario y milésimas, sincroniza notas y conserva la corrección automática.');

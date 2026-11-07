@@ -100,7 +100,7 @@ DROP POLICY IF EXISTS "Acceso total para API en pruebas_semanales" ON public.pru
 CREATE POLICY "Acceso total para API en pruebas_semanales" 
     ON public.pruebas_semanales 
     FOR ALL 
-    TO public 
+    TO service_role
     USING (true) 
     WITH CHECK (true);
 
@@ -109,7 +109,7 @@ DROP POLICY IF EXISTS "Acceso total para API en entregas_pruebas" ON public.entr
 CREATE POLICY "Acceso total para API en entregas_pruebas" 
     ON public.entregas_pruebas 
     FOR ALL 
-    TO public 
+    TO service_role
     USING (true) 
     WITH CHECK (true);
 

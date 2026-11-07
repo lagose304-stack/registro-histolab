@@ -1,3 +1,5 @@
+import { getLiveQuizEvidence } from "./liveQuiz.controller.js";
+import { sanitizeClientAudit } from "../middlewares/quizPrivacy.mjs";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -425,13 +427,34 @@ async function syncAutomaticStudentGrade(submission) {
   await updateEstudianteGradeDirect(submission.seccion_id,submission.numero_cuenta,submission.carrera,`prueba_${submission.numero_semana}_real`,submission.nota_real ?? submission.nota_obtenida,true);
 }
 
+export async function getQuizSubmissionForAccess(id) {
+  if (isSupabaseConfigured && supabase) {
+    const {data,error}=await supabase.from("entregas_pruebas").select("*").eq("id",id).maybeSingle();
+    if (error) throw error;
+    return data;
+  }
+  return cachePruebas.entregas.find(item=>String(item.id)===String(id));
+}
+
+const localSubmissionLocks = new Map();
+async function lockLocalSubmission(key) {
+  const previous = localSubmissionLocks.get(key);
+  let release;
+  const pending = new Promise(resolve => { release = resolve; });
+  localSubmissionLocks.set(key, pending);
+  if (previous) await previous;
+  return () => { if (localSubmissionLocks.get(key) === pending) localSubmissionLocks.delete(key); release(); };
+}
+
 // 4. Sellar respuestas y evaluar apartados objetivos con la clave guardada en el servidor.
 export const submitPruebaEstudiante = async (req,res) => {
+  let releaseLocalLock;
   try {
     const {seccion_id}=req.params;
     const {numero_semana,numero_cuenta,nombre_completo,carrera,respuestas={},auditoria={}}=req.body;
     if (!numero_cuenta || !Number.isInteger(Number(numero_semana)) || Number(numero_semana)<1) return res.status(400).json({success:false,message:"Número de cuenta y semana son obligatorios para la entrega."});
     const numSemana=Number(numero_semana);
+    if (!(isSupabaseConfigured && supabase)) releaseLocalLock=await lockLocalSubmission(JSON.stringify([seccion_id,numSemana,String(numero_cuenta)]));
     const answers=typeof respuestas === "string" ? JSON.parse(respuestas) : respuestas;
     const clientAudit=typeof auditoria === "string" ? JSON.parse(auditoria) : auditoria;
     if (!answers || typeof answers!=="object" || Array.isArray(answers)) return res.status(400).json({success:false,message:"Las respuestas no tienen un formato válido."});
@@ -442,18 +465,26 @@ export const submitPruebaEstudiante = async (req,res) => {
       existing=data;
     } else existing=cachePruebas.entregas.find(row=>String(row.seccion_id)===String(seccion_id) && Number(row.numero_semana)===numSemana && String(row.numero_cuenta)===String(numero_cuenta));
     if (existing && ["enviado","calificado"].includes(existing.estado)) {
-      if (existing.auditoria?.calificacion_automatica?.version===1) {
-        // Un reintento nunca reemplaza respuestas selladas; permite terminar una sincronización interrumpida.
-        if (!(isSupabaseConfigured && supabase)) savePersistentPruebas(cachePruebas,true);
-        await syncAutomaticStudentGrade(existing);
-        return res.json({success:true,message:"La entrega ya está registrada.",data:existing});
-      }
-      return res.status(403).json({success:false,message:"Esta evaluación ya fue entregada y registrada previamente. No es posible modificar las respuestas.",data:existing});
+      // Confirm every sealed delivery, including manual and historical quizzes.
+      // Retries never replace answers and must not trap the student in offline mode.
+      if (!(isSupabaseConfigured && supabase)) savePersistentPruebas(cachePruebas,true);
+      if (existing.auditoria?.calificacion_automatica?.version===1) await syncAutomaticStudentGrade(existing);
+      return res.json({success:true,message:"La entrega ya está registrada. Sus respuestas originales se conservan.",data:existing});
     }
     const quiz=await loadQuizForAssessment(seccion_id,numSemana);
+    let integrityEvidence;
+    if (req.student) {
+      if (!(quiz.publicada === true || String(quiz.publicada) === "true" || quiz.estado === "publicada")) return res.status(403).json({success:false,message:"Esta prueba no está publicada."});
+      const live = await getLiveQuizEvidence(seccion_id,numSemana);
+      integrityEvidence = live.alumnos_conectados?.[String(numero_cuenta)]?.integridad;
+      if (!["en_pregunta","esperando_siguiente","finalizada"].includes(live.estado)) return res.status(409).json({success:false,message:"La prueba aún no se ha iniciado para esta sección."});
+    }
     const assessment=buildAutomaticQuizAssessment(quiz.preguntas,answers);
     const result=resolveQuizAssessment(assessment);
-    const trustedAudit={...(clientAudit && typeof clientAudit==="object" && !Array.isArray(clientAudit)?clientAudit:{})};
+    const trustedAudit=sanitizeClientAudit(clientAudit);
+    trustedAudit.strikes = Math.max(trustedAudit.strikes,integrityEvidence?.strikes || 0);
+    trustedAudit.tiempo_fuera_segundos = Math.max(trustedAudit.tiempo_fuera_segundos,integrityEvidence?.tiempo_fuera_segundos || 0);
+    if (integrityEvidence) trustedAudit.contadores_respaldados_en_sesion = true;
     for (const key of ["calificacion_automatica","evaluaciones_incisos","nota_real","nota_con_bonus"]) delete trustedAudit[key];
     trustedAudit.hora_recepcion_servidor=new Date().toISOString();
     if (result.automaticCount) Object.assign(trustedAudit,{calificacion_automatica:assessment,evaluaciones_incisos:result.evaluations,puntos_automaticos:result.automaticScore,apartados_pendientes:result.pending,...(result.complete?{nota_real:result.raw,nota_con_bonus:result.raw}:{})});
@@ -461,6 +492,12 @@ export const submitPruebaEstudiante = async (req,res) => {
     if (isSupabaseConfigured && supabase) {
       // Insertar conserva el sello de respuestas si dos solicitudes llegan al mismo tiempo.
       const {error}=await supabase.from("entregas_pruebas").insert(submission);
+      if (error?.code === "23505") {
+        const {data:sealed,error:readError}=await supabase.from("entregas_pruebas").select("*").eq("seccion_id",seccion_id).eq("numero_semana",numSemana).eq("numero_cuenta",String(numero_cuenta)).maybeSingle();
+        if (readError || !sealed) throw readError || error;
+        if (sealed.auditoria?.calificacion_automatica?.version===1) await syncAutomaticStudentGrade(sealed);
+        return res.json({success:true,message:"La entrega ya está registrada. Sus respuestas originales se conservan.",data:sealed});
+      }
       if (error) throw error;
     }
     const index=cachePruebas.entregas.findIndex(row=>String(row.id)===String(submission.id));
@@ -471,7 +508,7 @@ export const submitPruebaEstudiante = async (req,res) => {
   } catch(error) {
     console.error("Error en submitPruebaEstudiante:",error.message);
     return res.status(500).json({success:false,message:"No pudimos completar el registro y la calificación de la entrega. Reintenta para confirmar el guardado.",error:error.message});
-  }
+  } finally { releaseLocalLock?.(); }
 };
 
 // 5. Obtener entregas de estudiantes para una prueba semanal (Docente)
@@ -914,16 +951,12 @@ export const deletePruebasSeccionHandler = async (req, res) => {
 // 10. Eliminar entrega individual de un estudiante (permite habilitar reintento)
 export const deleteEntregaEstudiante = async (req, res) => {
   try {
-    const { entrega_id, seccion_id, semana, numero_cuenta } = {
-      ...req.params,
-      ...req.query,
-      ...req.body
-    };
+    const { entrega_id, seccion_id, semana, numero_cuenta } = req.params;
 
     let targetId = entrega_id;
-    let targetSecId = seccion_id;
-    let targetSemana = semana !== undefined && semana !== null ? Number(semana) : null;
-    let targetCuenta = numero_cuenta ? String(numero_cuenta) : null;
+    let targetSecId = req.quizSubmission?.seccion_id || seccion_id;
+    let targetSemana = req.quizSubmission?.numero_semana ?? (semana !== undefined && semana !== null ? Number(semana) : null);
+    let targetCuenta = req.quizSubmission?.numero_cuenta || (numero_cuenta ? String(numero_cuenta) : null);
 
     // Buscar en caché si falta algún identificador
     const localMatch = cachePruebas.entregas.find((e) =>

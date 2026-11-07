@@ -6,7 +6,7 @@ import { supabase, isSupabaseConfigured, createSupabaseLoginClient } from "../db
 
 dotenv.config();
 
-const JWT_SECRET = process.env.JWT_SECRET || "histolab_default_secret_key_2026";
+const JWT_SECRET = process.env.JWT_SECRET;
 const INSTRUCTOR_SESSION_SECONDS = 7 * 24 * 60 * 60;
 const MAX_FAILED_ATTEMPTS = 5;
 const LOCKOUT_MINUTES = 5;

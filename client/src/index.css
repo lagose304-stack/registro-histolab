@@ -584,3 +584,17 @@ h1, h2, h3, h4, h5 {
   from { opacity: 1; }
   to { opacity: .68; }
 }
+
+/* La cabecera del estudiante comparte los bordes del contenido del portal. */
+.app-container--student { --student-content-width: 1200px; --student-page-gutter: 1.25rem; }
+.navbar-container.navbar-container--student {
+  max-width: var(--student-content-width, 1200px) !important;
+  width: calc(100% - 2 * var(--student-page-gutter, 1.25rem)) !important;
+  padding-inline: 0 !important;
+}
+@media (max-width: 768px) {
+  .app-container--student { --student-page-gutter: .85rem; }
+}
+@media (max-width: 480px) {
+  .app-container--student { --student-page-gutter: .45rem; }
+}

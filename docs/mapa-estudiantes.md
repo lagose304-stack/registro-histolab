@@ -4,7 +4,7 @@
 
 | Qué puede hacer en el portal | Dónde consultar para cambiarlo |
 | --- | --- |
-| Iniciar sesión, cambiar contraseña y cerrar sesión | `client/src/App.jsx` y `StudentPortalView.jsx`. En la API, sigue `/api/auth/student-login`, `/api/auth/student-change-password`, `/api/auth/student-heartbeat` y `/api/auth/student-logout` en `auth.routes.js` y `auth.controller.js`. La validación de sesión está en `server/src/middlewares/auth.middleware.js` y su persistencia en `student_concurrent_sessions_migration.sql`. |
+| Iniciar sesión, cambiar contraseña y cerrar sesión | `client/src/App.jsx`, `StudentPortalView.jsx` y `StudentAccountView.jsx`. En la API, sigue `/api/auth/student-login`, `/api/auth/student-change-password`, `/api/auth/student-heartbeat` y `/api/auth/student-logout` en `auth.routes.js` y `auth.controller.js`. La validación de sesión está en `server/src/middlewares/auth.middleware.js` y su persistencia en `student_concurrent_sessions_migration.sql`. |
 | Consultar información académica y calificaciones | `StudentPortalView.jsx` reúne los datos de cuenta, carrera y sección. Consulta las familias `/api/estudiantes`, `/api/secciones`, `/api/temario` y `/api/semanas`. Los cálculos están en `client/src/utils/academicEngine.js`. |
 | Abrir una prueba habilitada, responder, entregar y consultar su propia entrega | `StudentPortalView.jsx` y las llamadas de pruebas en `client/src/services/api.js`. Sigue `/api/pruebas/seccion` hasta `pruebas.routes.js` y `pruebas.controller.js`. |
 | Participar en una prueba en vivo | La entrada y el envío de latidos están en `StudentPortalView.jsx`. El estado y la sesión activa se consultan en `/api/pruebas/live`, atendido por `liveQuiz.controller.js`. |
@@ -18,3 +18,53 @@ Los apartados de pruebas se responden con `QuizItemResponse.jsx`: texto corto, n
 Selección múltiple, verdadero/falso y términos pareados se califican automáticamente al entregar. Una prueba compuesta únicamente por esos tipos queda calificada en ese momento; si incluye apartados manuales, permanece pendiente hasta que el docente termine de revisarlos. La entrega conserva el estado de calificación devuelto por el servidor.
 
 Después de confirmar una entrega, la salida de pantalla completa ya no cuenta como infracción y los intentos con entrega existente no se restauran como exámenes activos. El catálogo y la sala de espera muestran la duración configurada, y el comprobante respeta la distribución exacta de puntos por casilla.
+
+## Inicio del portal
+
+`StudentPortalView.jsx` abre la pestaña **Inicio**, implementada en `StudentDashboard.jsx` y `StudentDashboard.css`, salvo cuando se restaura una prueba activa. El dashboard muestra el acumulado y su desglose usando el mismo motor académico, la asistencia registrada, las alertas de derecho a examen cuando hay registros y los datos de sección. Sus accesos abren los módulos existentes de calificaciones, asistencia, pruebas y cuenta; el cierre de sesión sigue en la navegación general de `App.jsx`.
+
+**Actualizar datos** vuelve a consultar semanas, temario, puntajes y el perfil de la misma cuenta como un conjunto. Ante errores o una cuenta distinta en la respuesta, el portal oculta el resumen académico y los módulos de consulta afectados y ofrece reintentar. La carga inicial distingue espera, fallo y ausencia de registros. Los avisos en vivo conservan el inicio y la restauración de evaluaciones; solo se muestra un aviso principal cuando ambas fuentes detectan la misma disponibilidad. El sondeo y la lógica de rendición no cambian. La cabecera y la navegación se comparten con los módulos de consulta; el inicio conserva su componente y estilos propios.
+
+## Mis calificaciones
+
+`StudentGradesView.jsx` y `StudentGradesView.css` presentan el resumen oficial del periodo y el detalle de las actividades agrupadas por los parciales que recibe `StudentPortalView.jsx`. El acumulado global corresponde al periodo completo; el detalle se consulta directamente por parcial y semana, sin barra de filtros. Un cero explícito cuenta como nota; las actividades sin calificación muestran «Sin nota», y una prueba con entrega pendiente puede mostrar «En revisión». No se presenta la suma bruta de manuales, pruebas y exámenes como aporte del parcial: sus escalas difieren, y la sección desplegable explica la ponderación global del motor académico.
+
+Los parciales aparecen cerrados al entrar y se pueden expandir y contraer; abrir uno cierra el anterior y coloca la vista al inicio del parcial para mostrar su primera semana. Las actividades muestran el nombre completo y la escala de origen y se conservan todos los exámenes del grupo. «Ver entrega» selecciona la pestaña de pruebas y abre la revisión existente. Las alertas de derecho a examen conservan visibles las calificaciones y enlazan a asistencia. No se modifican fórmulas, formatos persistidos ni llamadas HTTP para este rediseño.
+
+Dentro de cada parcial, las actividades de calificaciones se agrupan por las semanas configuradas de la carrera en bloques alternos gris claro y blanco. El orden de la programación determina la alternancia. Se conservan las semanas sin actividades en la vista completa y las notas históricas sin semana tienen un bloque propio.
+
+La variante estudiantil de `Navbar.jsx` usa el ancho y los márgenes del portal definidos en `index.css` mediante `app-container--student`. El logo y las acciones de sesión se alinean con las tarjetas de contenido en móvil, tablet y escritorio.
+
+## Mi asistencia
+
+`StudentAttendanceView.jsx` y `StudentAttendanceView.css` muestran los estados semanales y los parciales preparados por `StudentPortalView.jsx`, sin nuevas llamadas HTTP ni escrituras. El resumen distingue asistencias, faltas justificadas, injustificadas y semanas sin registro; estas últimas no se convierten en faltas. Se utilizan las semanas reales de la carrera. Las semanas normales tienen fondo blanco y las de examen se distinguen con fondo lila claro.
+
+Los acordeones aparecen cerrados al entrar, mantienen uno abierto a la vez y desplazan la vista al inicio del parcial al abrir. El derecho a cada examen proviene del cálculo existente `derechoExamenesStatus`; se conservan varios exámenes por parcial y no se presenta una habilitación como confirmada cuando el parcial no tiene registros de asistencia. La carga y los errores siguen controlados por el portal compartido.
+
+## Mi cuenta
+
+`StudentAccountView.jsx` y `StudentAccountView.css` reúnen los datos de acceso en consulta y el formulario de cambio de contraseña. Conservan la contraseña actual, el mínimo de seis caracteres, la exigencia de una clave diferente y la confirmación coincidente. Los campos admiten gestores de contraseñas mediante autocompletado y tienen botones accesibles para mostrar u ocultar cada clave.
+
+El formulario usa la misma llamada `api.auth.changeStudentPassword` con la cuenta y carrera del estudiante autenticado; no cambia el servidor, la sesión ni el formato persistido. Bloquea la edición mientras guarda, conserva los campos ante un error y limpia y oculta las claves tras confirmar el éxito. La ayuda del primer cambio se presenta desplegada a petición del estudiante y las consultas se dirigen al instructor titular de la sección.
+
+## Pruebas semanales
+
+`StudentQuizzesView.jsx` y `StudentQuizzesView.css` presentan el catálogo ordenado por semana, con estados en vivo, en espera, entregada en revisión y calificada. Cada tarjeta muestra el número de preguntas y las duraciones configuradas, permite desplegar las instrucciones completas y conserva el acceso a respuestas y comprobante. Una sesión finalizada o inactiva no habilita el botón de entrada; un cero explícito se muestra como nota y el bonus se identifica por separado.
+
+Las pruebas por realizar permanecen visibles. El historial de entregas se agrupa en acordeones según los parciales configurados en las semanas de la carrera, incluyendo tanto entregas pendientes de revisión como calificadas. Los acordeones comienzan cerrados, permiten uno abierto a la vez y muestran el inicio del grupo al abrir. Las entregas sin una semana configurada se conservan en «Sin parcial asignado». Cada tarjeta mantiene el acceso a sus respuestas y comprobante.
+
+`loadStudentQuizzes` en `StudentPortalView.jsx` carga catálogo, sesiones y entregas como un conjunto y descarta cargas atrasadas. Un fallo muestra reintento y bloquea la entrada desde el catálogo y sus avisos hasta verificar los datos. Conserva los endpoints, los latidos y la restauración de pruebas activas. Los comprobantes mantienen las respuestas y la retroalimentación existentes con una cabecera adaptable a móvil; las notas ausentes no se representan como cero. La lógica de preguntas, sellado y entrega permanece en el portal.
+
+
+## Resolución de pruebas en vivo
+
+`StudentQuizPlayer.jsx` y `StudentQuizPlayer.css` presentan la sala de espera, la pregunta vigente, la espera entre preguntas y la finalización. Reciben los datos y las acciones de `StudentPortalView.jsx`, que conserva la integridad académica, el borrador local, la restauración y el sellado y envío. La pantalla muestra el número real de preguntas y las duraciones configuradas, mantiene visible el cronómetro durante el desplazamiento y admite preguntas históricas sin apartados. Las instrucciones se consultan en un desplegable. Las micrografías que no cargan ofrecen reintento. La entrega manual conserva el sellado local si no hay conexión.
+
+`QuizItemResponse.jsx` conserva el formato de respuestas para texto corto, listado, completación, selección múltiple, verdadero/falso y términos pareados. En pareados, un banco de definiciones completo con letras evita recortes de textos largos en los selectores nativos; los valores enviados siguen siendo las definiciones originales. La selección muestra además el texto completo elegido.
+
+La sincronización usa los mismos latidos de `/api/pruebas/live/:seccion_id/:semana/heartbeat`, sin superponer solicitudes ni reiniciar el sondeo en cada pulsación. Los campos se bloquean mientras se verifica la sesión, durante una interrupción, al agotarse el tiempo y después del sellado. El indicador diferencia conexión inicial, sincronización y reconexión; una respuesta lenta muestra reconexión a los ocho segundos. Los borradores siguen guardándose en el dispositivo. El temporizador local solo disminuye en la fase de pregunta y se corrige con el tiempo del servidor. La política de integridad observa ausencias sostenidas de visibilidad y no sanciona cambios de tamaño, selectores, teclado ni pérdida de foco por sí solos. Los diálogos de evaluación permiten desplazamiento dentro del alto disponible.
+
+
+## Seguridad del acceso a pruebas
+
+Todas las rutas de pruebas pasan por `quizAccess.middleware.js`: el estudiante solo accede a su sección y a su propia entrega. `quizPrivacy.mjs` retira claves de corrección y datos de otros participantes; los pareados usan un banco de definiciones separado de los términos. `quizIntegrity.mjs` controla una advertencia por salida sostenida de al menos dos segundos durante una pregunta activa y excluye interrupciones breves, espera y confirmaciones. Los contadores se respaldan en los latidos existentes; los incidentes se identifican como declaraciones del cliente, no como prueba de fraude. Véase [Seguridad e integridad de pruebas](seguridad-pruebas.md) para las verificaciones, límites y pasos pendientes de producción.

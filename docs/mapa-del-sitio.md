@@ -24,3 +24,19 @@ Los mapas describen el acceso que presenta la interfaz. Para confirmar la autori
 ## Verificar un cambio
 
 Usa la llamada correspondiente de `client/src/services/api.js` para rastrear la URL, los parámetros y el encabezado de sesión. Comprueba la vista que escribe y la vista que vuelve a leer. Para fórmulas y formatos, consulta `server/scripts/test_academic_integrity.js`. Para entender escenarios de prueba y persistencia, lee `server/scripts/test_pruebas_workflow.js` y `server/scripts/test_persistence_audit.js` antes de ejecutarlos, ya que escriben y pueden borrar datos.
+
+La autenticación, proyección de datos y política de integridad de las evaluaciones se detallan en [Seguridad e integridad de pruebas](seguridad-pruebas.md), junto con las pruebas aisladas y los requisitos de producción.
+
+
+## Dirección pública gratuita
+
+La entrada pública es `https://registrohistolab.pages.dev`. Cloudflare Pages sirve la misma compilación del cliente y envía únicamente `/api` y `/api/*` al Worker existente mediante el enlace interno `HISTOLAB_API`. `cloudflare/pages-worker.mjs` conserva métodos, parámetros, cuerpo, encabezado de autorización y errores de la API. No contiene credenciales ni consulta directamente Supabase. Los archivos estáticos no invocan la función.
+
+`cloudflare/wrangler.toml` configura Pages y el enlace al servicio `registro-histolab`; `wrangler.toml` en la raíz conserva la configuración de Express en Workers. `scripts/prepare-pages.mjs` prepara exclusivamente la salida generada en `.wrangler/pages-site`, excluida de Git. No se registró un dominio de pago.
+
+- `npm run deploy` compila y publica el servidor y después la entrada de Pages con la misma compilación.
+- `npm run deploy:pages` actualiza únicamente la entrada pública y sus archivos del cliente.
+- `npm run deploy:worker` actualiza únicamente el servidor interno.
+- `node server/scripts/test_pages_gateway.mjs` verifica el contrato del enlace interno sin solicitudes reales.
+
+La nueva dirección tiene su propio almacenamiento de sesión del navegador: los usuarios deben iniciar sesión al entrar por ella. El servidor y la base de datos son los mismos. La dirección antigua `registro-histolab.7w7.workers.dev` está desactivada y devuelve HTTP 404. `workers_dev = false` en `wrangler.toml` evita reactivarla en publicaciones posteriores; Pages sigue conectando al servidor mediante el enlace interno, sin depender de esa dirección pública.

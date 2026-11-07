@@ -762,7 +762,7 @@ export default function WeeklyQuizCreationView({
               </button>;
             })}</div>
           </nav>
-          <fieldset className="section-quizzes__fieldset quiz-builder__workspace" disabled={busy}>
+          <fieldset data-grade-grid className="section-quizzes__fieldset quiz-builder__workspace" disabled={busy}>
             {quizData.preguntas.filter((_,index)=>index===activeQuestion).map(question => <div key={question.id} className="quiz-builder__question">
               <header><div><p className="user-directory__eyebrow">Paso {activeQuestion + 1} de 6</p><h3>{activeQuestion === 5 ? "Pregunta 6 · Bonus" : `Pregunta ${activeQuestion + 1}`}</h3></div><span className="section-quizzes__badge">{Number(question.puntos).toFixed(3)} / 1.000 punto</span></header>
               {activeQuestion === 5 && <p className="section-quizzes__bonus-note">Esta pregunta aporta hasta 1 punto extra a Premios de la sección.</p>}

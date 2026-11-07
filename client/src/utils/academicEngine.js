@@ -66,12 +66,14 @@ export function getRegularWeeks(semanasConfig = [], temario = []) {
 }
 
 /**
- * Formatea un valor numérico de calificación a 3 decimales, o "—" si está vacío o no calificado.
+ * Formatea una nota con hasta 3 decimales; el resumen del cuadro puede solicitar 2.
+ * Devuelve "—" si está vacío o no calificado.
  */
-export function formatGrade(val) {
+export function formatGrade(val, decimals = 3) {
   if (val === undefined || val === null || val === "" || val === false) return "—";
   const num = Number(val);
   if (isNaN(num)) return "—";
+  if (decimals === 2) return (Math.round((num + Number.EPSILON) * 100) / 100).toFixed(2);
   if (num === 0) return "0";
   return String(Math.round(num * 1000) / 1000);
 }

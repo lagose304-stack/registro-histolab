@@ -1,3 +1,4 @@
+import GradeInput from "./GradeInput";
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { GraduationCap, Search, Save, Users, ArrowLeft, ShieldCheck, Lock, CheckCircle2, Clock } from "lucide-react";
 import { api } from "../services/api";
@@ -521,9 +522,10 @@ export default function WeeklyExamGradingView({
                 <button type="button" key={value} aria-pressed={statusFilter === value} onClick={() => setStatusFilter(value)}>{label} <span>{count}</span></button>
               ))}
             </div>
+            <p style={{fontSize:"0.78rem",color:"#526c80"}}>Teclado: Enter avanza; ↑ ↓ cambian de estudiante; ← → cambian de nota desde el borde del campo.</p>
             {!filteredEstudiantes.length ? <p className="user-directory__state">{estudiantes.length ? "Ningún estudiante coincide con los filtros." : "Aún no hay estudiantes matriculados en esta sección."}</p> : (
-              <ul className="partial-grades__students">
-                {filteredEstudiantes.map(student => {
+              <ul className="partial-grades__students" data-grade-grid>
+                {filteredEstudiantes.map((student, rowIndex) => {
                   const grade = getStudentExamGrade(student);
                   const graded = grade !== "" && grade !== null;
                   return (
@@ -531,10 +533,10 @@ export default function WeeklyExamGradingView({
                       <div className="partial-grades__student-info"><h4>{student.nombre_completo || "Sin nombre registrado"}</h4><p>Cuenta {student.numero_cuenta}</p>
                         <span>{graded ? <CheckCircle2 size={14} aria-hidden="true" /> : <Clock size={14} aria-hidden="true" />}{graded ? "Calificado" : "Pendiente"}</span></div>
                       <label className="user-field partial-grades__grade">Nota del examen
-                        <input type="text" inputMode="decimal" value={grade} placeholder="Sin nota" disabled={!canEdit || saving}
+                        <GradeInput data-grade-row={rowIndex} value={grade} placeholder="Sin nota" disabled={!canEdit || saving}
                           aria-label={`Nota de ${student.nombre_completo || student.numero_cuenta}`}
                           onFocus={() => setEditingAccount(student.numero_cuenta)}
-                          onChange={event => handleGradeChange(student.numero_cuenta, event.target.value)}
+                          onValueChange={value => handleGradeChange(student.numero_cuenta, value)}
                           onBlur={() => {
                             if (typeof grade === "string" && grade.endsWith(".")) handleGradeChange(student.numero_cuenta, grade.slice(0, -1));
                             setEditingAccount(null);

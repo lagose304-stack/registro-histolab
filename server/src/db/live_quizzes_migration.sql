@@ -85,5 +85,6 @@ ON public.sesiones_pruebas_en_vivo;
 CREATE POLICY "Acceso total para API en sesiones_pruebas_en_vivo" 
 ON public.sesiones_pruebas_en_vivo 
 FOR ALL 
+TO service_role
 USING (true) 
 WITH CHECK (true);

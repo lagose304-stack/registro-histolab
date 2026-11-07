@@ -1,3 +1,5 @@
+import { normalizeGradeInput } from "../utils/gradeInput.mjs";
+import GradeInput from "./GradeInput";
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { ArrowLeft, BookOpen, Calendar, Clock, Save, Search, Users } from "lucide-react";
 import { api } from "../services/api";
@@ -297,9 +299,9 @@ export default function WeeklyManualsGradingView({
     );
 
     if (defaultScoreStr === null) return;
-    const cleanStr = defaultScoreStr.replace(",", ".");
+    const cleanStr = normalizeGradeInput(defaultScoreStr.trim());
     const num = Number(cleanStr);
-    if (isNaN(num) || num < 0 || num > 1) {
+    if (cleanStr === null || cleanStr === "" || isNaN(num) || num < 0 || num > 1) {
       notifyRef.current("La nota del manual no puede ser mayor a 1 punto (máximo 1.000).", "error");
       return;
     }
@@ -496,20 +498,21 @@ export default function WeeklyManualsGradingView({
                 <button type="button" className="user-button user-button--danger" disabled={!canEdit || saving || !estudiantes.length} onClick={handleClearWeekManuals}>Limpiar notas de la semana</button>
               </div>
             )}
+            <p style={{fontSize:"0.78rem",color:"#526c80"}}>Teclado: Enter avanza; ↑ ↓ cambian de estudiante; ← → cambian de nota desde el borde del campo.</p>
             {!weekTopics.length ? <p className="user-directory__state">Esta semana no tiene temas con manual evaluable.</p> : !filteredEstudiantes.length ? (
               <p className="user-directory__state">{estudiantes.length ? "Ningún estudiante coincide con la búsqueda." : "Aún no hay estudiantes matriculados."}</p>
             ) : (
-              <ul className="weekly-manuals__students">
-                {filteredEstudiantes.map(student=>(
+              <ul className="weekly-manuals__students" data-grade-grid>
+                {filteredEstudiantes.map((student, rowIndex)=>(
                   <li className="weekly-manuals__student" key={student.numero_cuenta}>
                     <div><h4>{student.nombre_completo || "Sin nombre registrado"}</h4><p>Cuenta {student.numero_cuenta}</p></div>
                     <div className="weekly-manuals__grades">
-                      {weekTopics.map(topic=>(
+                      {weekTopics.map((topic, columnIndex)=>(
                         <label className="user-field" key={topic.id}>
                           {topic.titulo}
-                          <input type="text" inputMode="decimal" value={getStudentManualGrade(student, topic)}
+                          <GradeInput max={1} data-grade-row={rowIndex} data-grade-column={columnIndex} value={getStudentManualGrade(student, topic)}
                             disabled={!canEdit || saving} placeholder="Sin nota" aria-label={`${topic.titulo} de ${student.nombre_completo || student.numero_cuenta}`}
-                            onChange={event=>handleGradeChange(student.numero_cuenta,topic,event.target.value)} />
+                            onInvalidValue={value=>handleGradeChange(student.numero_cuenta,topic,value)} onValueChange={value=>handleGradeChange(student.numero_cuenta,topic,value)} />
                           <small>Máximo 1.000 punto</small>
                         </label>
                       ))}

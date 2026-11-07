@@ -353,21 +353,21 @@ export async function exportStyledExcel({
       } else if (col.key === "total") {
         const val = Number(est.total ?? 0);
         cellValue = val;
-        numFormat = "0.000";
+        numFormat = "0.00";
         bold = true;
         bg = "FFF0FDF4";
         fontColor = val >= 65 ? "FF15803D" : "FFDC2626";
       } else if (col.key === "nota_oro_manuales") {
         const val = Number(est.nota_oro_manuales ?? 0);
         cellValue = val;
-        numFormat = "0.000";
+        numFormat = "0.00";
         bold = true;
         bg = "FFE0F2FE";
         fontColor = "FF1D4ED8";
       } else if (col.key === "nota_oro_pruebas") {
         const val = Number(est.nota_oro_pruebas ?? 0);
         cellValue = val;
-        numFormat = "0.000";
+        numFormat = "0.00";
         bold = true;
         bg = "FFDCFCE7";
         fontColor = "FF15803D";

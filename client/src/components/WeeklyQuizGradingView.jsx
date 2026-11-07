@@ -1,3 +1,5 @@
+import { normalizeGradeInput } from "../utils/gradeInput.mjs";
+import GradeInput from "./GradeInput";
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   FileEdit,
@@ -520,9 +522,9 @@ export default function WeeklyQuizGradingView({
     );
 
     if (defaultScoreStr === null) return;
-    const cleanStr = defaultScoreStr.replace(",", ".");
+    const cleanStr = normalizeGradeInput(defaultScoreStr.trim());
     const num = Number(cleanStr);
-    if (isNaN(num) || num < 0 || num > 5) {
+    if (cleanStr === null || cleanStr === "" || isNaN(num) || num < 0 || num > 5) {
       notifyRef.current("La nota de la prueba no puede ser mayor a 5 puntos (máximo 5.000).", "error");
       return;
     }
@@ -1301,6 +1303,7 @@ export default function WeeklyQuizGradingView({
               </div>
             </div>
 
+            <p style={{fontSize:"0.78rem",color:"#526c80"}}>Teclado: Enter avanza; ↑ ↓ cambian de estudiante.</p>
             {/* Listado de alumnos */}
             {filteredEstudiantes.length === 0 ? (
               <div
@@ -1317,7 +1320,7 @@ export default function WeeklyQuizGradingView({
                 {searchTerm ? "No se encontraron alumnos con ese criterio de búsqueda." : "No hay alumnos matriculados en esta sección."}
               </div>
             ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+              <div data-grade-grid style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
                 {filteredEstudiantes.map((est, index) => {
                   const gradeVal = getStudentQuizGrade(est);
                   const onlineSub = submissionsMap.get(String(est.numero_cuenta));
@@ -1404,11 +1407,9 @@ export default function WeeklyQuizGradingView({
                             maxWidth: "160px"
                           }}
                         >
-                          <input
-                            type="text"
-                            inputMode="decimal"
+                          <GradeInput max={5} data-grade-row={index}
                             value={gradeVal}
-                            onChange={(e) => handleGradeChange(est.numero_cuenta, e.target.value)}
+                            onInvalidValue={value => handleGradeChange(est.numero_cuenta, value)} onValueChange={value => handleGradeChange(est.numero_cuenta, value)}
                             onBlur={() => {
                               if (typeof gradeVal === "string" && gradeVal.endsWith(".")) {
                                 handleGradeChange(est.numero_cuenta, gradeVal.slice(0, -1));
@@ -1878,13 +1879,9 @@ export default function WeeklyQuizGradingView({
                   <label style={{ display: "block", fontSize: "0.78rem", fontWeight: 800, color: "#1e293b", marginBottom: "0.35rem" }}>
                     Nota (0.000 a 5.000 pts):
                   </label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    min="0"
-                    max="5"
+                  <GradeInput max={5}
                     value={evalScore}
-                    onChange={(e) => setEvalScore(e.target.value)}
+                    onValueChange={setEvalScore}
                     disabled={!canEdit || savingEvaluation}
                     placeholder="0.000"
                     style={{

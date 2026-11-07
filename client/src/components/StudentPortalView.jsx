@@ -1,7 +1,15 @@
-import QuizItemResponse from "./QuizItemResponse";
+import { observeQuizIntegrity } from "../utils/quizIntegrity.mjs";
+import StudentQuizPlayer from "./StudentQuizPlayer";
+import StudentQuizzesView from "./StudentQuizzesView";
+import StudentAccountView from "./StudentAccountView";
+import StudentAttendanceView from "./StudentAttendanceView";
+import StudentGradesView from "./StudentGradesView";
+import StudentDashboard from "./StudentDashboard";
+import "./StudentDashboard.css";
 import { isQuizItemMultiSlot, quizItemSlotCount, quizSlotLabel } from "../../../shared/quizItems.mjs";
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import {
+  House,
   GraduationCap,
   LogOut,
   Award,
@@ -53,8 +61,6 @@ import {
 import laboratorioLogo from "../assets/logos/laboratorio.png";
 import facultadLogo from "../assets/logos/facultad.png";
 import universidadLogo from "../assets/logos/universidad.png";
-import { Watermark } from "watermark-js-plus";
-import { getFingerprint } from "@thumbmarkjs/thumbmarkjs";
 
 const CARRERA_THEMES = {
   Medicina: {
@@ -110,7 +116,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
     return null;
   }, [student?.numero_cuenta]);
 
-  const [activeTab, setActiveTab] = useState(() => (savedActiveQuizSession?.quiz ? "pruebas" : "calificaciones"));
+  const [activeTab, setActiveTab] = useState(() => (savedActiveQuizSession?.quiz ? "pruebas" : "inicio"));
   const [currentStudentData, setCurrentStudentData] = useState(() => {
     if (student && student.notas && Object.keys(student.notas).length > 0) return student;
     try {
@@ -127,18 +133,21 @@ export default function StudentPortalView({ student, notify = () => {} }) {
     } catch (_) {}
     return student;
   });
-  const [selectedParcialFilter, setSelectedParcialFilter] = useState("todos"); // "todos" | "I" | "II" | "III"
   const [semanasConfig, setSemanasConfig] = useState([]);
   const [temario, setTemario] = useState([]);
   const [configPuntajes, setConfigPuntajes] = useState(null);
   const [loadingAcademic, setLoadingAcademic] = useState(true);
+  const [academicError, setAcademicError] = useState("");
+  const [academicReload, setAcademicReload] = useState(0);
 
   // Estados para Pruebas Semanales en Línea y Sincronización en Vivo
   const [onlineQuizzes, setOnlineQuizzes] = useState(() => {
     if (savedActiveQuizSession?.quiz) return [savedActiveQuizSession.quiz];
     return [];
   });
-  const [loadingQuizzes, setLoadingQuizzes] = useState(false);
+  const [loadingQuizzes, setLoadingQuizzes] = useState(true);
+  const [quizLoadError, setQuizLoadError] = useState("");
+  const quizLoadRequestRef = useRef(0);
   const [activeQuizToTake, setActiveQuizToTake] = useState(() => savedActiveQuizSession?.quiz || null);
   const [quizAnswers, setQuizAnswers] = useState(() => {
     if (savedActiveQuizSession?.quiz?.numero_semana) {
@@ -172,12 +181,13 @@ export default function StudentPortalView({ student, notify = () => {} }) {
   const quizAnswersRef = useRef(quizAnswers);
   quizAnswersRef.current = quizAnswers;
   const sendHeartbeatRef = useRef(null);
+  const [liveConnection, setLiveConnection] = useState("connecting");
   const lastKnownQuestionIdxRef = useRef(null);
 
   // Estados del Sistema de Integridad Académica y Antitrampas (Móvil, Escritorio y Resiliencia de Red)
   const [shuffledQuestions, setShuffledQuestions] = useState(() => savedActiveQuizSession?.quiz?.preguntas || []);
   const [timeRemainingSeconds, setTimeRemainingSeconds] = useState(() => {
-    if (savedActiveQuizSession?.liveSess?.tiempo_restante_segundos) {
+    if (savedActiveQuizSession?.liveSess?.tiempo_restante_segundos != null) {
       return savedActiveQuizSession.liveSess.tiempo_restante_segundos;
     }
     return 90;
@@ -185,7 +195,6 @@ export default function StudentPortalView({ student, notify = () => {} }) {
   const [strikesCount, setStrikesCount] = useState(0);
   const [incidentsList, setIncidentsList] = useState([]);
   const [violationModal, setViolationModal] = useState(null); // { strike, isFinal, mensaje, segundosFuera }
-  const [isSplitScreenDetected, setIsSplitScreenDetected] = useState(false);
   const [isFullscreenActive, setIsFullscreenActive] = useState(false);
   const [isOnline, setIsOnline] = useState(typeof navigator !== "undefined" ? navigator.onLine : true);
   const [isExamSealedOffline, setIsExamSealedOffline] = useState(false);
@@ -208,15 +217,10 @@ export default function StudentPortalView({ student, notify = () => {} }) {
   const autoSubmitTriggeredRef = React.useRef(false);
   const isConfirmingRef = React.useRef(false);
   const isSubmittingRef = React.useRef(false);
-  const focusLossRecordRef = React.useRef({ lostAt: null, reason: null });
   const blackoutTimeoutRef = React.useRef(null);
   const lastAlertTimestampRef = React.useRef(0);
   const isFromTopBorderRef = React.useRef(false);
-  const touchStartYRef = React.useRef(0);
   const violationModalRef = React.useRef(null);
-  const watermarkInstanceRef = React.useRef(null);
-  const deviceFingerprintRef = React.useRef(null);
-  const typingCadenceRef = React.useRef([]);
   const pasteCountRef = React.useRef(0);
 
   useEffect(() => {
@@ -284,126 +288,30 @@ export default function StudentPortalView({ student, notify = () => {} }) {
   const asistencias = effectiveStudent?.asistencias || {};
   const seccion = effectiveStudent?.seccion || {};
 
-  // Estados para apartado de actualización de contraseña
-  const [currentPasswordInput, setCurrentPasswordInput] = useState("");
-  const [newPasswordInput, setNewPasswordInput] = useState("");
-  const [confirmPasswordInput, setConfirmPasswordInput] = useState("");
-  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
-  const [showNewPassword, setShowNewPassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-  const [changingPassword, setChangingPassword] = useState(false);
-  const [passwordFeedback, setPasswordFeedback] = useState(null);
-
-  const handleUpdatePassword = async (e) => {
-    if (e) e.preventDefault();
-    setPasswordFeedback(null);
-
-    const cleanCurrent = currentPasswordInput.trim();
-    const cleanNew = newPasswordInput.trim();
-    const cleanConfirm = confirmPasswordInput.trim();
-
-    if (!cleanCurrent) {
-      setPasswordFeedback({
-        type: "error",
-        message: "Por favor ingresa tu contraseña actual (o histolab123 si nunca la has cambiado)."
-      });
-      return;
-    }
-
-    if (!cleanNew) {
-      setPasswordFeedback({
-        type: "error",
-        message: "Por favor ingresa tu nueva contraseña."
-      });
-      return;
-    }
-
-    if (cleanNew.length < 6) {
-      setPasswordFeedback({
-        type: "error",
-        message: "La nueva contraseña debe tener un mínimo de 6 caracteres."
-      });
-      return;
-    }
-
-    if (cleanNew === cleanCurrent) {
-      setPasswordFeedback({
-        type: "error",
-        message: "La nueva contraseña no puede ser igual a tu contraseña actual."
-      });
-      return;
-    }
-
-    if (cleanNew !== cleanConfirm) {
-      setPasswordFeedback({
-        type: "error",
-        message: "La confirmación de la nueva contraseña no coincide."
-      });
-      return;
-    }
-
-    try {
-      setChangingPassword(true);
-      const res = await api.auth.changeStudentPassword({
-        carrera: carreraKey,
-        numero_cuenta: cuentaKey,
-        contrasena_actual: cleanCurrent,
-        nueva_contrasena: cleanNew
-      });
-
-      if (res?.success) {
-        setPasswordFeedback({
-          type: "success",
-          message: res.message || "¡Tu contraseña ha sido actualizada con éxito!"
-        });
-        setCurrentPasswordInput("");
-        setNewPasswordInput("");
-        setConfirmPasswordInput("");
-        notify("✓ Contraseña actualizada correctamente", "success");
-      } else {
-        setPasswordFeedback({
-          type: "error",
-          message: res?.message || "No se pudo actualizar la contraseña."
-        });
-        notify(res?.message || "Error al actualizar contraseña", "error");
-      }
-    } catch (err) {
-      console.error("Error al cambiar contraseña:", err);
-      setPasswordFeedback({
-        type: "error",
-        message: err?.message || "Ocurrió un error al intentar cambiar la contraseña."
-      });
-      notify(err?.message || "Error al actualizar contraseña", "error");
-    } finally {
-      setChangingPassword(false);
-    }
-  };
-
   // Cargar configuración de semanas, temario, puntajes y perfil actualizado del estudiante
   useEffect(() => {
     let isMounted = true;
     const loadAcademicData = async () => {
       setLoadingAcademic(true);
+      setAcademicError("");
       try {
         const [resSemanas, resTemario, resPuntajes, resStudent] = await Promise.all([
-          api.semanas.getConfig(carreraKey).catch(() => ({ data: [] })),
-          api.temario.getAll({ carrera: carreraKey }).catch(() => ({ data: [] })),
-          api.temario.getPuntajes(carreraKey).catch(() => ({ data: null })),
+          api.semanas.getConfig(carreraKey),
+          api.temario.getAll({ carrera: carreraKey }),
+          api.temario.getPuntajes(carreraKey),
           cuentaKey
-            ? api.estudiantes.getByCuenta(carreraKey, cuentaKey).catch(() => ({ data: null }))
+            ? api.estudiantes.getByCuenta(carreraKey, cuentaKey)
             : Promise.resolve({ data: null })
         ]);
+        if (!Array.isArray(resSemanas?.data) || !Array.isArray(resTemario?.data) ||
+          (cuentaKey && (!resStudent?.data || String(resStudent.data.numero_cuenta) !== String(cuentaKey)))) {
+          throw new Error("La información académica está incompleta.");
+        }
         if (isMounted) {
-          if (resSemanas?.data && Array.isArray(resSemanas.data) && resSemanas.data.length > 0) {
-            setSemanasConfig(resSemanas.data);
-          }
-          if (resTemario?.data && Array.isArray(resTemario.data) && resTemario.data.length > 0) {
-            setTemario(resTemario.data);
-          }
-          if (resPuntajes?.data) {
-            setConfigPuntajes(resPuntajes.data);
-          }
-          if (resStudent?.data && (!cuentaKey || resStudent.data.numero_cuenta === cuentaKey)) {
+          setSemanasConfig(resSemanas.data);
+          setTemario(resTemario.data);
+          setConfigPuntajes(resPuntajes?.data || null);
+          if (resStudent?.data && (!cuentaKey || String(resStudent.data.numero_cuenta) === String(cuentaKey))) {
             setCurrentStudentData(resStudent.data);
             try {
               if (cuentaKey) {
@@ -416,6 +324,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
         }
       } catch (err) {
         console.error("Error al cargar datos académicos de estudiante:", err);
+        if (isMounted) setAcademicError("No pudimos actualizar tu información académica. Revisa tu conexión y vuelve a intentarlo.");
       } finally {
         if (isMounted) {
           setLoadingAcademic(false);
@@ -426,7 +335,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
     return () => {
       isMounted = false;
     };
-  }, [carreraKey, cuentaKey]);
+  }, [carreraKey, cuentaKey, academicReload]);
 
   // Resolver el ID real de la sección del estudiante con múltiples niveles de contingencia
   const resolveStudentSectionId = useCallback(async () => {
@@ -454,80 +363,56 @@ export default function StudentPortalView({ student, notify = () => {} }) {
     return null;
   }, [effectiveStudent, carreraKey]);
 
-  // Cargar pruebas semanales de la sección (publicadas o habilitadas en vivo)
-  // Cargar pruebas semanales de la sección (publicadas o habilitadas en vivo)
+  // Cargar catálogo, estado en vivo y entregas como una instantánea de la sección.
   const loadStudentQuizzes = useCallback(async () => {
-    let secId = effectiveStudent?.seccion_id || effectiveStudent?.seccion?.id;
-    if (!secId) {
-      secId = await resolveStudentSectionId();
-    }
-    if (!secId) return;
-
+    const request = ++quizLoadRequestRef.current;
     setLoadingQuizzes(true);
+    setQuizLoadError("");
     try {
+      const secId = effectiveStudent?.seccion_id || effectiveStudent?.seccion?.id || await resolveStudentSectionId();
+      if (request !== quizLoadRequestRef.current) return;
+      if (!secId) throw new Error("No se pudo identificar tu sección. Actualiza tus datos e inténtalo de nuevo.");
       const res = await api.pruebas.getBySeccion(secId);
-      if (res?.success && Array.isArray(res.data)) {
-        // Consultar estado en vivo de cada prueba encontrada en la sección
-        const liveMap = {};
-        await Promise.all(
-          res.data.map(async (q) => {
-            try {
-              const liveRes = await api.pruebas.getLiveState(secId, q.numero_semana);
-              if (liveRes?.success && liveRes.data) {
-                liveMap[q.numero_semana] = liveRes.data;
-              }
-            } catch (_) {}
-          })
+      if (res?.success === false || !Array.isArray(res?.data)) throw new Error("No se pudo consultar el catálogo de pruebas.");
+      const liveEntries = await Promise.all(res.data.map(async quiz => {
+        const response = await api.pruebas.getLiveState(secId, quiz.numero_semana);
+        if (response?.success === false) throw new Error("No se pudo verificar el estado de las pruebas.");
+        return [quiz.numero_semana, response?.data || null];
+      }));
+      const liveMap = Object.fromEntries(liveEntries);
+      const publishedOrLive = res.data.filter(quiz => {
+        const session = liveMap[quiz.numero_semana];
+        const live = Boolean(
+          (session && (session.habilitada || ["lobby", "en_pregunta", "esperando_siguiente"].includes(session.estado)) && !["finalizada", "inactiva"].includes(session.estado)) ||
+          (quiz.habilitada_en_vivo === true && (!session || session.estado !== "finalizada"))
         );
-        setLiveSessionsMap(liveMap);
-
-        // Incluir pruebas publicadas Y pruebas habilitadas en vivo por el docente
-        const publishedOrLive = res.data.filter((q) => {
-          const s = liveMap[q.numero_semana];
-          const isLiveActive = Boolean(
-            (s && (s.habilitada || s.estado === "lobby" || s.estado === "en_pregunta" || s.estado === "esperando_siguiente") && s.estado !== "finalizada" && s.estado !== "inactiva") ||
-            (q.habilitada_en_vivo === true && (!s || s.estado !== "finalizada"))
-          );
-          return q.publicada === true || String(q.publicada) === "true" || q.estado === "publicada" || isLiveActive;
-        });
-
-        setOnlineQuizzes(publishedOrLive);
-
-        // Enviar latido de presencia para registrar al alumno como conectado ante el docente
-        if (cuentaKey && res.data.length > 0) {
-          res.data.forEach((q) => {
-            api.pruebas.sendLiveHeartbeat(secId, q.numero_semana, {
-              numero_cuenta: cuentaKey,
-              nombre_completo: effectiveStudent?.nombre_completo || "Estudiante",
-              pregunta_vista: -1
-            }).catch(() => {});
-          });
-        }
-
-        // Cargar las entregas de este estudiante
-        const subsMap = {};
-        await Promise.all(
-          publishedOrLive.map(async (q) => {
-            try {
-              const subRes = await api.pruebas.getMiEntrega(secId, q.numero_semana, cuentaKey);
-              if (subRes?.success && subRes.data) {
-                subsMap[q.numero_semana] = subRes.data;
-              }
-            } catch (_) {}
-          })
-        );
-        setExistingSubmissions(subsMap);
-      }
-    } catch (err) {
-      console.warn("Aviso al cargar pruebas online del estudiante:", err.message);
+        return quiz.publicada === true || String(quiz.publicada) === "true" || quiz.estado === "publicada" || live;
+      });
+      const submissionEntries = await Promise.all(publishedOrLive.map(async quiz => {
+        const response = await api.pruebas.getMiEntrega(secId, quiz.numero_semana, cuentaKey);
+        if (response?.success === false) throw new Error("No se pudieron verificar tus entregas.");
+        return [quiz.numero_semana, response?.data || null];
+      }));
+      if (request !== quizLoadRequestRef.current) return;
+      setLiveSessionsMap(liveMap);
+      setOnlineQuizzes(publishedOrLive);
+      setExistingSubmissions(Object.fromEntries(submissionEntries.filter(([, submission]) => submission)));
+      if (cuentaKey) res.data.forEach(quiz => {
+        api.pruebas.sendLiveHeartbeat(secId, quiz.numero_semana, {
+          numero_cuenta: cuentaKey, nombre_completo: effectiveStudent?.nombre_completo || "Estudiante", pregunta_vista: -1
+        }).catch(() => {});
+      });
+    } catch (error) {
+      if (request === quizLoadRequestRef.current) setQuizLoadError(error.message || "No se pudieron cargar las pruebas. Revisa tu conexión e inténtalo de nuevo.");
     } finally {
-      setLoadingQuizzes(false);
+      if (request === quizLoadRequestRef.current) setLoadingQuizzes(false);
     }
   }, [effectiveStudent, cuentaKey, resolveStudentSectionId]);
 
   // Cargar catálogo de pruebas de inmediato al montar la vista
   useEffect(() => {
     loadStudentQuizzes();
+    return () => { quizLoadRequestRef.current += 1; };
   }, [loadStudentQuizzes]);
 
   // Refrescar si el usuario entra explícitamente a la pestaña de pruebas
@@ -589,6 +474,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
 
   // Identificar si existe alguna prueba con sesión en vivo habilitada por el docente pendiente de realizar
   const anyLiveQuiz = useMemo(() => {
+    if (quizLoadError || loadingQuizzes) return null;
     return (onlineQuizzes || []).find((q) => {
       const s = liveSessionsMap[q.numero_semana];
       const isSubmitted = Boolean(existingSubmissions[q.numero_semana]);
@@ -598,15 +484,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
       );
       return isLiveActive && !isSubmitted;
     });
-  }, [onlineQuizzes, liveSessionsMap, existingSubmissions]);
-
-  // Formateador de tiempo mm:ss
-  const formatTimer = (totalSeconds) => {
-    const safeSec = Math.max(0, totalSeconds);
-    const mins = Math.floor(safeSec / 60);
-    const secs = safeSec % 60;
-    return `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
-  };
+  }, [onlineQuizzes, liveSessionsMap, existingSubmissions, quizLoadError, loadingQuizzes]);
 
   // Solicitar pantalla completa en dispositivo
   const requestQuizFullscreen = () => {
@@ -723,6 +601,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
       tiempo_restante_segundos: initialSecs
     };
     setActiveLiveState(effectiveLive);
+    setLiveConnection("connecting");
 
     const now = Date.now();
     quizStartTimeRef.current = now;
@@ -733,7 +612,6 @@ export default function StudentPortalView({ student, notify = () => {} }) {
     setStrikesCount(0);
     setIncidentsList([]);
     setViolationModal(null);
-    setIsSplitScreenDetected(false);
     setIsExamSealedOffline(false);
     setPendingSubmissionPayload(null);
     strikesCountRef.current = 0;
@@ -776,7 +654,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
       } else if (forcedReason?.motivo === "entrega_anticipada_por_salida") {
         notify("Evaluación finalizada y enviada con las respuestas contestadas hasta este momento.", "info");
       } else {
-        notify(submittedData?.estado === "calificado" ? "¡Prueba entregada y calificada automáticamente!" : "¡Prueba entregada! Los apartados automáticos están calificados; los demás esperan revisión docente.", "success");
+        notify(submittedData?.estado === "calificado" ? "¡Prueba entregada y calificada automáticamente!" : "¡Prueba entregada! Los apartados automáticos están calificados; los demás esperan revisión del instructor titular de la sección.", "success");
       }
 
       const finalData = {
@@ -895,11 +773,9 @@ export default function StudentPortalView({ student, notify = () => {} }) {
       incidentes: incidentsListRef.current,
       pantalla_completa_solicitada: true,
       conexion_al_enviar: navigator.onLine ? "online" : "offline",
-      huella_dispositivo: deviceFingerprintRef.current || null,
+      politica_integridad: "visibilidad-v2",
       intentos_pegar_texto: pasteCountRef.current || 0,
-      cadencia_escritura: typingCadenceRef.current.length > 0
-        ? { muestras: typingCadenceRef.current.length, promedio_ms: Math.round(typingCadenceRef.current.reduce((a, b) => a + b, 0) / typingCadenceRef.current.length) }
-        : null
+
     };
 
     const payload = {
@@ -1153,95 +1029,31 @@ export default function StudentPortalView({ student, notify = () => {} }) {
   }, [activeQuizToTake, isExamSealedOffline]);
 
 
-  // Registrar una infracción de integridad (Salida de app, cambio de pestaña, split screen, barra de notificaciones)
-  const registerViolation = useCallback(
-    (tipo, detalle, segundosFuera = 0) => {
-      if (!activeQuizToTake || autoSubmitTriggeredRef.current || isExamSealedOffline || isSubmittingRef.current || isConfirmingRef.current) return;
+  // A departure is an observed policy event, not proof of cheating.
+  const submitQuizRef = useRef(handleSubmitQuiz);
+  submitQuizRef.current = handleSubmitQuiz;
+  const registerViolation = (tipo, detalle, segundosFuera = 0) => {
+    if (!activeQuizToTake || autoSubmitTriggeredRef.current || isExamSealedOffline || isSubmittingRef.current || isConfirmingRef.current) return;
+    const nextStrike = Math.min(3, strikesCountRef.current + 1);
+    strikesCountRef.current = nextStrike;
+    totalTimeOutRef.current += segundosFuera;
+    setStrikesCount(nextStrike);
+    const incident = { tipo, detalle, strike: nextStrike, segundosFuera, hora: new Date().toISOString(), origen: "cliente", politica: "visibilidad-v2" };
+    incidentsListRef.current = [...incidentsListRef.current.slice(-99), incident];
+    setIncidentsList(incidentsListRef.current);
+    saveActiveAttemptToDisk(activeQuizToTake, shuffledQuestions, quizAnswersRef.current, quizStartTimeRef.current, quizEndTimeRef.current, nextStrike, incidentsListRef.current, totalTimeOutRef.current);
+    deactivateDrmBlackout();
+    if (nextStrike >= 3) {
+      autoSubmitTriggeredRef.current = true;
+      setViolationModal({ strike: 3, isFinal: true, mensaje: "Se registraron tres salidas prolongadas de la evaluación durante preguntas activas. La prueba se cerrará según las normas y las incidencias quedarán disponibles para revisión del instructor. Esto no determina por sí solo que hubo trampa." });
+      submitQuizRef.current({ motivo: "expulsion_infracciones" });
+    } else {
+      setViolationModal({ strike: nextStrike, isFinal: false, segundosFuera, mensaje: `La evaluación dejó de estar visible durante ${segundosFuera} segundos. Advertencia ${nextStrike} de 3. Mantén esta pantalla abierta; la tercera salida prolongada cierra y envía la prueba para revisión del instructor.` });
+    }
+  };
 
-      // Antirrebote ampliado para evitar múltiples advertencias simultáneas por el mismo evento
-      const now = Date.now();
-      if (now - lastAlertTimestampRef.current < 2500) return;
-      lastAlertTimestampRef.current = now;
-
-      // NO desactivar el blackout aquí — dejarlo visible brevemente para que el usuario vea
-      // la pantalla negra antes de mostrar la advertencia. Se desactiva con un delay corto.
-
-      const nextStrike = strikesCountRef.current + 1;
-      strikesCountRef.current = nextStrike;
-      setStrikesCount(nextStrike);
-
-      const incident = {
-        tipo,
-        detalle,
-        strike: nextStrike,
-        segundosFuera,
-        hora: new Date().toLocaleTimeString()
-      };
-      incidentsListRef.current.push(incident);
-      setIncidentsList([...incidentsListRef.current]);
-
-      // Guardar de inmediato en localStorage para que persista aun si recarga
-      saveActiveAttemptToDisk(
-        activeQuizToTake,
-        shuffledQuestions,
-        quizAnswers,
-        quizStartTimeRef.current,
-        quizEndTimeRef.current,
-        nextStrike,
-        incidentsListRef.current,
-        totalTimeOutRef.current
-      );
-
-      // Alerta háptica si el móvil lo soporta
-      if (navigator.vibrate) {
-        navigator.vibrate([250, 100, 250]);
-      }
-
-      if (nextStrike >= 3) {
-        // 3ª Infracción: Auto-envío forzado y cierre
-        autoSubmitTriggeredRef.current = true;
-        // Desactivar blackout para mostrar modal de expulsión
-        setTimeout(() => { deactivateDrmBlackout(); }, 600);
-        setViolationModal({
-          strike: 3,
-          isFinal: true,
-          mensaje:
-            "Has alcanzado el límite de 3 advertencias de integridad (salida de app, salida de pantalla completa, captura de pantalla o despliegue de barra de notificaciones). Tu examen ha sido bloqueado y enviado automáticamente para revisión docente."
-        });
-        setTimeout(() => {
-          handleSubmitQuiz({ motivo: "expulsion_infracciones" });
-        }, 2800);
-      } else {
-        // Advertencia intermedia 1 o 2
-        let mensajePersonalizado = detalle;
-        if (tipo === "captura_de_pantalla") {
-          mensajePersonalizado = "Se detectó un intento de captura de pantalla o grabación del examen. El contenido fue protegido y la infracción quedó registrada en tu bitácora de integridad.";
-        } else if (tipo === "barra_notificaciones_o_salida") {
-          mensajePersonalizado = `Se detectó que bajaste la barra de notificaciones, Centro de Control o cambiaste de ventana${segundosFuera > 0 ? ` durante ${segundosFuera} seg` : ""}. La incidencia quedó registrada en tu bitácora de integridad.`;
-        } else if (tipo === "pantalla_dividida") {
-          mensajePersonalizado = "Se detectó uso de pantalla dividida o ventana flotante en el dispositivo. Esta acción no está permitida durante la evaluación.";
-        } else if (tipo === "salida_pantalla_completa") {
-          mensajePersonalizado = "Se detectó que saliste del modo de pantalla completa durante la evaluación. El examen debe realizarse en pantalla completa en todo momento.";
-        } else if (tipo === "devtools_detectado") {
-          mensajePersonalizado = "Se detectaron las herramientas de desarrollador del navegador abiertas. Manipular el examen con DevTools no está permitido.";
-        } else if (segundosFuera > 0) {
-          mensajePersonalizado = `Se detectó salida de la pantalla de la evaluación durante ${segundosFuera} segundos.`;
-        }
-
-        // Desactivar blackout después de un breve momento para que el modal sea visible
-        setTimeout(() => { deactivateDrmBlackout(); }, 500);
-
-        setViolationModal({
-          strike: nextStrike,
-          isFinal: false,
-          segundosFuera,
-          mensaje: `${mensajePersonalizado} Advertencia ${nextStrike} de 3. A la 3ª advertencia, la prueba se sellará y enviará automáticamente sin derecho a reintento.`
-        });
-        notify(`⚠️ Advertencia ${nextStrike}/3: ${mensajePersonalizado}`, "warning");
-      }
-    },
-    [activeQuizToTake, isExamSealedOffline, saveActiveAttemptToDisk, shuffledQuestions, quizAnswers, notify, deactivateDrmBlackout, handleSubmitQuiz]
-  );
+  const confirmedAnswersRef = useRef(answeredQuestionsMap);
+  confirmedAnswersRef.current = answeredQuestionsMap;
 
   // Sincronización en vivo vía Heartbeat con el servidor durante la prueba
   useEffect(() => {
@@ -1249,15 +1061,20 @@ export default function StudentPortalView({ student, notify = () => {} }) {
 
     let isMounted = true;
     const sem = activeQuizToTake.numero_semana;
+    let heartbeatPending = false;
 
     const sendHeartbeat = async () => {
-      let secId = effectiveStudent?.seccion_id || effectiveStudent?.seccion?.id;
-      if (!secId) {
-        secId = await resolveStudentSectionId();
-      }
-      if (!secId || !isMounted) return;
-
+      if (!isMounted || heartbeatPending) return;
+      heartbeatPending = true;
+      let slowConnectionTimeout;
       try {
+        slowConnectionTimeout = setTimeout(() => { if (isMounted) setLiveConnection("reconnecting"); }, 8000);
+        let secId = effectiveStudent?.seccion_id || effectiveStudent?.seccion?.id;
+        if (!secId) {
+          secId = await resolveStudentSectionId();
+        }
+        if (!secId || !isMounted) return;
+
         const curAnswers = quizAnswersRef.current || quizAnswers;
         const curIdx = activeLiveStateRef.current?.pregunta_actual_idx ?? 0;
         const curQ = (activeQuizToTake?.preguntas || [])[curIdx];
@@ -1272,18 +1089,29 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                 typeof v === "string" ? v.trim() : Array.isArray(v) && v.some((x) => String(x).trim())
               ))
         );
-        const hasAnswered = Boolean(answeredQuestionsMap[curIdx] || hasContent);
+        const hasAnswered = Boolean(confirmedAnswersRef.current[curIdx] || hasContent);
 
         const res = await api.pruebas.sendLiveHeartbeat(secId, sem, {
           numero_cuenta: cuentaKey,
           nombre_completo: effectiveStudent?.nombre_completo,
           respuestas_parciales: curAnswers,
           pregunta_vista: curIdx,
-          ha_respondido: hasAnswered
+          ha_respondido: hasAnswered,
+          integridad: { strikes: strikesCountRef.current, tiempo_fuera_segundos: totalTimeOutRef.current }
         });
 
         if (res?.success && res.data && isMounted) {
           const liveData = res.data;
+          setLiveConnection("connected");
+          const remoteStrikes = Math.min(3, Math.max(0, Number(liveData.integridad?.strikes) || 0));
+          if (remoteStrikes > strikesCountRef.current) {
+            strikesCountRef.current = remoteStrikes;
+            setStrikesCount(remoteStrikes);
+          }
+          if (remoteStrikes >= 3 && !autoSubmitTriggeredRef.current) {
+            autoSubmitTriggeredRef.current = true;
+            submitQuizRef.current({ motivo: "expulsion_infracciones" });
+          }
           setActiveLiveState(liveData);
 
           // Detección cuando el docente desde control en vivo cambia de pregunta con los botones
@@ -1313,7 +1141,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
               document.activeElement.blur();
             }
 
-            notify(`Pregunta #${incomingIdx + 1} iniciada por el docente. Tu respuesta previa quedó guardada.`, "info");
+            notify(`Pregunta #${incomingIdx + 1} iniciada por el instructor titular de la sección. Tu respuesta previa quedó guardada.`, "info");
           } else if (typeof incomingIdx === "number") {
             lastKnownQuestionIdxRef.current = incomingIdx;
           }
@@ -1327,9 +1155,15 @@ export default function StudentPortalView({ student, notify = () => {} }) {
             autoSubmitTriggeredRef.current = true;
             handleSubmitQuiz({ motivo: "finalizada_por_docente" });
           }
+        } else if (isMounted) {
+          setLiveConnection("reconnecting");
         }
       } catch (err) {
+        if (isMounted) setLiveConnection("reconnecting");
         console.warn("Aviso en heartbeat:", err.message);
+      } finally {
+        clearTimeout(slowConnectionTimeout);
+        heartbeatPending = false;
       }
     };
 
@@ -1342,11 +1176,11 @@ export default function StudentPortalView({ student, notify = () => {} }) {
       sendHeartbeatRef.current = null;
       clearInterval(heartbeatInterval);
     };
-  }, [activeQuizToTake, effectiveStudent, cuentaKey, quizAnswers, isExamSealedOffline, resolveStudentSectionId, answeredQuestionsMap, shuffledQuestions, saveActiveAttemptToDisk, notify]);
+  }, [activeQuizToTake, effectiveStudent, cuentaKey, isExamSealedOffline, resolveStudentSectionId, shuffledQuestions, saveActiveAttemptToDisk, notify]);
 
   // Auto-guardado garantizado al terminarse el tiempo de cada pregunta
   useEffect(() => {
-    if (!activeQuizToTake || isExamSealedOffline) return;
+    if (!activeQuizToTake || isExamSealedOffline || activeLiveState?.estado !== "en_pregunta") return;
     if (timeRemainingSeconds === 0) {
       const curIdx = activeLiveStateRef.current?.pregunta_actual_idx ?? 0;
       setAnsweredQuestionsMap((prev) => ({ ...prev, [curIdx]: true }));
@@ -1364,11 +1198,11 @@ export default function StudentPortalView({ student, notify = () => {} }) {
         sendHeartbeatRef.current();
       }
     }
-  }, [timeRemainingSeconds, activeQuizToTake, isExamSealedOffline, shuffledQuestions, saveActiveAttemptToDisk]);
+  }, [timeRemainingSeconds, activeQuizToTake, isExamSealedOffline, activeLiveState?.estado, shuffledQuestions, saveActiveAttemptToDisk]);
 
   // Decremento local fluido de segundo a segundo mientras está en pregunta
   useEffect(() => {
-    if (!activeQuizToTake || isExamSealedOffline) return;
+    if (!activeQuizToTake || isExamSealedOffline || activeLiveState?.estado !== "en_pregunta") return;
 
     const interval = setInterval(() => {
       setTimeRemainingSeconds((prev) => {
@@ -1380,287 +1214,35 @@ export default function StudentPortalView({ student, notify = () => {} }) {
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [activeQuizToTake, isExamSealedOffline]);
+  }, [activeQuizToTake, isExamSealedOffline, activeLiveState?.estado]);
 
-  // =====================================================================================
-  // SISTEMA ANTITRAMPAS UNIFICADO v3 — Detección de pérdida de foco, capturas, notificaciones
-  // =====================================================================================
-  // Principio: En móvil, el navegador NO puede detectar capturas de pantalla directamente.
-  // Lo que SÍ puede detectar de forma fiable:
-  //   1. visibilitychange (pestaña oculta / app en segundo plano)
-  //   2. blur/focus (pérdida/recuperación de foco de la ventana)
-  //   3. touchcancel (el OS interrumpió un gesto — ej. notificación entrante)
-  //   4. resize (pantalla dividida / teclado)
-  //
-  // Estrategia:
-  //   - Al PERDER foco: activar blackout inmediatamente, registrar timestamp.
-  //   - Al RECUPERAR foco: desactivar blackout, registrar violación con tiempo fuera.
-  //   - Los eventos blur y visibilitychange se unifican con un solo ref para evitar doble conteo.
-  //   - El debounce de 2500ms en registerViolation impide que blur+visibilitychange generen 2 strikes.
-  // =====================================================================================
+  const integrityCallbacksRef = useRef({});
+  integrityCallbacksRef.current = {
+    isActive: () => Boolean(activeQuizToTake && !isExamSealedOffline && !autoSubmitTriggeredRef.current && activeLiveStateRef.current?.estado === "en_pregunta"),
+    isSuppressed: () => isSubmittingRef.current || isConfirmingRef.current || Boolean(violationModalRef.current),
+    onDeparture: seconds => registerViolation("salida_de_pantalla", "La evaluación dejó de estar visible durante una pregunta activa.", seconds),
+    onBlocked: type => {
+      if (type === "pegar_texto") pasteCountRef.current += 1;
+      const incident = { tipo: type, detalle: "Acción bloqueada dentro de la evaluación; no implica una infracción confirmada.", strike: strikesCountRef.current, segundosFuera: 0, hora: new Date().toISOString(), origen: "cliente" };
+      incidentsListRef.current = [...incidentsListRef.current.slice(-99), incident];
+      setIncidentsList(incidentsListRef.current);
+      saveActiveAttemptToDisk(activeQuizToTake, shuffledQuestions, quizAnswersRef.current, quizStartTimeRef.current, quizEndTimeRef.current, strikesCountRef.current, incidentsListRef.current, totalTimeOutRef.current);
+      notify("Esta acción está deshabilitada durante la evaluación.", "warning");
+    }
+  };
   useEffect(() => {
     if (!activeQuizToTake || isExamSealedOffline) return;
-
-    // ─── A. Pérdida y recuperación de foco unificada ───
-    // Usamos focusLossRecordRef como la ÚNICA fuente de verdad.
-    // Tanto blur como visibilitychange escriben en él pero solo si no hay ya un registro activo.
-    // Solo se registra la violación al VOLVER (focus / visibilitychange visible).
-
-    const markFocusLost = (reason) => {
-      if (isSubmittingRef.current || isConfirmingRef.current) return;
-      // Activar blackout de inmediato para oscurecer la pantalla
-      activateDrmBlackout(4000);
-      if (!focusLossRecordRef.current.lostAt) {
-        focusLossRecordRef.current = { lostAt: Date.now(), reason };
-      }
-    };
-
-    const markFocusRestored = () => {
-      if (isSubmittingRef.current || isConfirmingRef.current) {
-        focusLossRecordRef.current = { lostAt: null, reason: null };
-        deactivateDrmBlackout();
-        return;
-      }
-      if (!focusLossRecordRef.current.lostAt) {
-        // No había pérdida registrada, solo limpiar blackout
-        deactivateDrmBlackout();
-        return;
-      }
-
-      const elapsed = Math.max(1, Math.round((Date.now() - focusLossRecordRef.current.lostAt) / 1000));
-      const reason = focusLossRecordRef.current.reason || "salida_de_pantalla";
-      focusLossRecordRef.current = { lostAt: null, reason: null };
-      totalTimeOutRef.current += elapsed;
-
-      // Registrar la violación (el blackout se desactivará dentro de registerViolation tras un delay)
-      const violationType = reason === "barra_notificaciones" ? "barra_notificaciones_o_salida" : "salida_de_pantalla";
-      const violationDetail = reason === "barra_notificaciones"
-        ? `Despliegue de barra de notificaciones o Centro de Control durante ${elapsed} seg`
-        : `Salida de la evaluación / cambio de aplicación durante ${elapsed} seg`;
-      registerViolation(violationType, violationDetail, elapsed);
-    };
-
-    const handleVisibilityChange = () => {
-      if (document.hidden) {
-        markFocusLost(isFromTopBorderRef.current ? "barra_notificaciones" : "salida_de_pantalla");
-      } else {
-        markFocusRestored();
-      }
-    };
-
-    const handleBlur = () => {
-      const wasTop = isFromTopBorderRef.current;
-      isFromTopBorderRef.current = false;
-      markFocusLost(wasTop ? "barra_notificaciones" : "salida_de_pantalla");
-    };
-
-    const handleFocus = () => {
-      isFromTopBorderRef.current = false;
-      markFocusRestored();
-    };
-
-    const handlePageHide = () => {
-      markFocusLost("salida_de_pantalla");
-    };
-
-    // ─── B. Sensores táctiles para barra de notificaciones (Android & iPhone) ───
-    const handleTouchStart = (e) => {
-      if (isSubmittingRef.current || isConfirmingRef.current) return;
-      // Gesto de 3 dedos (screenshot en algunos Android)
-      if (e.touches && e.touches.length >= 3) {
-        activateDrmBlackout(2500);
-        registerViolation("captura_de_pantalla", "Gesto de captura de pantalla con 3 dedos detectado", 0);
-        return;
-      }
-      const touch = e.touches?.[0];
-      if (!touch) return;
-      touchStartYRef.current = touch.clientY;
-      // Zona superior del viewport: posible barra de notificaciones
-      const isTopZone = touch.clientY <= 50 || touch.screenY <= 80;
-      isFromTopBorderRef.current = isTopZone;
-    };
-
-    const handleTouchMove = (e) => {
-      if (isSubmittingRef.current || isConfirmingRef.current) return;
-      if (!isFromTopBorderRef.current) return;
-      const touch = e.touches?.[0];
-      if (!touch) return;
-      const deltaY = touch.clientY - touchStartYRef.current;
-      if (deltaY > 30) {
-        // Swipe hacia abajo desde el borde superior detectado dentro del viewport
-        isFromTopBorderRef.current = false;
-        activateDrmBlackout(2500);
-        registerViolation(
-          "barra_notificaciones_o_salida",
-          "Despliegue de barra de notificaciones o Centro de Control detectado (gesto)",
-          1
-        );
-      }
-    };
-
-    const handleTouchEnd = () => {
-      isFromTopBorderRef.current = false;
-    };
-
-    // touchcancel: Disparado cuando el OS interrumpe el gesto (notificación/control center reales)
-    const handleTouchCancel = () => {
-      if (isSubmittingRef.current || isConfirmingRef.current) return;
-      // touchcancel es la señal más confiable de que el OS tomó control (barra de notificaciones, etc.)
-      isFromTopBorderRef.current = false;
-      markFocusLost("barra_notificaciones");
-    };
-
-    // ─── C. Detección de pantalla dividida (Split-Screen en Android / iPad) ───
-    const handleResize = () => {
-      const isInputActive = Boolean(
-        document.activeElement &&
-        (document.activeElement.tagName === "INPUT" || document.activeElement.tagName === "TEXTAREA")
-      );
-      if (isInputActive) return; // Teclado móvil abierto
-
-      const isSplit = window.innerHeight < window.screen.height * 0.48;
-      setIsSplitScreenDetected(isSplit);
-      if (isSplit && !violationModalRef.current) {
-        registerViolation("pantalla_dividida", "Se detectó modo de pantalla dividida o ventana flotante en el dispositivo", 0);
-      }
-    };
-
-    // ─── D. Pantalla completa — salir de fullscreen es infracción ───
-    const handleFullscreenChange = () => {
-      const isFs = Boolean(document.fullscreenElement || document.webkitFullscreenElement);
-      setIsFullscreenActive(isFs);
-      // Si salió de pantalla completa durante la evaluación, registrar infracción
-      if (!isFs && !isSubmittingRef.current && !isConfirmingRef.current && !autoSubmitTriggeredRef.current) {
-        registerViolation(
-          "salida_pantalla_completa",
-          "El estudiante salió del modo de pantalla completa durante la evaluación",
-          0
-        );
-        // Intentar reactivar pantalla completa automáticamente
-        try {
-          if (document.documentElement.requestFullscreen) {
-            document.documentElement.requestFullscreen().catch(() => {});
-          } else if (document.documentElement.webkitRequestFullscreen) {
-            document.documentElement.webkitRequestFullscreen().catch(() => {});
-          }
-        } catch (_) {}
-      }
-    };
-
-    // ─── E. Atajos de teclado para capturas (desktop) ───
-    const handleKeyDown = (e) => {
-      const isPrintScreen = e.key === "PrintScreen" || e.key === "Snapshot" || e.keyCode === 44;
-      const isMacScreenshot = (e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === "3" || e.key === "4" || e.key === "5" || e.code === "Digit3" || e.code === "Digit4" || e.code === "Digit5");
-      const isWinSnipping = (e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === "s" || e.key === "S" || e.code === "KeyS");
-
-      if (isPrintScreen || isMacScreenshot || isWinSnipping) {
-        e.preventDefault();
-        activateDrmBlackout(2500);
-        try {
-          if (navigator.clipboard && navigator.clipboard.writeText) {
-            navigator.clipboard.writeText("");
-          }
-        } catch (_) {}
-        registerViolation("captura_de_pantalla", "Intento de captura de pantalla o grabación detectado", 0);
-        if (navigator.vibrate) navigator.vibrate([350, 100, 350]);
-        return;
-      }
-
-      if (
-        e.key === "F12" ||
-        (e.ctrlKey && e.shiftKey && (e.key === "I" || e.key === "i" || e.key === "C" || e.key === "c" || e.key === "J" || e.key === "j")) ||
-        (e.ctrlKey && (e.key === "u" || e.key === "U" || e.key === "s" || e.key === "S" || e.key === "p" || e.key === "P"))
-      ) {
-        e.preventDefault();
-        notify("⚠️ Función del navegador restringida durante la evaluación.", "warning");
-      }
-    };
-
-    // ─── F. Bloqueo de copia y menú contextual ───
-    const handleCopy = (e) => {
-      e.preventDefault();
-      try {
-        if (e.clipboardData) e.clipboardData.setData("text/plain", "");
-      } catch (_) {}
-      activateDrmBlackout(2000);
-      registerViolation("captura_de_pantalla", "Acción de copiado o captura de contenido bloqueada", 0);
-    };
-
-    const handleContextMenu = (e) => {
-      e.preventDefault();
-    };
-
-    // ─── G. Bloqueo de pegar texto (Paste Detection) ───
-    // Detecta si el estudiante pega texto copiado de otra fuente (ChatGPT, Google, etc.)
-    const handlePaste = (e) => {
-      if (isSubmittingRef.current || isConfirmingRef.current) return;
-      e.preventDefault();
-      pasteCountRef.current += 1;
-      const pastedText = e.clipboardData ? e.clipboardData.getData("text/plain") : "";
-      const preview = pastedText.length > 80 ? pastedText.substring(0, 80) + "..." : pastedText;
-      // Registrar en bitácora como incidente (no como strike, pero queda en el registro)
-      const incident = {
-        tipo: "intento_pegar_texto",
-        detalle: `Intento de pegar texto bloqueado (${pastedText.length} caracteres). Vista previa: "${preview}"`,
-        strike: strikesCountRef.current,
-        segundosFuera: 0,
-        hora: new Date().toLocaleTimeString()
-      };
-      incidentsListRef.current.push(incident);
-      setIncidentsList([...incidentsListRef.current]);
-      notify("⚠️ Pegar texto está bloqueado durante la evaluación. Escribe tus respuestas manualmente.", "warning");
-      if (navigator.vibrate) navigator.vibrate([150]);
-    };
-
-    // ─── H. Bloqueo de arrastrar texto de preguntas ───
-    const handleDragStart = (e) => {
-      e.preventDefault();
-    };
-
-    // ─── I. Bloqueo de selección de texto (cut) ───
-    const handleCut = (e) => {
-      e.preventDefault();
-    };
-
-    // ─── Registrar todos los listeners ───
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-    window.addEventListener("blur", handleBlur);
-    window.addEventListener("focus", handleFocus);
-    window.addEventListener("pagehide", handlePageHide);
-    window.addEventListener("resize", handleResize);
-    document.addEventListener("fullscreenchange", handleFullscreenChange);
-    document.addEventListener("webkitfullscreenchange", handleFullscreenChange);
-    window.addEventListener("keydown", handleKeyDown, { capture: true });
-    window.addEventListener("contextmenu", handleContextMenu);
-    document.addEventListener("copy", handleCopy);
-    document.addEventListener("paste", handlePaste, { capture: true });
-    document.addEventListener("cut", handleCut);
-    document.addEventListener("dragstart", handleDragStart);
-    window.addEventListener("touchstart", handleTouchStart, { passive: true });
-    window.addEventListener("touchmove", handleTouchMove, { passive: true });
-    window.addEventListener("touchend", handleTouchEnd, { passive: true });
-    window.addEventListener("touchcancel", handleTouchCancel, { passive: true });
-
-    return () => {
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-      window.removeEventListener("blur", handleBlur);
-      window.removeEventListener("focus", handleFocus);
-      window.removeEventListener("pagehide", handlePageHide);
-      window.removeEventListener("resize", handleResize);
-      document.removeEventListener("fullscreenchange", handleFullscreenChange);
-      document.removeEventListener("webkitfullscreenchange", handleFullscreenChange);
-      window.removeEventListener("keydown", handleKeyDown, { capture: true });
-      window.removeEventListener("contextmenu", handleContextMenu);
-      document.removeEventListener("copy", handleCopy);
-      document.removeEventListener("paste", handlePaste, { capture: true });
-      document.removeEventListener("cut", handleCut);
-      document.removeEventListener("dragstart", handleDragStart);
-      window.removeEventListener("touchstart", handleTouchStart);
-      window.removeEventListener("touchmove", handleTouchMove);
-      window.removeEventListener("touchend", handleTouchEnd);
-      window.removeEventListener("touchcancel", handleTouchCancel);
-    };
-  }, [activeQuizToTake, isExamSealedOffline, registerViolation, activateDrmBlackout, deactivateDrmBlackout, notify]);
+    return observeQuizIntegrity({
+      document, window,
+      isActive: () => integrityCallbacksRef.current.isActive(),
+      isSuppressed: () => integrityCallbacksRef.current.isSuppressed(),
+      onHidden: () => activateDrmBlackout(),
+      onVisible: deactivateDrmBlackout,
+      onDeparture: seconds => integrityCallbacksRef.current.onDeparture(seconds),
+      onBlocked: type => integrityCallbacksRef.current.onBlocked(type),
+      onFullscreen: current => setIsFullscreenActive(current)
+    });
+  }, [activeQuizToTake, isExamSealedOffline, activateDrmBlackout, deactivateDrmBlackout]);
 
   // G. Auto-desplazamiento inteligente para cuando el teclado virtual de celular se abre
   useEffect(() => {
@@ -1689,140 +1271,6 @@ export default function StudentPortalView({ student, notify = () => {} }) {
         window.visualViewport.removeEventListener("scroll", handleViewportChange);
       }
     };
-  }, [activeQuizToTake, isExamSealedOffline]);
-
-  // H. Marca de agua anti-capturas con identificación del estudiante (watermark-js-plus)
-  // Si toman captura, la imagen contiene su nombre y número de cuenta como evidencia.
-  // La marca de agua se recrea automáticamente si intentan eliminarla con DevTools.
-  useEffect(() => {
-    if (!activeQuizToTake || isExamSealedOffline) return;
-
-    const studentName = effectiveStudent?.nombre_completo || "Estudiante";
-    const studentAccount = cuentaKey || "";
-    const now = new Date();
-    const timestamp = `${now.toLocaleDateString()} ${now.toLocaleTimeString()}`;
-    const watermarkText = `${studentName} • ${studentAccount} • ${timestamp}`;
-
-    // Destruir instancia previa si existe
-    if (watermarkInstanceRef.current) {
-      try { watermarkInstanceRef.current.destroy(); } catch (_) {}
-      watermarkInstanceRef.current = null;
-    }
-
-    try {
-      const wm = new Watermark({
-        content: watermarkText,
-        width: 340,
-        height: 180,
-        rotate: -22,
-        fontSize: "14px",
-        fontFamily: "system-ui, -apple-system, sans-serif",
-        fontColor: "rgba(0, 0, 0, 0.06)",
-        zIndex: 9999980,
-        mutationObserve: true,
-        monitorProtection: true,
-        globalAlpha: 0.08
-      });
-      wm.create();
-      watermarkInstanceRef.current = wm;
-    } catch (err) {
-      console.warn("Aviso al crear marca de agua:", err);
-    }
-
-    return () => {
-      if (watermarkInstanceRef.current) {
-        try { watermarkInstanceRef.current.destroy(); } catch (_) {}
-        watermarkInstanceRef.current = null;
-      }
-    };
-  }, [activeQuizToTake, isExamSealedOffline, effectiveStudent?.nombre_completo, cuentaKey]);
-
-  // I. Huella digital del dispositivo (Browser Fingerprint) vía ThumbmarkJS
-  // Captura un ID único del dispositivo al iniciar el examen para verificar que
-  // el mismo dispositivo que inició es el que termina (anti-suplantación).
-  useEffect(() => {
-    if (!activeQuizToTake || isExamSealedOffline) return;
-    if (deviceFingerprintRef.current) return; // Ya capturado
-
-    const captureFingerprint = async () => {
-      try {
-        const fp = await getFingerprint();
-        deviceFingerprintRef.current = fp;
-      } catch (err) {
-        console.warn("Aviso al capturar huella digital del dispositivo:", err);
-        // Fallback básico si ThumbmarkJS falla
-        deviceFingerprintRef.current = `${navigator.userAgent}_${screen.width}x${screen.height}_${Intl.DateTimeFormat().resolvedOptions().timeZone}`;
-      }
-    };
-    captureFingerprint();
-  }, [activeQuizToTake, isExamSealedOffline]);
-
-  // J. Detección avanzada de DevTools abiertos (timing-based)
-  // Mide el tiempo que toma ejecutar un debugger statement — si DevTools está abierto,
-  // el debugger pausa la ejecución y genera un delay medible.
-  useEffect(() => {
-    if (!activeQuizToTake || isExamSealedOffline) return;
-
-    const devtoolsDetectedRef = { value: false };
-    const checkDevTools = () => {
-      const start = performance.now();
-      // eslint-disable-next-line no-debugger
-      debugger;
-      const elapsed = performance.now() - start;
-      // Si el debugger tardó más de 100ms, DevTools está abierto y pausó la ejecución
-      if (elapsed > 100 && !devtoolsDetectedRef.value) {
-        devtoolsDetectedRef.value = true;
-        const incident = {
-          tipo: "devtools_detectado",
-          detalle: `Se detectaron las herramientas de desarrollador abiertas (delay: ${Math.round(elapsed)}ms)`,
-          strike: strikesCountRef.current,
-          segundosFuera: 0,
-          hora: new Date().toLocaleTimeString()
-        };
-        incidentsListRef.current.push(incident);
-        setIncidentsList([...incidentsListRef.current]);
-        registerViolation(
-          "devtools_detectado",
-          "Se detectaron las herramientas de desarrollador del navegador abiertas durante la evaluación",
-          0
-        );
-        // Reset para poder detectar si lo vuelven a abrir
-        setTimeout(() => { devtoolsDetectedRef.value = false; }, 10000);
-      }
-    };
-
-    const interval = setInterval(checkDevTools, 3000);
-    return () => clearInterval(interval);
-  }, [activeQuizToTake, isExamSealedOffline, registerViolation]);
-
-  // K. Análisis de cadencia de escritura (Typing Cadence)
-  // Registra el intervalo entre teclas para detectar texto pegado o escrito por IA
-  // (cadencia inhumanamente rápida o uniforme indica copy-paste que evadió el bloqueo).
-  useEffect(() => {
-    if (!activeQuizToTake || isExamSealedOffline) return;
-
-    let lastKeyTime = 0;
-    const handleKeyCadence = (e) => {
-      // Solo registrar en inputs/textareas del examen
-      const tag = e.target?.tagName;
-      if (tag !== "INPUT" && tag !== "TEXTAREA") return;
-      const now = performance.now();
-      if (lastKeyTime > 0) {
-        const delta = now - lastKeyTime;
-        // Solo registrar intervalos razonables (entre 10ms y 2000ms)
-        if (delta >= 10 && delta <= 2000) {
-          typingCadenceRef.current.push(Math.round(delta));
-          // Mantener solo las últimas 200 muestras para no acumular memoria
-          if (typingCadenceRef.current.length > 200) {
-            typingCadenceRef.current = typingCadenceRef.current.slice(-200);
-          }
-        }
-      }
-      lastKeyTime = now;
-    };
-
-    window.addEventListener("keydown", handleKeyCadence);
-    return () => window.removeEventListener("keydown", handleKeyCadence);
   }, [activeQuizToTake, isExamSealedOffline]);
 
   // Manejar cambio en casilla de respuesta con auto-guardado persistente
@@ -1995,7 +1443,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
   // CÁLCULOS DINÁMICOS ACADÉMICOS UNIFICADOS (MOTOR CENTRAL ACADÉMICO)
   // =========================================================================
   const academicSummary = useMemo(() => {
-    if (loadingAcademic || !effectiveStudent) {
+    if (loadingAcademic || academicError || !effectiveStudent) {
       return {
         total: 0,
         notaOroManuales: 0,
@@ -2018,7 +1466,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
       temario,
       semanasConfig
     );
-  }, [effectiveStudent, configPuntajes, temario, semanasConfig, loadingAcademic]);
+  }, [effectiveStudent, configPuntajes, temario, semanasConfig, loadingAcademic, academicError]);
 
   const {
     total: totalDinamico,
@@ -2287,9 +1735,20 @@ export default function StudentPortalView({ student, notify = () => {} }) {
     });
   }, [activeCareerWeeks, temario, examenesList, manualesList, pruebasList, asistencias, effectiveStudent]);
 
+  const navigatePortal = tab => {
+    setActiveTab(tab);
+    if (tab === "pruebas" || tab === "seguridad") {
+      setActiveQuizToTake(null);
+      setReviewingSubmission(null);
+    }
+  };
+
   return (
-    <div
+    <div className="student-portal" data-taking-quiz={Boolean(activeQuizToTake)}
       style={{
+        "--student-accent": theme.primary,
+        "--student-soft": theme.bg,
+        "--student-line": theme.border,
         minHeight: "100%",
         background: "transparent",
         color: "#0f172a",
@@ -2896,7 +2355,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
           <>
             {/* Banner de Notificación de Prueba en Vivo Habilitada */}
             {anyLiveQuiz && (
-              <div className="sp-live-alert">
+              <div className="sp-live-alert student-portal__live">
                 <div style={{ display: "flex", alignItems: "center", gap: "1rem" }}>
                   <div
                     style={{
@@ -2934,7 +2393,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                       </strong>
                     </div>
                     <p style={{ margin: "0.25rem 0 0", fontSize: "0.86rem", color: "#7f1d1d", fontWeight: 600 }}>
-                      Tu docente ha activado la sesión en vivo para tu sección. Ingresa ahora para realizar tu prueba sincronizado con la clase.
+                      El instructor titular de tu sección ha activado la sesión en vivo para tu sección. Ingresa ahora para realizar tu prueba sincronizado con la clase.
                     </p>
                   </div>
                 </div>
@@ -2965,92 +2424,17 @@ export default function StudentPortalView({ student, notify = () => {} }) {
               </div>
             )}
 
-            {/* Banner Superior de Perfil del Estudiante */}
-            <div className="sp-profile-banner">
-              <div className="sp-profile-inner">
-                <div
-                  className="sp-profile-avatar"
-                  style={{
-                    background: theme.gradient,
-                    boxShadow: `0 8px 24px -4px ${theme.primary}50`
-                  }}
-                >
-                  <GraduationCap size={32} />
-                </div>
-
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: "0.65rem", flexWrap: "wrap" }}>
-                    <h2 className="sp-profile-name">
-                      {effectiveStudent?.nombre_completo || "Estudiante de Histología"}
-                    </h2>
-                    <span
-                      style={{
-                        background: "#f1f5f9",
-                        color: "#334155",
-                        fontFamily: "monospace",
-                        fontSize: "0.82rem",
-                        fontWeight: 800,
-                        padding: "0.18rem 0.55rem",
-                        borderRadius: "0.45rem",
-                        border: "1px solid #e2e8f0"
-                      }}
-                    >
-                      Cuenta: {effectiveStudent?.numero_cuenta}
-                    </span>
-                  </div>
-
-                  <div className="sp-profile-tags">
-                    <span className="sp-tag-pill" style={{ background: theme.bg, borderColor: theme.border, color: theme.text }}>
-                      🎓 <strong>{carreraKey}</strong>
-                    </span>
-                    <span className="sp-tag-pill">
-                      🏛️ Sec: <strong>{seccion?.codigo || "Sin sección"}</strong>
-                    </span>
-                    {seccion?.dia && (
-                      <span className="sp-tag-pill">
-                        📅 {seccion.dia} {seccion.hora_inicio} - {seccion.hora_fin}
-                      </span>
-                    )}
-                    {seccion?.coordinador && (
-                      <span className="sp-tag-pill">
-                        👨‍🏫 Titular de sección: {seccion.coordinador}
-                      </span>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setActiveTab("seguridad");
-                        setActiveQuizToTake(null);
-                        setReviewingSubmission(null);
-                      }}
-                      className="sp-tag-pill"
-                      style={{
-                        background: activeTab === "seguridad" ? theme.primary : "#ffffff",
-                        borderColor: activeTab === "seguridad" ? theme.primary : "#cbd5e1",
-                        color: activeTab === "seguridad" ? "#ffffff" : "#334155",
-                        cursor: "pointer",
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: "0.35rem",
-                        fontWeight: 800,
-                        transition: "all 0.15s ease"
-                      }}
-                      title="Actualizar tu contraseña de acceso"
-                    >
-                      <Lock size={12} color={activeTab === "seguridad" ? "#ffffff" : theme.primary} />
-                      <span>Cambiar Contraseña</span>
-                    </button>
-                  </div>
-                </div>
+            <header className="student-portal__header">
+              <div className="student-portal__identity"><span className="student-portal__avatar"><GraduationCap size={26} /></span>
+                <div><p className="student-portal__eyebrow">PORTAL DE ESTUDIANTES · HISTOLAB</p><h2>{effectiveStudent?.nombre_completo || "Tu espacio de aprendizaje"}</h2><p>Cuenta {effectiveStudent?.numero_cuenta} <span aria-hidden="true">·</span> {carreraKey}</p></div>
               </div>
-            </div>
-
-
+              <div className="student-portal__header-actions"><button type="button" className="student-portal__button" disabled={loadingAcademic} onClick={() => setAcademicReload(value => value + 1)}><RefreshCw size={16} className={loadingAcademic ? "animate-spin" : ""} />{loadingAcademic ? "Actualizando…" : "Actualizar datos"}</button><button type="button" className="student-portal__button" onClick={() => navigatePortal("seguridad")}><KeyRound size={16} />Mi cuenta</button></div>
+            </header>
 
             {/* AVISO DESTACADO DE PRUEBA EN VIVO TIPO KAHOOT */}
-            {activeLiveBannerSession && !existingSubmissions[activeLiveBannerSession.numero_semana] && !activeQuizToTake && (
+            {!anyLiveQuiz && !quizLoadError && !loadingQuizzes && activeLiveBannerSession && !existingSubmissions[activeLiveBannerSession.numero_semana] && !activeQuizToTake && (
               <div
-                className="animate-fade-in"
+                className="student-portal__live student-portal__live--session"
                 style={{
                   background: "linear-gradient(135deg, #16a34a 0%, #15803d 100%)",
                   borderRadius: "1rem",
@@ -3104,7 +2488,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                       ¡Prueba en vivo activa! Sala de espera abierta
                     </h3>
                     <p style={{ margin: "0.2rem 0 0", fontSize: "0.85rem", opacity: 0.95 }}>
-                      Tu docente habilitó la evaluación en directo. Entra ahora para sincronizarte antes de la Pregunta 1.
+                      El instructor titular de tu sección habilitó la evaluación en directo. Entra ahora para sincronizarte antes de la Pregunta 1.
                     </p>
                   </div>
                 </div>
@@ -3154,942 +2538,40 @@ export default function StudentPortalView({ student, notify = () => {} }) {
               </div>
             )}
 
-            {/* Pestañas de Navegación del Portal */}
-            <div className="sp-tabs-nav">
-              <button
-                type="button"
-                onClick={() => setActiveTab("calificaciones")}
-                className={`sp-tab-btn ${activeTab === "calificaciones" ? "active" : ""}`}
-                style={{
-                  color: activeTab === "calificaciones" ? theme.primary : "#64748b",
-                  borderBottom: activeTab === "calificaciones" ? `3px solid ${theme.primary}` : "3px solid transparent"
-                }}
-              >
-                <Award size={16} />
-                <span className="sp-tab-label-desktop">Mis Calificaciones</span>
-                <span className="sp-tab-label-mobile">Notas</span>
-              </button>
+            <nav className="student-portal__nav" aria-label="Navegación del portal de estudiantes">
+              {[
+                { id: "inicio", label: "Inicio", short: "Inicio", Icon: House },
+                { id: "calificaciones", label: "Mis calificaciones", short: "Notas", Icon: Award },
+                { id: "asistencia", label: "Mi asistencia", short: "Asistencia", Icon: CalendarCheck },
+                { id: "pruebas", label: "Pruebas semanales", short: "Pruebas", Icon: FileEdit },
+                { id: "seguridad", label: "Mi cuenta", short: "Cuenta", Icon: KeyRound }
+              ].map(({ id, label, short, Icon }) => <button type="button" key={id} aria-label={label} aria-current={activeTab === id ? "page" : undefined} onClick={() => navigatePortal(id)}><Icon size={20} /><span className="student-portal__nav-label">{label}</span><span className="student-portal__nav-short" aria-hidden="true">{short}</span>{id === "pruebas" && (anyLiveQuiz || activeLiveBannerSession) && <span className="student-portal__live-dot" aria-label="Prueba en vivo disponible" />}</button>)}
+            </nav>
 
-              <button
-                type="button"
-                onClick={() => setActiveTab("asistencia")}
-                className={`sp-tab-btn ${activeTab === "asistencia" ? "active" : ""}`}
-                style={{
-                  color: activeTab === "asistencia" ? theme.primary : "#64748b",
-                  borderBottom: activeTab === "asistencia" ? `3px solid ${theme.primary}` : "3px solid transparent"
-                }}
-              >
-                <CalendarCheck size={16} />
-                <span className="sp-tab-label-desktop">Control de Asistencia</span>
-                <span className="sp-tab-label-mobile">Asistencia</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setActiveTab("pruebas");
-                  setActiveQuizToTake(null);
-                  setReviewingSubmission(null);
-                }}
-                className={`sp-tab-btn ${activeTab === "pruebas" ? "active" : ""}`}
-                style={{
-                  color: activeTab === "pruebas" ? theme.primary : "#64748b",
-                  borderBottom: activeTab === "pruebas" ? `3px solid ${theme.primary}` : "3px solid transparent"
-                }}
-              >
-                <HelpCircle size={16} />
-                <span className="sp-tab-label-desktop">Pruebas Semanales</span>
-                <span className="sp-tab-label-mobile">Pruebas</span>
-                {anyLiveQuiz && (
-                  <span className="sp-live-badge">
-                    <span style={{ width: "5px", height: "5px", borderRadius: "50%", background: "#ffffff" }} />
-                    <span className="sp-tab-label-desktop">EN VIVO</span>
-                  </span>
-                )}
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setActiveTab("seguridad");
-                  setActiveQuizToTake(null);
-                  setReviewingSubmission(null);
-                }}
-                className={`sp-tab-btn ${activeTab === "seguridad" ? "active" : ""}`}
-                style={{
-                  color: activeTab === "seguridad" ? theme.primary : "#64748b",
-                  borderBottom: activeTab === "seguridad" ? `3px solid ${theme.primary}` : "3px solid transparent"
-                }}
-              >
-                <KeyRound size={16} />
-                <span className="sp-tab-label-desktop">Actualizar Contraseña</span>
-                <span className="sp-tab-label-mobile">Contraseña</span>
-              </button>
-            </div>
+            {academicError && ["inicio", "calificaciones", "asistencia"].includes(activeTab) && <div className="student-portal__error" role="alert"><AlertCircle size={22} /><p>{academicError}</p><button type="button" className="student-portal__button" onClick={() => setAcademicReload(value => value + 1)}>Reintentar carga</button></div>}
+            {loadingAcademic && ["calificaciones", "asistencia"].includes(activeTab) && <div className="student-dashboard__loading" role="status"><RefreshCw size={24} className="animate-spin" /><p>Cargando tu información académica…</p></div>}
+            {activeTab === "inicio" && <StudentDashboard summary={academicSummary} attendance={attendanceStats} examStatus={derechoExamenesStatus} section={seccion} loading={loadingAcademic} error={academicError} onNavigate={navigatePortal} />}
 
         {/* =================================================================== */}
         {/* PESTAÑA A: MIS CALIFICACIONES - ORGANIZADO POR PARCIALES            */}
         {/* =================================================================== */}
-        {activeTab === "calificaciones" && (
-          <div className="sp-tab-content-container" style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
-            
-            {/* HERO ACADÉMICO: PROGRESO GLOBAL Y RESUMEN OFICIAL */}
-            <div
-              className="sp-hero-progress-card"
-              style={{
-                background: "linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)",
-                borderRadius: "1.1rem",
-                border: "1.5px solid #e2e8f0",
-                padding: "1.5rem",
-                boxShadow: "0 4px 20px -2px rgba(0, 0, 0, 0.04)",
-                position: "relative",
-                overflow: "hidden"
-              }}
-            >
-              {/* Decoración sutil de fondo */}
-              <div
-                style={{
-                  position: "absolute",
-                  top: "-40px",
-                  right: "-40px",
-                  width: "180px",
-                  height: "180px",
-                  borderRadius: "50%",
-                  background: `${theme.primary}10`,
-                  pointerEvents: "none",
-                  filter: "blur(20px)"
-                }}
-              />
-
-              <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: "1rem", position: "relative", zIndex: 1 }}>
-                <div>
-                  <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                    <span
-                      style={{
-                        background: theme.bg,
-                        color: theme.primary,
-                        border: `1px solid ${theme.border}`,
-                        fontSize: "0.74rem",
-                        fontWeight: 900,
-                        padding: "0.2rem 0.6rem",
-                        borderRadius: "9999px",
-                        letterSpacing: "0.5px"
-                      }}
-                    >
-                      HISTOLAB • {carreraKey.toUpperCase()}
-                    </span>
-                    <span style={{ fontSize: "0.76rem", color: "#64748b", fontWeight: 700 }}>
-                      Libro de Calificaciones Oficial
-                    </span>
-                  </div>
-
-                  <div style={{ marginTop: "0.5rem", display: "flex", alignItems: "baseline", gap: "0.6rem", flexWrap: "wrap" }}>
-                    <div style={{ fontSize: "2.4rem", fontWeight: 900, color: "#0f172a", letterSpacing: "-0.03em", lineHeight: 1.1 }}>
-                      {loadingAcademic ? "..." : totalDinamico}
-                    </div>
-                    <span style={{ fontSize: "1.1rem", fontWeight: 800, color: "#64748b" }}>
-                      / {maxPuntajeCarrera > 0 ? maxPuntajeCarrera : 100} pts
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-
-
-              {/* 4 Píldoras de desglose rápido */}
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
-                  gap: "0.65rem",
-                  marginTop: "1.15rem",
-                  paddingTop: "1rem",
-                  borderTop: "1px solid #f1f5f9"
-                }}
-              >
-                <div style={{ background: "#f0f9ff", border: "1px solid #bae6fd", borderRadius: "0.6rem", padding: "0.55rem 0.75rem" }}>
-                  <div style={{ fontSize: "0.68rem", fontWeight: 800, color: "#0369a1", textTransform: "uppercase" }}>Manuales (Oro)</div>
-                  <div style={{ fontSize: "1.05rem", fontWeight: 900, color: "#0c4a6e", marginTop: "0.15rem" }}>
-                    {loadingAcademic ? "..." : `${notaOroManuales}`} <span style={{ fontSize: "0.72rem", color: "#0284c7" }}>/ {maxNotaManuales} pts</span>
-                  </div>
-                </div>
-
-                <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: "0.6rem", padding: "0.55rem 0.75rem" }}>
-                  <div style={{ fontSize: "0.68rem", fontWeight: 800, color: "#15803d", textTransform: "uppercase" }}>Pruebas (Oro)</div>
-                  <div style={{ fontSize: "1.05rem", fontWeight: 900, color: "#14532d", marginTop: "0.15rem" }}>
-                    {loadingAcademic ? "..." : `${notaOroPruebas}`} <span style={{ fontSize: "0.72rem", color: "#16a34a" }}>/ {maxNotaPruebas} pts</span>
-                  </div>
-                </div>
-
-                <div style={{ background: "#faf5ff", border: "1px solid #e9d5ff", borderRadius: "0.6rem", padding: "0.55rem 0.75rem" }}>
-                  <div style={{ fontSize: "0.68rem", fontWeight: 800, color: "#7e22ce", textTransform: "uppercase" }}>Exámenes Parciales</div>
-                  <div style={{ fontSize: "1.05rem", fontWeight: 900, color: "#581c87", marginTop: "0.15rem" }}>
-                    {loadingAcademic ? "..." : `${sumaExamenes}`} <span style={{ fontSize: "0.72rem", color: "#9333ea" }}>/ {maxExamenesPuntaje} pts</span>
-                  </div>
-                </div>
-
-                <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "0.6rem", padding: "0.55rem 0.75rem" }}>
-                  <div style={{ fontSize: "0.68rem", fontWeight: 800, color: "#475569", textTransform: "uppercase" }}>Asistencia Global</div>
-                  <div style={{ fontSize: "1.05rem", fontWeight: 900, color: "#1e293b", marginTop: "0.15rem" }}>
-                    {loadingAcademic ? "..." : `${attendanceStats.asistenciasCount}`} <span style={{ fontSize: "0.72rem", color: "#64748b" }}>de {attendanceStats.totalSemanas} sem ({attendanceStats.pct}%)</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* BARRA SEGMENTADA DE FILTRADO POR PARCIAL */}
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                flexWrap: "wrap",
-                gap: "0.75rem",
-                padding: "0.4rem 0"
-              }}
-            >
-              <div style={{ display: "flex", alignItems: "center", gap: "0.45rem" }}>
-                <Layers size={18} color={theme.primary} />
-                <h3 style={{ fontSize: "1.05rem", fontWeight: 900, color: "#0f172a", margin: 0 }}>
-                  Evaluaciones Organizadas por Parcial
-                </h3>
-              </div>
-
-              {/* Selector de Parcial con Pills Modernos */}
-              <div
-                className="sp-parcial-selector"
-                style={{
-                  display: "inline-flex",
-                  background: "#f1f5f9",
-                  padding: "0.25rem",
-                  borderRadius: "0.75rem",
-                  gap: "0.25rem",
-                  border: "1px solid #e2e8f0",
-                  overflowX: "auto",
-                  maxWidth: "100%"
-                }}
-              >
-                <button
-                  type="button"
-                  onClick={() => setSelectedParcialFilter("todos")}
-                  style={{
-                    padding: "0.45rem 0.85rem",
-                    borderRadius: "0.55rem",
-                    border: "none",
-                    background: selectedParcialFilter === "todos" ? "#ffffff" : "transparent",
-                    color: selectedParcialFilter === "todos" ? "#0f172a" : "#64748b",
-                    fontWeight: 800,
-                    fontSize: "0.78rem",
-                    cursor: "pointer",
-                    boxShadow: selectedParcialFilter === "todos" ? "0 2px 6px rgba(0, 0, 0, 0.08)" : "none",
-                    transition: "all 0.15s ease",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "0.35rem",
-                    whiteSpace: "nowrap"
-                  }}
-                >
-                  <span>Todos los Parciales</span>
-                </button>
-
-                {parcialesData.map((p) => {
-                  const isSelected = selectedParcialFilter === p.key;
-                  return (
-                    <button
-                      key={p.key}
-                      type="button"
-                      onClick={() => setSelectedParcialFilter(p.key)}
-                      style={{
-                        padding: "0.45rem 0.85rem",
-                        borderRadius: "0.55rem",
-                        border: "none",
-                        background: isSelected ? theme.primary : "transparent",
-                        color: isSelected ? "#ffffff" : "#64748b",
-                        fontWeight: 800,
-                        fontSize: "0.78rem",
-                        cursor: "pointer",
-                        boxShadow: isSelected ? `0 2px 8px ${theme.primary}40` : "none",
-                        transition: "all 0.15s ease",
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "0.35rem",
-                        whiteSpace: "nowrap"
-                      }}
-                    >
-                      <span>{p.label}</span>
-                      <span
-                        style={{
-                          fontSize: "0.68rem",
-                          fontWeight: 900,
-                          padding: "0.08rem 0.35rem",
-                          borderRadius: "9999px",
-                          background: isSelected ? "rgba(255, 255, 255, 0.25)" : "#e2e8f0",
-                          color: isSelected ? "#ffffff" : "#475569"
-                        }}
-                      >
-                        {p.totalPuntosParcial} pts
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* CONTENEDORES DE CADA PARCIAL (FILTRADOS SEGÚN LA SELECCIÓN) */}
-            {parcialesData
-              .filter((p) => selectedParcialFilter === "todos" || selectedParcialFilter === p.key)
-              .map((p) => {
-                return (
-                  <div
-                    key={`parcial_card_${p.key}`}
-                    className="sp-card-panel animate-fade-in"
-                    style={{
-                      background: "#ffffff",
-                      borderRadius: "1rem",
-                      border: "1.5px solid #e2e8f0",
-                      padding: "1.4rem",
-                      boxShadow: "0 2px 10px rgba(0, 0, 0, 0.02)",
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: "1.15rem"
-                    }}
-                  >
-                    {/* ENCABEZADO DEL PARCIAL */}
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "space-between",
-                        flexWrap: "wrap",
-                        gap: "0.75rem",
-                        paddingBottom: "0.85rem",
-                        borderBottom: "1.5px solid #f1f5f9"
-                      }}
-                    >
-                      <div style={{ display: "flex", alignItems: "center", gap: "0.65rem" }}>
-                        <div
-                          style={{
-                            width: "36px",
-                            height: "36px",
-                            borderRadius: "0.6rem",
-                            background: p.bgLight,
-                            border: `1.5px solid ${p.borderLight}`,
-                            color: p.accent,
-                            fontWeight: 900,
-                            fontSize: "0.95rem",
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center"
-                          }}
-                        >
-                          {p.roman}
-                        </div>
-                        <div>
-                          <div style={{ display: "flex", alignItems: "center", gap: "0.45rem" }}>
-                            <h3 style={{ fontSize: "1.1rem", fontWeight: 900, color: "#0f172a", margin: 0 }}>
-                              {p.label}
-                            </h3>
-                            <span
-                              style={{
-                                fontSize: "0.72rem",
-                                fontWeight: 700,
-                                background: "#f1f5f9",
-                                color: "#475569",
-                                padding: "0.15rem 0.5rem",
-                                borderRadius: "0.4rem",
-                                border: "1px solid #e2e8f0"
-                              }}
-                            >
-                              {p.rangoSemanasText}
-                            </span>
-                          </div>
-                          <span style={{ fontSize: "0.76rem", color: "#64748b", fontWeight: 600 }}>
-                            Evaluación continua • {p.weeks.length} semanas calendarizadas
-                          </span>
-                        </div>
-                      </div>
-
-                      <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
-                        {/* Subtotal del parcial */}
-                        <span
-                          style={{
-                            fontSize: "0.8rem",
-                            fontWeight: 900,
-                            background: p.bgLight,
-                            color: p.accent,
-                            padding: "0.3rem 0.75rem",
-                            borderRadius: "9999px",
-                            border: `1px solid ${p.borderLight}`
-                          }}
-                        >
-                          Subtotal Parcial: {p.totalPuntosParcial} pts
-                        </span>
-
-                        {/* Píldora de Derecho a Examen del Parcial */}
-                        <span
-                          style={{
-                            fontSize: "0.76rem",
-                            fontWeight: 800,
-                            padding: "0.3rem 0.7rem",
-                            borderRadius: "9999px",
-                            background: p.perdioDerecho ? "#fee2e2" : "#f0fdf4",
-                            color: p.perdioDerecho ? "#b91c1c" : "#15803d",
-                            border: p.perdioDerecho ? "1px solid #fca5a5" : "1px solid #bbf7d0",
-                            display: "inline-flex",
-                            alignItems: "center",
-                            gap: "0.35rem"
-                          }}
-                        >
-                          {p.perdioDerecho ? (
-                            <>
-                              <ShieldAlert size={14} color="#dc2626" />
-                              <span>Sin Derecho ({p.faltasInjustificadas} faltas injustificadas)</span>
-                            </>
-                          ) : (
-                            <>
-                              <ShieldCheck size={14} color="#16a34a" />
-                              <span>Derecho a Examen Habilitado ✓</span>
-                            </>
-                          )}
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* CUADRÍCULA CON ELEMENTOS DEL PARCIAL */}
-                    <div
-                      style={{
-                        display: "grid",
-                        gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
-                        gap: "1rem"
-                      }}
-                    >
-                      {/* CARD 1: EXAMEN PARCIAL */}
-                      {(p.examenes.length ? p.examenes : [null]).map(examen => <div key={examen?.id || "sin-examen"}
-                        style={{
-                          background: "#faf5ff",
-                          border: "1.5px solid #e9d5ff",
-                          borderRadius: "0.85rem",
-                          padding: "1.15rem",
-                          display: "flex",
-                          flexDirection: "column",
-                          justifyContent: "space-between",
-                          gap: "0.85rem"
-                        }}
-                      >
-                        <div>
-                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "0.5rem" }}>
-                            <div style={{ display: "flex", alignItems: "center", gap: "0.45rem" }}>
-                              <GraduationCap size={18} color="#7c3aed" />
-                              <strong style={{ fontSize: "0.88rem", color: "#581c87" }}>
-                                {examen?.label || `Examen ${p.label}`}
-                              </strong>
-                            </div>
-                            {(() => {
-                              const isExamGraded = examen?.nota !== null && examen?.nota !== undefined && examen?.nota !== "";
-                              return (
-                                <span
-                                  style={{
-                                    fontSize: "0.68rem",
-                                    fontWeight: 800,
-                                    padding: "0.15rem 0.5rem",
-                                    borderRadius: "0.35rem",
-                                    background: isExamGraded ? "#dcfce7" : "#f1f5f9",
-                                    color: isExamGraded ? "#15803d" : "#64748b",
-                                    border: isExamGraded ? "1px solid #86efac" : "1px solid #e2e8f0"
-                                  }}
-                                >
-                                  {isExamGraded ? "✓ Calificado" : "⏳ Pendiente"}
-                                </span>
-                              );
-                            })()}
-                          </div>
-
-                          <div style={{ fontSize: "1.75rem", fontWeight: 900, color: "#581c87", lineHeight: 1.1 }}>
-                            {formatGrade(examen?.nota)}{" "}
-                            <span style={{ fontSize: "0.85rem", fontWeight: 700, color: "#9333ea" }}>
-                              / {examen?.ptsMax || 10} pts
-                            </span>
-                          </div>
-
-                          <div style={{ fontSize: "0.74rem", color: "#6b21a8", marginTop: "0.35rem", fontWeight: 600 }}>
-                            {examen?.subLabel || `Evaluación oficial de ${p.label}`}
-                          </div>
-                        </div>
-
-                        {p.perdioDerecho && (
-                          <div
-                            style={{
-                              background: "#fee2e2",
-                              border: "1px solid #fca5a5",
-                              borderRadius: "0.5rem",
-                              padding: "0.45rem 0.65rem",
-                              fontSize: "0.72rem",
-                              color: "#991b1b",
-                              fontWeight: 700,
-                              display: "flex",
-                              alignItems: "center",
-                              gap: "0.35rem"
-                            }}
-                          >
-                            <AlertTriangle size={14} color="#dc2626" />
-                            <span>Inhabilitado por 2+ faltas injustificadas en este parcial.</span>
-                          </div>
-                        )}
-                      </div>)}
-
-                      {/* CARD 2: MANUALES DE LABORATORIO */}
-                      <div
-                        style={{
-                          background: "#ffffff",
-                          border: "1.5px solid #e2e8f0",
-                          borderRadius: "0.85rem",
-                          padding: "1.15rem",
-                          display: "flex",
-                          flexDirection: "column",
-                          gap: "0.65rem"
-                        }}
-                      >
-                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", paddingBottom: "0.4rem", borderBottom: "1px solid #f1f5f9" }}>
-                          <div style={{ display: "flex", alignItems: "center", gap: "0.45rem" }}>
-                            <BookOpen size={18} color="#0284c7" />
-                            <strong style={{ fontSize: "0.88rem", color: "#0c4a6e" }}>
-                              Manuales del {p.label}
-                            </strong>
-                          </div>
-                          <span style={{ fontSize: "0.74rem", fontWeight: 800, color: "#0369a1", background: "#e0f2fe", padding: "0.15rem 0.5rem", borderRadius: "9999px" }}>
-                            {p.subtotalManuales} pts ({p.manualesCalificadosCount}/{p.manuales.length})
-                          </span>
-                        </div>
-
-                        {p.manuales.length === 0 ? (
-                          <div style={{ padding: "1rem", textAlign: "center", color: "#94a3b8", fontSize: "0.78rem" }}>
-                            No hay manuales asignados en este parcial.
-                          </div>
-                        ) : (
-                          <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem", maxHeight: "190px", overflowY: "auto" }}>
-                            {p.manuales.map((m) => {
-                              const hasGrade = m.nota !== null && m.nota !== undefined && m.nota !== "";
-                              return (
-                                <div
-                                  key={m.key}
-                                  style={{
-                                    display: "flex",
-                                    alignItems: "center",
-                                    justifyContent: "space-between",
-                                    padding: "0.45rem 0.65rem",
-                                    borderRadius: "0.45rem",
-                                    background: "#f0f9ff",
-                                    border: "1px solid #bae6fd",
-                                    fontSize: "0.78rem"
-                                  }}
-                                >
-                                  <div style={{ minWidth: 0, flex: 1, paddingRight: "0.5rem" }}>
-                                    <div style={{ fontWeight: 700, color: "#0369a1", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                                      {m.label}
-                                    </div>
-                                    {m.semana > 0 && (
-                                      <span style={{ fontSize: "0.68rem", color: "#0284c7", fontWeight: 600 }}>
-                                        Semana {m.semana}
-                                      </span>
-                                    )}
-                                  </div>
-                                  <strong style={{ fontSize: "0.88rem", color: hasGrade ? "#0c4a6e" : "#94a3b8", whiteSpace: "nowrap" }}>
-                                    {formatGrade(m.nota)} <span style={{ fontSize: "0.68rem", color: "#0284c7" }}>/ 1.0 pt</span>
-                                  </strong>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </div>
-
-                      {/* CARD 3: PRUEBAS SEMANALES */}
-                      <div
-                        style={{
-                          background: "#ffffff",
-                          border: "1.5px solid #e2e8f0",
-                          borderRadius: "0.85rem",
-                          padding: "1.15rem",
-                          display: "flex",
-                          flexDirection: "column",
-                          gap: "0.65rem"
-                        }}
-                      >
-                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", paddingBottom: "0.4rem", borderBottom: "1px solid #f1f5f9" }}>
-                          <div style={{ display: "flex", alignItems: "center", gap: "0.45rem" }}>
-                            <FileEdit size={18} color="#16a34a" />
-                            <strong style={{ fontSize: "0.88rem", color: "#14532d" }}>
-                              Pruebas del {p.label}
-                            </strong>
-                          </div>
-                          <span style={{ fontSize: "0.74rem", fontWeight: 800, color: "#15803d", background: "#dcfce7", padding: "0.15rem 0.5rem", borderRadius: "9999px" }}>
-                            {p.subtotalPruebas} pts ({p.pruebasCalificadasCount}/{p.pruebas.length})
-                          </span>
-                        </div>
-
-                        {p.pruebas.length === 0 ? (
-                          <div style={{ padding: "1rem", textAlign: "center", color: "#94a3b8", fontSize: "0.78rem" }}>
-                            No hay pruebas cortas programadas en este parcial.
-                          </div>
-                        ) : (
-                          <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem", maxHeight: "190px", overflowY: "auto" }}>
-                            {p.pruebas.map((pr) => {
-                              const hasGrade = pr.nota !== null && pr.nota !== undefined && pr.nota !== "";
-                              const sub = existingSubmissions[pr.semana];
-                              return (
-                                <div
-                                  key={pr.key}
-                                  style={{
-                                    display: "flex",
-                                    alignItems: "center",
-                                    justifyContent: "space-between",
-                                    padding: "0.45rem 0.65rem",
-                                    borderRadius: "0.45rem",
-                                    background: "#f0fdf4",
-                                    border: "1px solid #bbf7d0",
-                                    fontSize: "0.78rem"
-                                  }}
-                                >
-                                  <div style={{ minWidth: 0, flex: 1, paddingRight: "0.5rem" }}>
-                                    <div style={{ fontWeight: 700, color: "#15803d", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                                      {pr.label}
-                                    </div>
-                                    <span style={{ fontSize: "0.68rem", color: "#16a34a", fontWeight: 600 }}>
-                                      Semana {pr.semana}
-                                    </span>
-                                  </div>
-
-                                  <div style={{ display: "flex", alignItems: "center", gap: "0.45rem" }}>
-                                    <strong style={{ fontSize: "0.88rem", color: hasGrade ? "#14532d" : "#94a3b8", whiteSpace: "nowrap" }}>
-                                      {formatGrade(pr.nota)} <span style={{ fontSize: "0.68rem", color: "#16a34a" }}>/ 5.0 pts</span>
-                                    </strong>
-                                    {sub && (
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          const qObj = (onlineQuizzes || []).find((q) => Number(q.numero_semana) === Number(pr.semana)) || {
-                                            numero_semana: pr.semana,
-                                            titulo: pr.label
-                                          };
-                                          handleOpenReview(qObj, sub);
-                                        }}
-                                        style={{
-                                          padding: "0.2rem 0.45rem",
-                                          fontSize: "0.68rem",
-                                          fontWeight: 800,
-                                          borderRadius: "0.35rem",
-                                          border: "1px solid #86efac",
-                                          background: "#ffffff",
-                                          color: "#15803d",
-                                          cursor: "pointer"
-                                        }}
-                                        title="Ver comprobante de prueba"
-                                      >
-                                        Revisar
-                                      </button>
-                                    )}
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* SECCIÓN INFERIOR: HISTORIAL DE ASISTENCIAS DEL PARCIAL */}
-                    <div
-                      style={{
-                        background: "#f8fafc",
-                        border: "1px solid #e2e8f0",
-                        borderRadius: "0.75rem",
-                        padding: "0.75rem 1rem",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "space-between",
-                        flexWrap: "wrap",
-                        gap: "0.65rem"
-                      }}
-                    >
-                      <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                        <CalendarCheck size={16} color="#0891b2" />
-                        <span style={{ fontSize: "0.78rem", fontWeight: 800, color: "#334155" }}>
-                          Asistencia en {p.label}:
-                        </span>
-                        <span style={{ fontSize: "0.78rem", fontWeight: 700, color: "#16a34a" }}>
-                          ✓ {p.asistenciasCount} Asistió
-                        </span>
-                        {p.faltasJustificadas > 0 && (
-                          <span style={{ fontSize: "0.78rem", fontWeight: 700, color: "#d97706" }}>
-                            • {p.faltasJustificadas} FJ
-                          </span>
-                        )}
-                        {p.faltasInjustificadas > 0 && (
-                          <span style={{ fontSize: "0.78rem", fontWeight: 700, color: "#dc2626" }}>
-                            • {p.faltasInjustificadas} FI
-                          </span>
-                        )}
-                      </div>
-
-                      {/* Chips de semanas del parcial */}
-                      <div style={{ display: "flex", flexWrap: "wrap", gap: "0.3rem" }}>
-                        {p.semanasAsistencia.map((semItem) => {
-                          const isAsist = semItem.estado === "Asistio";
-                          const isFJ = semItem.estado === "Falta justificada";
-                          const isFI = semItem.estado === "Falta injustificada";
-
-                          let bgSem = "#f1f5f9";
-                          let colorSem = "#64748b";
-                          let labelSem = `S${semItem.semana}: —`;
-
-                          if (isAsist) {
-                            bgSem = "#dcfce7";
-                            colorSem = "#15803d";
-                            labelSem = `S${semItem.semana}: ✓`;
-                          } else if (isFJ) {
-                            bgSem = "#fef3c7";
-                            colorSem = "#b45309";
-                            labelSem = `S${semItem.semana}: FJ`;
-                          } else if (isFI) {
-                            bgSem = "#fee2e2";
-                            colorSem = "#b91c1c";
-                            labelSem = `S${semItem.semana}: FI`;
-                          }
-
-                          return (
-                            <span
-                              key={`sem_pill_${p.key}_${semItem.semana}`}
-                              style={{
-                                fontSize: "0.68rem",
-                                fontWeight: 800,
-                                padding: "0.15rem 0.45rem",
-                                borderRadius: "0.35rem",
-                                background: bgSem,
-                                color: colorSem
-                              }}
-                              title={`${semItem.nombre}: ${semItem.estado}`}
-                            >
-                              {labelSem}
-                            </span>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-          </div>
+        {activeTab === "calificaciones" && !loadingAcademic && !academicError && (
+          <StudentGradesView summary={academicSummary} parciales={parcialesData} submissions={existingSubmissions}
+            onAttendance={() => navigatePortal("asistencia")}
+            onReview={(prueba, submission) => {
+              const quiz = (onlineQuizzes || []).find(q => Number(q.numero_semana) === Number(prueba.semana)) || {
+                numero_semana: prueba.semana, titulo: prueba.label
+              };
+              setActiveTab("pruebas");
+              handleOpenReview(quiz, submission);
+            }} />
         )}
 
         {/* =================================================================== */}
         {/* PESTAÑA B: CONTROL DE ASISTENCIA                                    */}
         {/* =================================================================== */}
-        {activeTab === "asistencia" && (
-          <div
-            className="sp-card-panel"
-            style={{
-              background: "#ffffff",
-              borderRadius: "1rem",
-              border: "1px solid #e2e8f0",
-              padding: "1.5rem",
-              boxShadow: "0 2px 8px rgba(0, 0, 0, 0.02)"
-            }}
-          >
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "1rem", flexWrap: "wrap", gap: "0.75rem" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                <CalendarCheck size={20} color="#0284c7" />
-                <h3 style={{ fontSize: "1.05rem", fontWeight: 800, color: "#0f172a", margin: 0 }}>
-                  Historial de Asistencias por Semana
-                </h3>
-              </div>
-
-              <div className="sp-asistencia-legend" style={{ display: "flex", gap: "0.75rem", fontSize: "0.76rem", fontWeight: 700 }}>
-                <span style={{ color: "#16a34a" }}>✓ Asistió ({attendanceStats.asistenciasCount})</span>
-                <span style={{ color: "#d97706" }}>FJ Falta Justificada ({attendanceStats.faltasJustificadas})</span>
-                <span style={{ color: "#dc2626" }}>FI Falta Injustificada ({attendanceStats.faltasInjustificadas})</span>
-              </div>
-            </div>
-
-            {/* Banner de Estado de Derecho por Examen */}
-            <div
-              className="sp-asistencia-banner"
-              style={{
-                background: derechoExamenesStatus.perdioAlguno ? "#fef2f2" : "#f0fdf4",
-                border: `1.5px solid ${derechoExamenesStatus.perdioAlguno ? "#f87171" : "#86efac"}`,
-                borderRadius: "0.75rem",
-                padding: "0.85rem 1.25rem",
-                marginBottom: "1.25rem",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                flexWrap: "wrap",
-                gap: "0.75rem"
-              }}
-            >
-              <div style={{ display: "flex", alignItems: "center", gap: "0.65rem" }}>
-                {derechoExamenesStatus.perdioAlguno ? (
-                  <ShieldAlert size={20} color="#dc2626" />
-                ) : (
-                  <ShieldCheck size={20} color="#16a34a" />
-                )}
-                <div>
-                  <div style={{ fontSize: "0.86rem", fontWeight: 800, color: derechoExamenesStatus.perdioAlguno ? "#991b1b" : "#166534" }}>
-                    Estado de Derecho: {derechoExamenesStatus.titulo}
-                  </div>
-                  <div style={{ fontSize: "0.74rem", color: derechoExamenesStatus.perdioAlguno ? "#b91c1c" : "#15803d" }}>
-                    {derechoExamenesStatus.perdioAlguno
-                      ? "Se pierde el derecho a examen al acumular 2 o más faltas injustificadas en el periodo evaluado."
-                      : `El estudiante cumple con la asistencia reglamentaria para los ${derechoExamenesStatus.totalExams} exámenes del periodo.`}
-                  </div>
-                </div>
-              </div>
-              <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap" }}>
-                {derechoExamenesStatus.exams.map((dex) => (
-                  <span
-                    key={dex.id}
-                    style={{
-                      fontSize: "0.74rem",
-                      fontWeight: 800,
-                      padding: "0.2rem 0.6rem",
-                      borderRadius: "0.4rem",
-                      background: dex.perdio ? "#fee2e2" : "#ffffff",
-                      color: dex.perdio ? "#b91c1c" : "#15803d",
-                      border: dex.perdio ? "1px solid #fca5a5" : "1px solid #bbf7d0"
-                    }}
-                  >
-                    {dex.label}: {dex.perdio ? `🚨 Sin Derecho (${dex.faltasInjustificadas} faltas)` : "✓ Habilitado"}
-                  </span>
-                ))}
-              </div>
-            </div>
-
-            {activeCareerWeeks.length === 0 ? (
-              <div style={{ padding: "1.5rem", textAlign: "center", color: "#94a3b8", fontSize: "0.82rem" }}>
-                No hay semanas académicas configuradas para esta carrera.
-              </div>
-            ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
-                {parcialesData.map((p) => {
-                  if (p.weeks.length === 0) return null;
-                  return (
-                    <div
-                      key={`asist_parcial_block_${p.key}`}
-                      style={{
-                        background: "#f8fafc",
-                        border: "1px solid #e2e8f0",
-                        borderRadius: "0.85rem",
-                        padding: "1rem 1.15rem",
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: "0.85rem"
-                      }}
-                    >
-                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "0.5rem" }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                          <span
-                            style={{
-                              fontSize: "0.88rem",
-                              fontWeight: 900,
-                              color: p.accent,
-                              background: p.bgLight,
-                              padding: "0.2rem 0.6rem",
-                              borderRadius: "0.4rem",
-                              border: `1px solid ${p.borderLight}`
-                            }}
-                          >
-                            {p.label}
-                          </span>
-                          <span style={{ fontSize: "0.75rem", color: "#64748b", fontWeight: 700 }}>
-                            ({p.rangoSemanasText})
-                          </span>
-                        </div>
-
-                        <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap" }}>
-                          <span style={{ fontSize: "0.74rem", fontWeight: 800, color: "#16a34a", background: "#dcfce7", padding: "0.15rem 0.5rem", borderRadius: "9999px" }}>
-                            ✓ {p.asistenciasCount} Asistió
-                          </span>
-                          {p.faltasJustificadas > 0 && (
-                            <span style={{ fontSize: "0.74rem", fontWeight: 800, color: "#d97706", background: "#fef3c7", padding: "0.15rem 0.5rem", borderRadius: "9999px" }}>
-                              • {p.faltasJustificadas} FJ
-                            </span>
-                          )}
-                          {p.faltasInjustificadas > 0 && (
-                            <span style={{ fontSize: "0.74rem", fontWeight: 800, color: "#dc2626", background: "#fee2e2", padding: "0.15rem 0.5rem", borderRadius: "9999px" }}>
-                              • {p.faltasInjustificadas} FI
-                            </span>
-                          )}
-                          <span
-                            style={{
-                              fontSize: "0.72rem",
-                              fontWeight: 800,
-                              padding: "0.15rem 0.5rem",
-                              borderRadius: "9999px",
-                              background: p.perdioDerecho ? "#fee2e2" : "#f0fdf4",
-                              color: p.perdioDerecho ? "#b91c1c" : "#15803d",
-                              border: p.perdioDerecho ? "1px solid #fca5a5" : "1px solid #bbf7d0"
-                            }}
-                          >
-                            {p.perdioDerecho ? "🚨 Sin Derecho" : "✓ Con Derecho"}
-                          </span>
-                        </div>
-                      </div>
-
-                      <div className="sp-asistencia-grid">
-                        {p.semanasAsistencia.map((wItem) => {
-                          const val = wItem.estado;
-                          let bg = "#ffffff";
-                          let border = "#e2e8f0";
-                          let textColor = "#64748b";
-                          let badgeText = "Sin registro";
-
-                          if (val === "Asistio") {
-                            bg = "#f0fdf4";
-                            border = "#86efac";
-                            textColor = "#15803d";
-                            badgeText = "Asistió ✓";
-                          } else if (val === "Falta justificada") {
-                            bg = "#fffbeb";
-                            border = "#fde68a";
-                            textColor = "#b45309";
-                            badgeText = "Falta Justificada";
-                          } else if (val === "Falta injustificada") {
-                            bg = "#fef2f2";
-                            border = "#fecdd3";
-                            textColor = "#dc2626";
-                            badgeText = "Falta Injustificada ✗";
-                          }
-
-                          return (
-                            <div
-                              key={`asist_sem_${wItem.semana}`}
-                              className="sp-asistencia-item"
-                              style={{
-                                background: bg,
-                                border: `1.5px solid ${border}`,
-                                borderRadius: "0.75rem",
-                                padding: "0.75rem 0.65rem",
-                                textAlign: "center",
-                                display: "flex",
-                                flexDirection: "column",
-                                gap: "0.3rem"
-                              }}
-                            >
-                              <span className="sp-asistencia-name" style={{ fontSize: "0.76rem", fontWeight: 800, color: "#1e293b", lineHeight: 1.25 }}>
-                                {wItem.nombre}
-                              </span>
-                              <strong className="sp-asistencia-badge" style={{ fontSize: "0.8rem", color: textColor, fontWeight: 800 }}>
-                                {badgeText}
-                              </strong>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
+        {activeTab === "asistencia" && !loadingAcademic && !academicError && (
+          <StudentAttendanceView parciales={parcialesData} examStatus={derechoExamenesStatus} />
         )}
 
         {/* =================================================================== */}
@@ -4100,7 +2582,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
             {reviewingSubmission ? (
               /* CASO 2: REVISIÓN DE COMPROBANTE Y RESPUESTAS ENTREGADAS */
               <div
-                className="animate-fade-in"
+                className="student-quiz-receipt"
                 style={{
                   background: "#ffffff",
                   borderRadius: "1rem",
@@ -4111,10 +2593,11 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                   gap: "1.5rem"
                 }}
               >
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1.5px solid #f1f5f9", paddingBottom: "1rem" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+                <div className="student-quiz-receipt__header" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1.5px solid #f1f5f9", paddingBottom: "1rem" }}>
+                  <div className="student-quiz-receipt__identity" style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
                     <button
                       type="button"
+                      aria-label="Volver a pruebas semanales"
                       onClick={() => setReviewingSubmission(null)}
                       style={{
                         display: "flex",
@@ -4136,12 +2619,12 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                         Comprobante de Entrega • Semana {reviewingSubmission.quiz.numero_semana}
                       </span>
                       <h3 style={{ margin: "0.15rem 0 0", fontSize: "1.25rem", fontWeight: 900, color: "#0f172a" }}>
-                        {reviewingSubmission.quiz.titulo}
+                        {reviewingSubmission.quiz.titulo || `Prueba semanal ${reviewingSubmission.quiz.numero_semana}`}
                       </h3>
                     </div>
                   </div>
 
-                  <div
+                  <div className="student-quiz-receipt__status"
                     style={{
                       padding: "0.5rem 1rem",
                       borderRadius: "0.6rem",
@@ -4153,14 +2636,16 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                     }}
                   >
                     {reviewingSubmission.submission.estado === "calificado"
-                      ? `Nota Obtenida: ${Number(reviewingSubmission.submission.nota_obtenida).toFixed(3)} / 5.000 pts`
-                      : "Estado: Entregada (En espera de calificación docente)"}
+                      ? (reviewingSubmission.submission.nota_obtenida !== null && reviewingSubmission.submission.nota_obtenida !== undefined && Number.isFinite(Number(reviewingSubmission.submission.nota_obtenida))
+                          ? `Nota oficial: ${Number(reviewingSubmission.submission.nota_obtenida).toFixed(3)} / 5.000 pts`
+                          : "Calificada · nota por sincronizar")
+                      : "Entregada · en revisión"}
                   </div>
                 </div>
 
                 {reviewingSubmission.submission.comentarios && (
                   <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", padding: "0.85rem 1.1rem", borderRadius: "0.65rem", fontSize: "0.85rem", color: "#166534" }}>
-                    💬 <strong>Comentarios del Docente:</strong> {reviewingSubmission.submission.comentarios}
+                    💬 <strong>Comentarios del instructor titular de la sección:</strong> {reviewingSubmission.submission.comentarios}
                   </div>
                 )}
 
@@ -4219,7 +2704,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                             </span>
 
                             <span style={{ fontSize: "0.82rem", fontWeight: 800, color: isBonus ? "#92400e" : "#475569" }}>
-                              Valor: {qMaxPts.toFixed(2)} pts {isBonus ? "(Extra)" : ""}
+                              Valor: {qMaxPts.toFixed(3)} pts {isBonus ? "(Extra)" : ""}
                             </span>
                           </div>
 
@@ -4788,1051 +3273,33 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                 </div>
               </div>
             ) : (
-              /* CASO 3: CATÁLOGO DE PRUEBAS SEMANALES DISPONIBLES */
-              <>
-                <div
-                  style={{
-                    background: "linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%)",
-                    border: "1.5px solid #bae6fd",
-                    borderRadius: "1rem",
-                    padding: "1.25rem 1.5rem",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    flexWrap: "wrap",
-                    gap: "1rem"
-                  }}
-                >
-                  <div style={{ display: "flex", alignItems: "center", gap: "0.85rem" }}>
-                    <div
-                      style={{
-                        width: "42px",
-                        height: "42px",
-                        borderRadius: "0.75rem",
-                        background: "#0284c7",
-                        color: "#ffffff",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center"
-                      }}
-                    >
-                      <HelpCircle size={22} />
-                    </div>
-                    <div>
-                      <h3 style={{ margin: 0, fontSize: "1.05rem", fontWeight: 900, color: "#0369a1" }}>
-                        Módulo de Pruebas Semanales de Laboratorio
-                      </h3>
-                      <p style={{ margin: "0.15rem 0 0", fontSize: "0.82rem", color: "#0284c7" }}>
-                        Aquí puedes realizar tus pruebas prácticas de micrografías histológicas y consultar tus calificaciones oficiales.
-                      </p>
-                    </div>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={loadStudentQuizzes}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "0.4rem",
-                      padding: "0.45rem 0.85rem",
-                      borderRadius: "0.55rem",
-                      border: "1px solid #bae6fd",
-                      background: "#ffffff",
-                      color: "#0369a1",
-                      fontSize: "0.8rem",
-                      fontWeight: 700,
-                      cursor: "pointer"
-                    }}
-                  >
-                    <RefreshCw size={14} className={loadingQuizzes ? "animate-spin" : ""} />
-                    <span>Actualizar</span>
-                  </button>
-                </div>
-
-                {loadingQuizzes ? (
-                  <div style={{ padding: "3rem", textAlign: "center", color: "#64748b" }}>
-                    <RefreshCw size={24} className="animate-spin" color="#0284c7" style={{ margin: "0 auto 0.75rem" }} />
-                    <span style={{ fontSize: "0.88rem", fontWeight: 700 }}>Cargando pruebas semanales disponibles...</span>
-                  </div>
-                ) : onlineQuizzes.length === 0 ? (
-                  <div
-                    style={{
-                      background: "#ffffff",
-                      borderRadius: "1rem",
-                      border: "1px solid #e2e8f0",
-                      padding: "3rem",
-                      textAlign: "center",
-                      color: "#64748b"
-                    }}
-                  >
-                    <HelpCircle size={36} color="#94a3b8" style={{ margin: "0 auto 0.75rem" }} />
-                    <h4 style={{ margin: "0 0 0.35rem", fontSize: "1rem", fontWeight: 800, color: "#0f172a" }}>
-                      No hay pruebas semanales publicadas en este momento
-                    </h4>
-                    <p style={{ margin: 0, fontSize: "0.84rem" }}>
-                      Tu docente publicará aquí las evaluaciones correspondientes a cada semana de laboratorio.
-                    </p>
-                  </div>
-                ) : (
-                  <div className="sp-quizzes-grid">
-                    {onlineQuizzes.map((quiz) => {
-                      const submission = existingSubmissions[quiz.numero_semana];
-                      const isSubmitted = Boolean(submission);
-                      const isGraded = submission?.estado === "calificado";
-                      const liveSess = liveSessionsMap[quiz.numero_semana] || null;
-                      const isLiveEnabled = Boolean(
-                        liveSess &&
-                        (liveSess.habilitada ||
-                          liveSess.estado === "lobby" ||
-                          liveSess.estado === "en_pregunta" ||
-                          liveSess.estado === "esperando_siguiente")
-                      );
-
-                      return (
-                        <div
-                          key={quiz.id || quiz.numero_semana}
-                          className="sp-quiz-card"
-                          style={{
-                            background: "#ffffff",
-                            borderRadius: "1rem",
-                            border: "1.5px solid #e2e8f0",
-                            boxShadow: "0 2px 8px rgba(0, 0, 0, 0.03)",
-                            padding: "1.4rem",
-                            display: "flex",
-                            flexDirection: "column",
-                            justifyContent: "space-between",
-                            gap: "1.1rem",
-                            transition: "transform 0.15s ease, box-shadow 0.15s ease"
-                          }}
-                        >
-                          <div>
-                            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "0.6rem" }}>
-                              <span
-                                style={{
-                                  fontSize: "0.75rem",
-                                  fontWeight: 900,
-                                  color: "#0284c7",
-                                  background: "#f0f9ff",
-                                  border: "1px solid #bae6fd",
-                                  padding: "0.2rem 0.6rem",
-                                  borderRadius: "0.45rem"
-                                }}
-                              >
-                                SEMANA {quiz.numero_semana}
-                              </span>
-
-                              <div style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
-                                <Clock size={14} color="#64748b" />
-                                <span style={{ fontSize: "0.76rem", color: "#64748b", fontWeight: 700 }}>
-                                  {quiz.duracionMinutos || 15} min
-                                </span>
-                              </div>
-                            </div>
-
-                            <h4 style={{ margin: "0 0 0.4rem", fontSize: "1.05rem", fontWeight: 900, color: "#0f172a" }}>
-                              {quiz.titulo || `Prueba Semanal ${quiz.numero_semana}`}
-                            </h4>
-
-                            <p style={{ margin: 0, fontSize: "0.82rem", color: "#64748b", lineHeight: 1.45, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
-                              {quiz.instrucciones}
-                            </p>
-                          </div>
-
-                          <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem", borderTop: "1px solid #f1f5f9", paddingTop: "0.9rem" }}>
-                            {/* Estatus */}
-                            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                              <span style={{ fontSize: "0.75rem", fontWeight: 700, color: "#64748b" }}>
-                                {quiz.preguntas?.length || 0} preguntas • {formatTimer(Number(quiz.tiempo_por_pregunta_segundos || 90))} min c/u
-                              </span>
-
-                              {isGraded ? (
-                                <span style={{ fontSize: "0.78rem", fontWeight: 900, color: "#16a34a", background: "#f0fdf4", border: "1px solid #86efac", padding: "0.2rem 0.55rem", borderRadius: "0.4rem" }}>
-                                  ✓ {Number(submission.nota_obtenida).toFixed(3)} / 5.000 pts
-                                </span>
-                              ) : isSubmitted ? (
-                                <span style={{ fontSize: "0.78rem", fontWeight: 800, color: "#d97706", background: "#fffbeb", border: "1px solid #fde68a", padding: "0.2rem 0.55rem", borderRadius: "0.4rem" }}>
-                                  ⏳ Entregada • En revisión
-                                </span>
-                              ) : isLiveEnabled ? (
-                                <span style={{ fontSize: "0.78rem", fontWeight: 900, color: "#16a34a", background: "#f0fdf4", border: "1px solid #86efac", padding: "0.2rem 0.55rem", borderRadius: "0.4rem", display: "inline-flex", alignItems: "center", gap: "0.3rem" }}>
-                                  <Radio size={12} className="animate-pulse" />
-                                  <span>🔴 EN VIVO • Habilitada</span>
-                                </span>
-                              ) : (
-                                <span style={{ fontSize: "0.78rem", fontWeight: 800, color: "#d97706", background: "#fffbeb", border: "1px solid #fde68a", padding: "0.2rem 0.55rem", borderRadius: "0.4rem", display: "inline-flex", alignItems: "center", gap: "0.3rem" }}>
-                                  <Lock size={12} />
-                                  <span>🔒 Publicada • En espera</span>
-                                </span>
-                              )}
-                            </div>
-
-                            {/* Botón de acción */}
-                            {isSubmitted ? (
-                              <button
-                                type="button"
-                                onClick={() => handleOpenReview(quiz, submission)}
-                                style={{
-                                  width: "100%",
-                                  padding: "0.55rem",
-                                  borderRadius: "0.6rem",
-                                  border: "1.5px solid #cbd5e1",
-                                  background: "#ffffff",
-                                  color: "#334155",
-                                  fontSize: "0.84rem",
-                                  fontWeight: 800,
-                                  cursor: "pointer",
-                                  display: "flex",
-                                  alignItems: "center",
-                                  justifyContent: "center",
-                                  gap: "0.45rem"
-                                }}
-                              >
-                                <Eye size={16} />
-                                <span>Ver Mis Respuestas / Comprobante</span>
-                              </button>
-                            ) : isLiveEnabled ? (
-                              <button
-                                type="button"
-                                onClick={() => handleStartQuiz(quiz, liveSess)}
-                                style={{
-                                  width: "100%",
-                                  padding: "0.65rem",
-                                  borderRadius: "0.6rem",
-                                  border: "none",
-                                  background: "linear-gradient(135deg, #16a34a 0%, #15803d 100%)",
-                                  color: "#ffffff",
-                                  fontSize: "0.88rem",
-                                  fontWeight: 900,
-                                  cursor: "pointer",
-                                  display: "flex",
-                                  alignItems: "center",
-                                  justifyContent: "center",
-                                  gap: "0.45rem",
-                                  boxShadow: "0 4px 14px rgba(22, 163, 74, 0.35)"
-                                }}
-                              >
-                                <Radio size={16} className="animate-pulse" />
-                                <span>Entrar a la Prueba en Vivo</span>
-                              </button>
-                            ) : (
-                              <button
-                                type="button"
-                                disabled
-                                style={{
-                                  width: "100%",
-                                  padding: "0.6rem",
-                                  borderRadius: "0.6rem",
-                                  border: "1.5px solid #e2e8f0",
-                                  background: "#f8fafc",
-                                  color: "#94a3b8",
-                                  fontSize: "0.85rem",
-                                  fontWeight: 800,
-                                  cursor: "not-allowed",
-                                  display: "flex",
-                                  alignItems: "center",
-                                  justifyContent: "center",
-                                  gap: "0.45rem"
-                                }}
-                                title="La prueba está publicada pero el docente aún no la ha habilitado en vivo."
-                              >
-                                <Lock size={15} />
-                                <span>En Espera de Habilitación Docente</span>
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </>
+              <StudentQuizzesView quizzes={onlineQuizzes} submissions={existingSubmissions} sessions={liveSessionsMap} parciales={parcialesData}
+                loading={loadingQuizzes} error={quizLoadError} onRefresh={loadStudentQuizzes}
+                onStart={handleStartQuiz} onReview={handleOpenReview} />
             )}
           </div>
         )}
           </>
         ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem", width: "100%" }}>
-            <div
-                className="animate-fade-in sp-quiz-take-card"
-                style={{
-                  position: "relative",
-                  background: "#ffffff",
-                  borderRadius: "1rem",
-                  border: strikesCount >= 2 ? "2px solid #ef4444" : strikesCount === 1 ? "2px solid #f59e0b" : "1.5px solid #cbd5e1",
-                  boxShadow: "0 8px 30px rgba(0, 0, 0, 0.08)",
-                  padding: "1.75rem",
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: "1.5rem",
-                  userSelect: "none",
-                  WebkitUserSelect: "none",
-                  WebkitTouchCallout: "none",
-                  overscrollBehaviorY: "contain"
-                }}
-                onContextMenu={(e) => e.preventDefault()}
-                onCopy={(e) => {
-                  e.preventDefault();
-                  notify("⚠️ Acción bloqueada: No está permitido copiar durante la evaluación.", "warning");
-                }}
-              >
-                {/* Marca de agua forense visible estilo Netflix DRM sobre toda la evaluación */}
-                <div
-                  style={{
-                    position: "absolute",
-                    inset: 0,
-                    pointerEvents: "none",
-                    zIndex: 1,
-                    opacity: 0.12,
-                    backgroundImage: `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='340' height='130' viewBox='0 0 340 130'><text x='15' y='65' fill='%23000000' font-family='sans-serif' font-weight='900' font-size='12' transform='rotate(-22 170 65)' letter-spacing='1'>HISTOLAB • ${encodeURIComponent((effectiveStudent?.nombre_completo || "HISTOLAB").toUpperCase())} • ${encodeURIComponent(cuentaKey || "")}</text></svg>")`,
-                    backgroundRepeat: "repeat"
-                  }}
-                />
-
-                {/* Cabecera de Seguridad del Examen */}
-                <div
-                  style={{
-                    position: "relative",
-                    zIndex: 2,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    flexWrap: "wrap",
-                    gap: "1rem",
-                    borderBottom: "2px solid #f1f5f9",
-                    paddingBottom: "1.1rem"
-                  }}
-                >
-                  <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        isConfirmingRef.current = true;
-                        outStartTimeRef.current = null;
-                        setConfirmExitModalOpen(true);
-                      }}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        width: "36px",
-                        height: "36px",
-                        borderRadius: "0.55rem",
-                        border: "1.5px solid #cbd5e1",
-                        background: "#ffffff",
-                        color: "#475569",
-                        cursor: "pointer"
-                      }}
-                      title="Salir de la prueba"
-                    >
-                      <ArrowLeft size={18} />
-                    </button>
-                    <div>
-                      <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: "0.5rem" }}>
-                        <span style={{ fontSize: "0.76rem", fontWeight: 800, color: "#0284c7", textTransform: "uppercase" }}>
-                          Semana {activeQuizToTake.numero_semana} • Evaluación Práctica
-                        </span>
-                        <span
-                          style={{
-                            display: "inline-flex",
-                            alignItems: "center",
-                            gap: "0.25rem",
-                            fontSize: "0.72rem",
-                            fontWeight: 800,
-                            padding: "0.15rem 0.5rem",
-                            borderRadius: "0.4rem",
-                            background: strikesCount >= 2 ? "#fef2f2" : strikesCount === 1 ? "#fffbeb" : "#f0fdf4",
-                            color: strikesCount >= 2 ? "#dc2626" : strikesCount === 1 ? "#b45309" : "#16a34a",
-                            border: strikesCount >= 2 ? "1px solid #fecaca" : strikesCount === 1 ? "1px solid #fde68a" : "1px solid #bbf7d0"
-                          }}
-                        >
-                          <Shield size={12} />
-                          <span>
-                            {strikesCount === 0
-                              ? "Supervisión Activa (0/3)"
-                              : strikesCount === 1
-                              ? "Advertencia (1/3)"
-                              : "Infracción Crítica (2/3)"}
-                          </span>
-                        </span>
-
-                        {/* Indicador de Conectividad en Tiempo Real (Online / Respaldo Offline) */}
-                        <span
-                          style={{
-                            display: "inline-flex",
-                            alignItems: "center",
-                            gap: "0.3rem",
-                            fontSize: "0.72rem",
-                            fontWeight: 800,
-                            padding: "0.15rem 0.5rem",
-                            borderRadius: "0.4rem",
-                            background: isOnline ? "#f0fdf4" : "#fff7ed",
-                            color: isOnline ? "#16a34a" : "#c2410c",
-                            border: isOnline ? "1px solid #bbf7d0" : "1px solid #fed7aa"
-                          }}
-                          title={isOnline ? "Conexión a internet activa" : "Sin internet. Tus respuestas están resguardadas en este dispositivo."}
-                        >
-                          <span style={{ width: "7px", height: "7px", borderRadius: "50%", background: isOnline ? "#22c55e" : "#ea580c" }} />
-                          <span>{isOnline ? "En Línea" : "Offline (Respaldo Seguro)"}</span>
-                        </span>
-                      </div>
-
-                      <h2 style={{ margin: "0.2rem 0 0", fontSize: "1.25rem", fontWeight: 900, color: "#0f172a" }}>
-                        {activeQuizToTake.titulo}
-                      </h2>
-                    </div>
-                  </div>
-
-                  {/* Bloque Derecho: Temporizador Dinámico + Pantalla Completa + Valor */}
-                  <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: "0.6rem" }}>
-                    {/* Botón para forzar pantalla completa si el usuario la quitó */}
-                    {!isFullscreenActive && (
-                      <button
-                        type="button"
-                        onClick={requestQuizFullscreen}
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "0.35rem",
-                          padding: "0.45rem 0.75rem",
-                          borderRadius: "0.5rem",
-                          background: "#eff6ff",
-                          border: "1px solid #93c5fd",
-                          color: "#1d4ed8",
-                          fontSize: "0.78rem",
-                          fontWeight: 800,
-                          cursor: "pointer"
-                        }}
-                        title="Activar Pantalla Completa para evitar sanciones"
-                      >
-                        <Maximize2 size={14} />
-                        <span>Pantalla Completa</span>
-                      </button>
-                    )}
-
-                    {/* Indicador de Estado y Temporizador Dinámico */}
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "0.45rem",
-                        padding: "0.45rem 0.85rem",
-                        borderRadius: "0.55rem",
-                        background:
-                          activeLiveState?.estado === "lobby"
-                            ? "#eff6ff"
-                            : activeLiveState?.estado === "esperando_siguiente"
-                            ? "#fffbeb"
-                            : timeRemainingSeconds <= 15
-                            ? "#fee2e2"
-                            : timeRemainingSeconds <= 30
-                            ? "#fffbeb"
-                            : "#f0f9ff",
-                        border:
-                          activeLiveState?.estado === "lobby"
-                            ? "1.5px solid #bfdbfe"
-                            : activeLiveState?.estado === "esperando_siguiente"
-                            ? "1.5px solid #fde68a"
-                            : timeRemainingSeconds <= 15
-                            ? "2px solid #ef4444"
-                            : "1.5px solid #bae6fd",
-                        color:
-                          activeLiveState?.estado === "lobby"
-                            ? "#1d4ed8"
-                            : activeLiveState?.estado === "esperando_siguiente"
-                            ? "#b45309"
-                            : timeRemainingSeconds <= 15
-                            ? "#b91c1c"
-                            : "#0369a1",
-                        fontSize: "0.95rem",
-                        fontWeight: 900,
-                        animation: (activeLiveState?.estado === "en_pregunta" && timeRemainingSeconds <= 15) ? "pulse 1s infinite" : "none"
-                      }}
-                    >
-                      {activeLiveState?.estado === "lobby" ? (
-                        <>
-                          <Clock size={17} />
-                          <span>Lobby en Espera</span>
-                        </>
-                      ) : activeLiveState?.estado === "esperando_siguiente" ? (
-                        <>
-                          <Clock size={17} className="animate-bounce" />
-                          <span>Esperando Siguiente</span>
-                        </>
-                      ) : (
-                        <>
-                          <Clock size={17} />
-                          <span>{formatTimer(timeRemainingSeconds)}</span>
-                        </>
-                      )}
-                    </div>
-
-                    <div
-                      style={{
-                        padding: "0.45rem 0.85rem",
-                        borderRadius: "0.55rem",
-                        background: "#ecfdf5",
-                        border: "1.5px solid #a7f3d0",
-                        color: "#047857",
-                        fontSize: "0.82rem",
-                        fontWeight: 900
-                      }}
-                    >
-                      Valor: 5.000 pts
-                    </div>
-                  </div>
-                </div>
-
-                {/* Banner de Advertencia Informativa de Seguridad */}
-                <div
-                  style={{
-                    position: "relative",
-                    zIndex: 2,
-                    background: "#f8fafc",
-                    border: "1px solid #e2e8f0",
-                    borderRadius: "0.65rem",
-                    padding: "0.75rem 1rem",
-                    fontSize: "0.82rem",
-                    color: "#475569",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    flexWrap: "wrap",
-                    gap: "0.6rem"
-                  }}
-                >
-                  <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                    <Lock size={15} color="#0284c7" />
-                    <span>
-                      <strong>Protocolo Antitrampas Activo:</strong> Prohibido salir de la app, cambiar de pestaña, dividir pantalla o copiar texto. Se permite un máximo de 2 advertencias; al 3er intento la prueba se bloqueará y enviará automáticamente.
-                    </span>
-                  </div>
-
-                  {activeQuizToTake.instrucciones && (
-                    <div style={{ width: "100%", marginTop: "0.25rem", color: "#334155" }}>
-                      📌 <strong>Instrucciones:</strong> {activeQuizToTake.instrucciones}
-                    </div>
-                  )}
-                </div>
-
-                {/* RENDERIZADO DINÁMICO SEGÚN FASE DE LA SESIÓN EN VIVO */}
-                {(() => {
-                  const liveEstado = activeLiveState?.estado || "lobby";
-                  const currentActiveIdx = activeLiveState?.pregunta_actual_idx ?? 0;
-                  const totalQuestionsCount = activeQuizToTake.preguntas?.length || 6;
-                  const currentActiveQ = activeQuizToTake.preguntas?.[currentActiveIdx] || activeQuizToTake.preguntas?.[0];
-                  const isBonusActive = currentActiveIdx === 5;
-
-                  // FASE 1: LOBBY DE DATOS GENERALES
-                  if (liveEstado === "lobby") {
-                    return (
-                      <div style={{ position: "relative", zIndex: 2, display: "flex", flexDirection: "column", gap: "1.5rem" }}>
-                        {/* Tarjeta de Datos Generales de la Prueba */}
-                        <div
-                          style={{
-                            background: "#ffffff",
-                            borderRadius: "1rem",
-                            border: "1.5px solid #bae6fd",
-                            padding: "2rem",
-                            boxShadow: "0 4px 20px rgba(2, 132, 199, 0.08)",
-                            display: "flex",
-                            flexDirection: "column",
-                            gap: "1.25rem"
-                          }}
-                        >
-                          <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", borderBottom: "1px solid #f1f5f9", paddingBottom: "1rem" }}>
-                            <div style={{ width: "42px", height: "42px", borderRadius: "0.65rem", background: "#0284c7", color: "#ffffff", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                              <BookOpen size={22} />
-                            </div>
-                            <div>
-                              <span style={{ fontSize: "0.75rem", fontWeight: 900, color: "#0284c7", textTransform: "uppercase" }}>
-                                Datos Generales de la Prueba • Semana {activeQuizToTake.numero_semana}
-                              </span>
-                              <h3 style={{ margin: "0.2rem 0 0", fontSize: "1.35rem", fontWeight: 900, color: "#0f172a" }}>
-                                {activeQuizToTake.titulo}
-                              </h3>
-                            </div>
-                          </div>
-
-                          {activeQuizToTake.instrucciones && (
-                            <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "0.75rem", padding: "1rem 1.25rem", color: "#334155", fontSize: "0.88rem", lineHeight: 1.55 }}>
-                              <strong>📌 Instrucciones del Docente:</strong> {activeQuizToTake.instrucciones}
-                            </div>
-                          )}
-
-                          {/* Requisitos y Normas de la Prueba Sincronizada */}
-                          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "1rem" }}>
-                            <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: "0.75rem", padding: "1rem", display: "flex", flexDirection: "column", gap: "0.3rem" }}>
-                              <strong style={{ fontSize: "0.86rem", color: "#1d4ed8" }}>📋 6 Preguntas Fijas</strong>
-                              <span style={{ fontSize: "0.76rem", color: "#1e40af" }}>5 reactivos oficiales (5.0 pts) + 1 reactivo bonus (+1.0 pt para Premios).</span>
-                            </div>
-
-                            <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: "0.75rem", padding: "1rem", display: "flex", flexDirection: "column", gap: "0.3rem" }}>
-                              <strong style={{ fontSize: "0.86rem", color: "#15803d" }}>⏱️ {formatTimer(Number(activeQuizToTake.tiempo_por_pregunta_segundos || 90))} min por Pregunta</strong>
-                              <span style={{ fontSize: "0.76rem", color: "#166534" }}>Tiempo global sincronizado. El cronómetro corre en directo para toda la sección.</span>
-                            </div>
-
-                            <div style={{ background: "#fff7ed", border: "1px solid #fed7aa", borderRadius: "0.75rem", padding: "1rem", display: "flex", flexDirection: "column", gap: "0.3rem" }}>
-                              <strong style={{ fontSize: "0.86rem", color: "#c2410c" }}>🚫 Sin Retroceso</strong>
-                              <span style={{ fontSize: "0.76rem", color: "#9a3412" }}>Al terminar el tiempo de cada pregunta, se bloquea y pasa a espera de la siguiente.</span>
-                            </div>
-
-                            <div style={{ background: "#faf5ff", border: "1px solid #e9d5ff", borderRadius: "0.75rem", padding: "1rem", display: "flex", flexDirection: "column", gap: "0.3rem" }}>
-                              <strong style={{ fontSize: "0.86rem", color: "#7e22ce" }}>🛡️ Supervisión Activa</strong>
-                              <span style={{ fontSize: "0.76rem", color: "#6b21a8" }}>No salgas de la pantalla ni cambies de aplicación para evitar sanciones antitrampas.</span>
-                            </div>
-                          </div>
-
-                          {/* Banner de Sala de Espera Activa */}
-                          <div
-                            style={{
-                              background: "linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%)",
-                              border: "2px solid #86efac",
-                              borderRadius: "1rem",
-                              padding: "2.5rem 1.5rem",
-                              textAlign: "center",
-                              display: "flex",
-                              flexDirection: "column",
-                              alignItems: "center",
-                              gap: "0.9rem"
-                            }}
-                          >
-                            <div
-                              style={{
-                                width: "64px",
-                                height: "64px",
-                                borderRadius: "50%",
-                                background: "#16a34a",
-                                color: "#ffffff",
-                                display: "flex",
-                                alignItems: "center",
-                                justifyContent: "center",
-                                boxShadow: "0 0 25px rgba(22, 163, 74, 0.45)"
-                              }}
-                            >
-                              <Radio size={32} className="animate-pulse" />
-                            </div>
-
-                            <h3 style={{ margin: 0, fontSize: "1.35rem", fontWeight: 900, color: "#166534" }}>
-                              Sala de Espera Activa • Conectado Exitosamente
-                            </h3>
-
-                            <p style={{ margin: 0, fontSize: "0.92rem", color: "#15803d", maxWidth: "520px", lineHeight: 1.55 }}>
-                              Por favor mantén esta pantalla abierta. El docente dará la orden de inicio desde su panel para que la <strong>Pregunta 1</strong> comience en simultáneo para todos.
-                            </p>
-
-                            <div style={{ display: "inline-flex", alignItems: "center", gap: "0.5rem", background: "#ffffff", padding: "0.45rem 1.2rem", borderRadius: "9999px", fontSize: "0.82rem", fontWeight: 800, color: "#15803d", border: "1px solid #bbf7d0", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
-                              <RefreshCw size={14} className="animate-spin" />
-                              <span>Sincronizando con el docente en tiempo real...</span>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  }
-
-                  // FASE 2: ESPERANDO LA SIGUIENTE PREGUNTA
-                  if (liveEstado === "esperando_siguiente") {
-                    return (
-                      <div style={{ position: "relative", zIndex: 2, display: "flex", flexDirection: "column", gap: "1.5rem" }}>
-                        <div
-                          style={{
-                            background: "linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%)",
-                            border: "2px solid #f59e0b",
-                            borderRadius: "1rem",
-                            padding: "3rem 1.5rem",
-                            textAlign: "center",
-                            display: "flex",
-                            flexDirection: "column",
-                            alignItems: "center",
-                            gap: "1rem",
-                            boxShadow: "0 10px 30px rgba(245, 158, 11, 0.15)"
-                          }}
-                        >
-                          <div
-                            style={{
-                              width: "68px",
-                              height: "68px",
-                              borderRadius: "50%",
-                              background: "#d97706",
-                              color: "#ffffff",
-                              display: "flex",
-                              alignItems: "center",
-                              justifyContent: "center",
-                              boxShadow: "0 0 25px rgba(217, 119, 6, 0.35)"
-                            }}
-                          >
-                            <Clock size={36} className="animate-bounce" />
-                          </div>
-
-                          <div>
-                            <span style={{ fontSize: "0.8rem", fontWeight: 900, color: "#d97706", textTransform: "uppercase", letterSpacing: "1px" }}>
-                              Pregunta #{currentActiveIdx + 1} Concluida
-                            </span>
-                            <h3 style={{ margin: "0.3rem 0 0", fontSize: "1.45rem", fontWeight: 900, color: "#92400e" }}>
-                              Esperando la Siguiente Pregunta...
-                            </h3>
-                          </div>
-
-                          <p style={{ margin: 0, fontSize: "0.94rem", color: "#b45309", maxWidth: "520px", lineHeight: 1.55 }}>
-                            El tiempo para la pregunta anterior ha terminado y tus respuestas han sido resguardadas en el servidor. Por favor espera en esta pantalla; la siguiente pregunta se abrirá automáticamente en cuanto el docente dé la orden.
-                          </p>
-
-                          <div style={{ display: "inline-flex", alignItems: "center", gap: "0.5rem", background: "#ffffff", padding: "0.5rem 1.25rem", borderRadius: "9999px", fontSize: "0.84rem", fontWeight: 800, color: "#92400e", border: "1px solid #fde68a" }}>
-                            <RefreshCw size={14} className="animate-spin" />
-                            <span>Progreso: Pregunta {currentActiveIdx + 1} de {totalQuestionsCount} completada</span>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  }
-
-                  // FASE 3: EN PREGUNTA ACTIVA (Únicamente se muestra la pregunta asignada)
-                  if (!currentActiveQ) return null;
-
-                  return (
-                    <div style={{ position: "relative", zIndex: 2, display: "flex", flexDirection: "column", gap: "1.5rem", paddingBottom: "min(45vh, 320px)" }}>
-                      <div
-                        key={currentActiveQ.id}
-                        style={{
-                          borderRadius: "1rem",
-                          border: isBonusActive ? "2px solid #fde68a" : "2px solid #cbd5e1",
-                          borderLeft: isBonusActive ? "7px solid #f59e0b" : "7px solid #0284c7",
-                          background: "#ffffff",
-                          boxShadow: "0 8px 24px -4px rgba(15, 23, 42, 0.08)",
-                          overflow: "hidden",
-                          display: "flex",
-                          flexDirection: "column"
-                        }}
-                      >
-                        {/* Barra de Título / Identificador Superior de la Pregunta */}
-                        <div
-                          style={{
-                            padding: "0.8rem 1.25rem",
-                            background: isBonusActive
-                              ? "linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%)"
-                              : "linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)",
-                            borderBottom: isBonusActive ? "1.5px solid #fde68a" : "1.5px solid #e2e8f0",
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "space-between",
-                            flexWrap: "wrap",
-                            gap: "0.6rem"
-                          }}
-                        >
-                          <div style={{ display: "flex", alignItems: "center", gap: "0.65rem", flexWrap: "wrap" }}>
-                            <span
-                              style={{
-                                background: isBonusActive ? "#d97706" : "#0284c7",
-                                color: "#ffffff",
-                                fontWeight: 900,
-                                fontSize: "0.82rem",
-                                padding: "0.25rem 0.75rem",
-                                borderRadius: "0.5rem",
-                                letterSpacing: "0.04em",
-                                textTransform: "uppercase",
-                                boxShadow: isBonusActive
-                                  ? "0 2px 6px rgba(217, 119, 6, 0.3)"
-                                  : "0 2px 6px rgba(2, 132, 199, 0.3)"
-                              }}
-                            >
-                              {isBonusActive ? "⭐ PREGUNTA BONUS" : `PREGUNTA ${currentActiveQ.numero || currentActiveIdx + 1}`}
-                            </span>
-
-                            <span style={{ fontSize: "0.82rem", fontWeight: 800, color: isBonusActive ? "#92400e" : "#475569" }}>
-                              Valor: {Number(currentActiveQ.puntos || 1.0).toFixed(2)} pts {isBonusActive ? "(Extra)" : ""}
-                            </span>
-                          </div>
-
-                          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                            <span
-                              style={{
-                                fontSize: "0.78rem",
-                                fontWeight: 800,
-                                color: "#64748b",
-                                background: "#ffffff",
-                                padding: "0.2rem 0.6rem",
-                                borderRadius: "0.4rem",
-                                border: "1px solid #cbd5e1"
-                              }}
-                            >
-                              Reactivo {currentActiveIdx + 1} de {totalQuestionsCount}
-                            </span>
-
-                            {isBonusActive && (
-                              <span
-                                style={{
-                                  display: "inline-flex",
-                                  alignItems: "center",
-                                  gap: "0.25rem",
-                                  background: "#ffffff",
-                                  color: "#b45309",
-                                  border: "1px solid #fde68a",
-                                  padding: "0.2rem 0.55rem",
-                                  borderRadius: "9999px",
-                                  fontSize: "0.72rem",
-                                  fontWeight: 900
-                                }}
-                              >
-                                +1.0 pt para Premios
-                              </span>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* Contenedor del Cuerpo de la Pregunta */}
-                        <div style={{ padding: "1.35rem 1.5rem", display: "flex", flexDirection: "column", gap: "1.25rem" }}>
-                          {/* Enunciado Principal de la Pregunta */}
-                          {currentActiveQ.enunciado && (
-                            <div style={{ fontSize: "1.05rem", fontWeight: 800, color: "#0f172a", lineHeight: 1.5 }}>
-                              {currentActiveQ.enunciado}
-                            </div>
-                          )}
-
-                        {/* Micrografía histológica protegida contra Google Lens y capturas */}
-                        {currentActiveQ.imagen_url && (
-                          <div
-                            className="sp-quiz-image-container"
-                            style={{
-                              position: "relative",
-                              textAlign: "center",
-                              background: "#0f172a",
-                              padding: "0.65rem",
-                              borderRadius: "0.75rem",
-                              border: "1px solid #cbd5e1",
-                              overflow: "hidden",
-                              userSelect: "none",
-                              WebkitUserSelect: "none"
-                            }}
-                            onContextMenu={(e) => e.preventDefault()}
-                          >
-                            <div
-                              style={{
-                                position: "absolute",
-                                inset: 0,
-                                pointerEvents: "none",
-                                zIndex: 2,
-                                opacity: 0.24,
-                                backgroundImage: `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='260' height='90' viewBox='0 0 260 90'><text x='20' y='45' fill='%23ffffff' font-family='sans-serif' font-weight='900' font-size='12' transform='rotate(-20 130 45)' letter-spacing='1'>HISTOLAB • ${encodeURIComponent((effectiveStudent?.nombre_completo || "HISTOLAB").toUpperCase())} • ${encodeURIComponent(cuentaKey || "")}</text></svg>")`,
-                                backgroundRepeat: "repeat"
-                              }}
-                            />
-                            <div
-                              style={{
-                                position: "absolute",
-                                inset: 0,
-                                zIndex: 3,
-                                background: "transparent",
-                                touchAction: "manipulation",
-                                WebkitTouchCallout: "none"
-                              }}
-                              onContextMenu={(e) => e.preventDefault()}
-                            />
-                            <img
-                              src={currentActiveQ.imagen_url}
-                              alt={`Micrografía pregunta ${currentActiveIdx + 1}`}
-                              draggable="false"
-                              style={{
-                                maxHeight: "320px",
-                                maxWidth: "100%",
-                                borderRadius: "0.5rem",
-                                objectFit: "contain",
-                                pointerEvents: "none",
-                                userSelect: "none",
-                                WebkitUserSelect: "none"
-                              }}
-                            />
-                          </div>
-                        )}
-
-                        {/* Apartados / Sub-reactivos de respuesta */}
-                        <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
-                          {(!currentActiveQ.items || currentActiveQ.items.length === 0) ? (
-                            <div
-                              style={{
-                                background: "#f8fafc",
-                                border: "1.5px solid #e2e8f0",
-                                borderRadius: "0.75rem",
-                                padding: "0.9rem 1.1rem",
-                                display: "flex",
-                                flexDirection: "column",
-                                gap: "0.5rem"
-                              }}
-                            >
-                              <label style={{ fontSize: "0.88rem", fontWeight: 800, color: "#1e293b" }}>
-                                Respuesta:
-                              </label>
-                              <textarea
-                                rows={2}
-                                className="sp-quiz-input sp-quiz-textarea"
-                                value={
-                                  typeof quizAnswers?.[currentActiveQ.id]?.respuesta === "string"
-                                    ? quizAnswers[currentActiveQ.id].respuesta
-                                    : typeof quizAnswers?.[currentActiveQ.id] === "string"
-                                    ? quizAnswers[currentActiveQ.id]
-                                    : ""
-                                }
-                                readOnly={isExamSealedOffline || submittingQuiz || timeRemainingSeconds <= 0}
-                                onChange={(e) => {
-                                  handleAnswerChange(currentActiveQ.id, "respuesta", e.target.value);
-                                  e.target.style.height = "auto";
-                                  e.target.style.height = `${Math.max(56, e.target.scrollHeight)}px`;
-                                }}
-                                onBlur={() => handleAnswerBlur(currentActiveQ.id)}
-                                onFocus={(e) => {
-                                  const target = e.target;
-                                  setTimeout(() => target.scrollIntoView({ behavior: "smooth", block: "center" }), 250);
-                                }}
-                                onKeyDown={(e) => {
-                                  if (e.key === "Enter" && !e.shiftKey) e.preventDefault();
-                                }}
-                                onPaste={(e) => {
-                                  e.preventDefault();
-                                  notify("⚠️ Acción bloqueada por seguridad: No está permitido pegar texto.", "warning");
-                                }}
-                                autoComplete="off"
-                                autoCorrect="off"
-                                spellCheck="false"
-                                placeholder="Escribe tu respuesta aquí (se ajusta automáticamente)..."
-                                style={{
-                                  width: "100%",
-                                  boxSizing: "border-box",
-                                  padding: "0.65rem 0.85rem",
-                                  borderRadius: "0.55rem",
-                                  border: "1.5px solid #cbd5e1",
-                                  background: (isExamSealedOffline || submittingQuiz || timeRemainingSeconds <= 0) ? "#f8fafc" : "#ffffff",
-                                  fontSize: "0.9rem",
-                                  lineHeight: "1.45",
-                                  fontWeight: 600,
-                                  color: "#0f172a",
-                                  outline: "none",
-                                  resize: "vertical",
-                                  minHeight: "56px",
-                                  fontFamily: "inherit",
-                                  cursor: (isExamSealedOffline || submittingQuiz || timeRemainingSeconds <= 0) ? "not-allowed" : "text"
-                                }}
-                              />
-                            </div>
-                          ) : (
-                            (currentActiveQ.items || []).map((item, itemIdx) => {
-                              const currentVal = quizAnswers?.[currentActiveQ.id]?.[item.id];
-                              const itemLabel = item.instruccion || item.etiqueta || `Inciso ${itemIdx + 1}`;
-                            const displayCompletion = item.tipo === "completacion" ? item.texto_completar || "" : "";
-                              return (
-                                <div
-                                  key={item.id}
-                                  style={{
-                                    background: "#f8fafc",
-                                    border: "1.5px solid #e2e8f0",
-                                    borderRadius: "0.75rem",
-                                    padding: "0.9rem 1.1rem",
-                                    display: "flex",
-                                    flexDirection: "column",
-                                    gap: "0.6rem"
-                                  }}
-                                >
-                                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "0.4rem" }}>
-                                    <label style={{ fontSize: "0.88rem", fontWeight: 800, color: "#1e293b", margin: 0 }}>
-                                      {String.fromCharCode(97 + itemIdx)}) {itemLabel}: {displayCompletion}
-                                    </label>
-                                    {item.puntos !== undefined && (
-                                      <span style={{ fontSize: "0.75rem", fontWeight: 800, color: "#0369a1", background: "#ffffff", border: "1px solid #bae6fd", padding: "0.15rem 0.5rem", borderRadius: "0.35rem" }}>
-                                        {item.puntos} pt(s)
-                                      </span>
-                                    )}
-                                  </div>
-
-                                  <QuizItemResponse item={item} value={currentVal}
-                                    disabled={isExamSealedOffline || submittingQuiz || timeRemainingSeconds <= 0}
-                                    onChange={value => handleAnswerChange(currentActiveQ.id,item.id,value)}
-                                    onBlur={() => handleAnswerBlur(currentActiveQ.id)}
-                                    onPasteBlocked={() => notify("No está permitido pegar texto durante la prueba.", "warning")} />
-                                </div>
-                              );
-                            })
-                          )}
-                        </div>
-                      </div>
-                    </div>
-
-                      {/* Barra Inferior del Reactivo */}
-                      <div
-                        style={{
-                          position: "relative",
-                          zIndex: 2,
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "space-between",
-                          flexWrap: "wrap",
-                          gap: "1rem",
-                          borderTop: "2px solid #f1f5f9",
-                          paddingTop: "1.25rem"
-                        }}
-                      >
-                        <span style={{ fontSize: "0.84rem", color: "#64748b", fontWeight: 600 }}>
-                          {currentActiveIdx === totalQuestionsCount - 1
-                            ? "Última pregunta de la prueba semanal (Reactivo Bonus). Al terminar el tiempo o pulsar enviar se sellará tu entrega."
-                            : `Pregunta ${currentActiveIdx + 1} de ${totalQuestionsCount}. Tus respuestas se guardan automáticamente al cumplirse el tiempo.`}
-                        </span>
-
-                        {currentActiveIdx < totalQuestionsCount - 1 && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setAnsweredQuestionsMap((prev) => ({ ...prev, [currentActiveIdx]: true }));
-                              notify("✓ Respuesta guardada. Esperando a que el tiempo concluya o el docente avance.", "success");
-                            }}
-                            style={{
-                              display: "flex",
-                              alignItems: "center",
-                              gap: "0.5rem",
-                              padding: "0.6rem 1.25rem",
-                              borderRadius: "0.65rem",
-                              border: answeredQuestionsMap[currentActiveIdx] ? "1.5px solid #86efac" : "none",
-                              background: answeredQuestionsMap[currentActiveIdx] ? "#f0fdf4" : "linear-gradient(135deg, #0284c7 0%, #0369a1 100%)",
-                              color: answeredQuestionsMap[currentActiveIdx] ? "#15803d" : "#ffffff",
-                              fontSize: "0.86rem",
-                              fontWeight: 800,
-                              cursor: "pointer",
-                              boxShadow: answeredQuestionsMap[currentActiveIdx] ? "none" : "0 3px 10px rgba(2, 132, 199, 0.25)",
-                              transition: "all 0.15s ease"
-                            }}
-                          >
-                            <CheckCircle2 size={16} color={answeredQuestionsMap[currentActiveIdx] ? "#16a34a" : "#ffffff"} />
-                            <span>{answeredQuestionsMap[currentActiveIdx] ? "Respuesta Guardada ✓" : "Confirmar Respuesta"}</span>
-                          </button>
-                        )}
-
-                        {currentActiveIdx === totalQuestionsCount - 1 && (
-                          <button
-                            type="button"
-                            onClick={() => handleSubmitQuiz()}
-                            disabled={submittingQuiz}
-                            style={{
-                              display: "flex",
-                              alignItems: "center",
-                              gap: "0.5rem",
-                              padding: "0.7rem 1.6rem",
-                              borderRadius: "0.65rem",
-                              border: "none",
-                              background: "linear-gradient(135deg, #16a34a 0%, #15803d 100%)",
-                              color: "#ffffff",
-                              fontSize: "0.92rem",
-                              fontWeight: 900,
-                              cursor: submittingQuiz ? "not-allowed" : "pointer",
-                              boxShadow: "0 4px 14px rgba(22, 163, 74, 0.3)"
-                            }}
-                          >
-                            {submittingQuiz ? <RefreshCw size={18} className="animate-spin" /> : <Send size={18} />}
-                            <span>{submittingQuiz ? "Enviando Respuestas..." : "Finalizar y Entregar Prueba"}</span>
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })()}
-              </div>
-          </div>
+          <StudentQuizPlayer quiz={activeQuizToTake} liveState={activeLiveState} answers={quizAnswers}
+            seconds={timeRemainingSeconds} strikes={strikesCount} online={isOnline} connection={liveConnection}
+            sealed={isExamSealedOffline} submitting={submittingQuiz} confirmed={answeredQuestionsMap}
+            studentName={effectiveStudent?.nombre_completo} account={cuentaKey}
+            onExit={() => {
+              if (["lobby", "inactiva"].includes(activeLiveStateRef.current?.estado)) {
+                autoSubmitTriggeredRef.current = true;
+                clearActiveAttemptFromDisk(activeQuizToTake.numero_semana);
+                setActiveQuizToTake(null);
+                deactivateDrmBlackout();
+                if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(() => {});
+                return;
+              }
+              isConfirmingRef.current = true; outStartTimeRef.current = null; setConfirmExitModalOpen(true);
+            }}
+            onChange={handleAnswerChange} onBlur={handleAnswerBlur}
+            onConfirm={index => setAnsweredQuestionsMap(previous => ({ ...previous, [index]: true }))}
+            onSubmit={() => handleSubmitQuiz()}
+            onPasteBlocked={() => notify("No está permitido pegar texto durante la prueba.", "warning")} />
         )}
 
 
@@ -5862,10 +3329,10 @@ export default function StudentPortalView({ student, notify = () => {} }) {
           <ShieldAlert size={52} color="#ef4444" className="animate-pulse" />
           <div style={{ textAlign: "center", padding: "0 1.5rem", maxWidth: "480px" }}>
             <div style={{ fontSize: "1.2rem", fontWeight: 900, color: "#ffffff", letterSpacing: "0.5px" }}>
-              PROTECCIÓN DE INTEGRIDAD HISTOLAB
+              EVALUACIÓN EN PAUSA
             </div>
             <div style={{ fontSize: "0.88rem", color: "#94a3b8", marginTop: "0.45rem", lineHeight: 1.5 }}>
-              Intento de captura de pantalla, cambio de app o despliegue de barra de notificaciones detectado. El contenido fue resguardado temporalmente.
+              La evaluación dejó de estar visible. Vuelve a la prueba para continuar; tus respuestas se conservan.
             </div>
           </div>
           <button
@@ -5950,7 +3417,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                     color: violationModal.strike >= 3 ? "#dc2626" : "#d97706"
                   }}
                 >
-                  {violationModal.strike >= 3 ? "Bloqueo por Infracción Crítica" : "Incidencia de Integridad Registrada"}
+                  {violationModal.strike >= 3 ? "Cierre según las normas" : "Incidencia de Integridad Registrada"}
                 </span>
                 <h3 style={{ margin: "0.3rem 0 0", fontSize: "1.35rem", fontWeight: 900, color: "#0f172a" }}>
                   {violationModal.strike >= 3 ? "Evaluación Bloqueada" : `Advertencia ${violationModal.strike} de 3`}
@@ -6018,418 +3485,13 @@ export default function StudentPortalView({ student, notify = () => {} }) {
         {/* PESTAÑA D: SEGURIDAD Y ACTUALIZAR CONTRASEÑA                        */}
         {/* =================================================================== */}
         {activeTab === "seguridad" && (
-          <div className="sp-tab-content-container animate-fade-in" style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
-            {/* Banner Informativo Superior */}
-            <div
-              style={{
-                background: "linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)",
-                border: "1.5px solid #e2e8f0",
-                borderRadius: "1rem",
-                padding: "1.35rem 1.5rem",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                flexWrap: "wrap",
-                gap: "1rem"
-              }}
-            >
-              <div style={{ display: "flex", alignItems: "center", gap: "0.85rem" }}>
-                <div
-                  style={{
-                    width: "46px",
-                    height: "46px",
-                    borderRadius: "0.75rem",
-                    background: theme.gradient || "linear-gradient(135deg, #0284c7 0%, #0369a1 100%)",
-                    color: "#ffffff",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    boxShadow: `0 4px 12px ${theme.primary}40`,
-                    flexShrink: 0
-                  }}
-                >
-                  <KeyRound size={24} />
-                </div>
-                <div>
-                  <h3 style={{ margin: 0, fontSize: "1.1rem", fontWeight: 900, color: "#0f172a" }}>
-                    Seguridad y Actualización de Contraseña
-                  </h3>
-                  <p style={{ margin: "0.2rem 0 0", fontSize: "0.84rem", color: "#64748b" }}>
-                    Gestiona tu clave de acceso para proteger tus registros de laboratorio, notas y evaluaciones.
-                  </p>
-                </div>
-              </div>
-
-              <div
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "0.45rem",
-                  background: "#ffffff",
-                  padding: "0.45rem 0.85rem",
-                  borderRadius: "0.6rem",
-                  border: "1px solid #cbd5e1",
-                  fontSize: "0.8rem",
-                  fontWeight: 800,
-                  color: "#475569"
-                }}
-              >
-                <span>Usuario:</span>
-                <span style={{ fontFamily: "monospace", color: theme.primary, fontWeight: 900 }}>
-                  {cuentaKey}
-                </span>
-              </div>
-            </div>
-
-            {/* Tarjeta con el Formulario y Consejos */}
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
-                gap: "1.5rem"
-              }}
-            >
-              {/* Formulario */}
-              <div
-                className="sp-card-panel"
-                style={{
-                  background: "#ffffff",
-                  borderRadius: "1rem",
-                  border: "1px solid #e2e8f0",
-                  padding: "1.75rem",
-                  boxShadow: "0 4px 14px rgba(0, 0, 0, 0.03)"
-                }}
-              >
-                <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "1.25rem" }}>
-                  <Lock size={19} color={theme.primary} />
-                  <h4 style={{ margin: 0, fontSize: "1rem", fontWeight: 900, color: "#0f172a" }}>
-                    Cambiar mi Contraseña
-                  </h4>
-                </div>
-
-                {/* Nota sobre contraseña inicial */}
-                <div
-                  style={{
-                    background: "#eff6ff",
-                    border: "1px solid #bfdbfe",
-                    borderRadius: "0.65rem",
-                    padding: "0.75rem 0.9rem",
-                    fontSize: "0.82rem",
-                    color: "#1e40af",
-                    marginBottom: "1.25rem",
-                    display: "flex",
-                    alignItems: "flex-start",
-                    gap: "0.5rem"
-                  }}
-                >
-                  <AlertCircle size={17} style={{ flexShrink: 0, marginTop: "0.1rem" }} />
-                  <div style={{ lineHeight: 1.45 }}>
-                    Si es la primera vez que actualizas tu acceso o no recuerdas haberla modificado antes, tu contraseña actual es la inicial: <strong style={{ fontFamily: "monospace" }}>histolab123</strong>.
-                  </div>
-                </div>
-
-                <form onSubmit={handleUpdatePassword} style={{ display: "flex", flexDirection: "column", gap: "1.1rem" }}>
-                  {/* Campo 1: Contraseña Actual */}
-                  <div>
-                    <label style={{ display: "block", fontSize: "0.82rem", fontWeight: 800, color: "#334155", marginBottom: "0.4rem" }}>
-                      Contraseña Actual <span style={{ color: "#ef4444" }}>*</span>
-                    </label>
-                    <div style={{ position: "relative" }}>
-                      <input
-                        type={showCurrentPassword ? "text" : "password"}
-                        value={currentPasswordInput}
-                        onChange={(e) => setCurrentPasswordInput(e.target.value)}
-                        placeholder="Ingresa tu contraseña actual"
-                        required
-                        style={{
-                          width: "100%",
-                          padding: "0.65rem 2.5rem 0.65rem 0.85rem",
-                          borderRadius: "0.6rem",
-                          border: "1.5px solid #cbd5e1",
-                          fontSize: "0.9rem",
-                          outline: "none",
-                          boxSizing: "border-box",
-                          transition: "border-color 0.15s ease"
-                        }}
-                        onFocus={(e) => (e.target.style.borderColor = theme.primary)}
-                        onBlur={(e) => (e.target.style.borderColor = "#cbd5e1")}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowCurrentPassword((prev) => !prev)}
-                        style={{
-                          position: "absolute",
-                          right: "0.65rem",
-                          top: "50%",
-                          transform: "translateY(-50%)",
-                          background: "none",
-                          border: "none",
-                          color: "#64748b",
-                          cursor: "pointer",
-                          padding: "0.2rem",
-                          display: "flex",
-                          alignItems: "center"
-                        }}
-                        title={showCurrentPassword ? "Ocultar" : "Mostrar"}
-                      >
-                        {showCurrentPassword ? <EyeOff size={17} /> : <Eye size={17} />}
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Campo 2: Nueva Contraseña */}
-                  <div>
-                    <label style={{ display: "block", fontSize: "0.82rem", fontWeight: 800, color: "#334155", marginBottom: "0.4rem" }}>
-                      Nueva Contraseña <span style={{ color: "#ef4444" }}>*</span>
-                    </label>
-                    <div style={{ position: "relative" }}>
-                      <input
-                        type={showNewPassword ? "text" : "password"}
-                        value={newPasswordInput}
-                        onChange={(e) => setNewPasswordInput(e.target.value)}
-                        placeholder="Mínimo 6 caracteres"
-                        required
-                        style={{
-                          width: "100%",
-                          padding: "0.65rem 2.5rem 0.65rem 0.85rem",
-                          borderRadius: "0.6rem",
-                          border: "1.5px solid #cbd5e1",
-                          fontSize: "0.9rem",
-                          outline: "none",
-                          boxSizing: "border-box",
-                          transition: "border-color 0.15s ease"
-                        }}
-                        onFocus={(e) => (e.target.style.borderColor = theme.primary)}
-                        onBlur={(e) => (e.target.style.borderColor = "#cbd5e1")}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowNewPassword((prev) => !prev)}
-                        style={{
-                          position: "absolute",
-                          right: "0.65rem",
-                          top: "50%",
-                          transform: "translateY(-50%)",
-                          background: "none",
-                          border: "none",
-                          color: "#64748b",
-                          cursor: "pointer",
-                          padding: "0.2rem",
-                          display: "flex",
-                          alignItems: "center"
-                        }}
-                        title={showNewPassword ? "Ocultar" : "Mostrar"}
-                      >
-                        {showNewPassword ? <EyeOff size={17} /> : <Eye size={17} />}
-                      </button>
-                    </div>
-                    {/* Checklist en tiempo real de requerimientos */}
-                    <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem", marginTop: "0.45rem" }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: "0.35rem", fontSize: "0.75rem", color: newPasswordInput.length >= 6 ? "#16a34a" : "#64748b", fontWeight: 700 }}>
-                        {newPasswordInput.length >= 6 ? <Check size={13} strokeWidth={3} /> : <span style={{ width: "13px", textAlign: "center" }}>•</span>}
-                        <span>Mínimo 6 caracteres {newPasswordInput.length > 0 && `(${newPasswordInput.length}/6)`}</span>
-                      </div>
-                      {newPasswordInput && currentPasswordInput && (
-                        <div style={{ display: "flex", alignItems: "center", gap: "0.35rem", fontSize: "0.75rem", color: newPasswordInput !== currentPasswordInput ? "#16a34a" : "#dc2626", fontWeight: 700 }}>
-                          {newPasswordInput !== currentPasswordInput ? <Check size={13} strokeWidth={3} /> : <X size={13} strokeWidth={3} />}
-                          <span>{newPasswordInput !== currentPasswordInput ? "Diferente a la actual" : "Debe ser diferente a la contraseña actual"}</span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Campo 3: Confirmar Nueva Contraseña */}
-                  <div>
-                    <label style={{ display: "block", fontSize: "0.82rem", fontWeight: 800, color: "#334155", marginBottom: "0.4rem" }}>
-                      Confirmar Nueva Contraseña <span style={{ color: "#ef4444" }}>*</span>
-                    </label>
-                    <div style={{ position: "relative" }}>
-                      <input
-                        type={showConfirmPassword ? "text" : "password"}
-                        value={confirmPasswordInput}
-                        onChange={(e) => setConfirmPasswordInput(e.target.value)}
-                        placeholder="Repite la nueva contraseña"
-                        required
-                        style={{
-                          width: "100%",
-                          padding: "0.65rem 2.5rem 0.65rem 0.85rem",
-                          borderRadius: "0.6rem",
-                          border: `1.5px solid ${confirmPasswordInput ? (confirmPasswordInput === newPasswordInput ? "#86efac" : "#fca5a5") : "#cbd5e1"}`,
-                          fontSize: "0.9rem",
-                          outline: "none",
-                          boxSizing: "border-box",
-                          transition: "border-color 0.15s ease"
-                        }}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowConfirmPassword((prev) => !prev)}
-                        style={{
-                          position: "absolute",
-                          right: "0.65rem",
-                          top: "50%",
-                          transform: "translateY(-50%)",
-                          background: "none",
-                          border: "none",
-                          color: "#64748b",
-                          cursor: "pointer",
-                          padding: "0.2rem",
-                          display: "flex",
-                          alignItems: "center"
-                        }}
-                        title={showConfirmPassword ? "Ocultar" : "Mostrar"}
-                      >
-                        {showConfirmPassword ? <EyeOff size={17} /> : <Eye size={17} />}
-                      </button>
-                    </div>
-                    {confirmPasswordInput && (
-                      <div style={{ fontSize: "0.75rem", fontWeight: 700, marginTop: "0.35rem", color: confirmPasswordInput === newPasswordInput ? "#16a34a" : "#dc2626" }}>
-                        {confirmPasswordInput === newPasswordInput ? "✓ Las contraseñas coinciden" : "✗ Las contraseñas no coinciden"}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Alerta de Feedback */}
-                  {passwordFeedback && (
-                    <div
-                      className="animate-fade-in"
-                      style={{
-                        padding: "0.75rem 1rem",
-                        borderRadius: "0.65rem",
-                        fontSize: "0.85rem",
-                        fontWeight: 700,
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "0.6rem",
-                        background: passwordFeedback.type === "success" ? "#f0fdf4" : "#fef2f2",
-                        color: passwordFeedback.type === "success" ? "#166534" : "#991b1b",
-                        border: `1.5px solid ${passwordFeedback.type === "success" ? "#86efac" : "#fca5a5"}`
-                      }}
-                    >
-                      {passwordFeedback.type === "success" ? <CheckCircle2 size={18} color="#16a34a" /> : <AlertTriangle size={18} color="#dc2626" />}
-                      <span>{passwordFeedback.message}</span>
-                    </div>
-                  )}
-
-                  {/* Botón de Enviar */}
-                  <button
-                    type="submit"
-                    disabled={
-                      changingPassword ||
-                      !currentPasswordInput.trim() ||
-                      !newPasswordInput.trim() ||
-                      newPasswordInput.trim().length < 6 ||
-                      newPasswordInput.trim() !== confirmPasswordInput.trim()
-                    }
-                    style={{
-                      marginTop: "0.5rem",
-                      padding: "0.85rem 1.5rem",
-                      borderRadius: "0.75rem",
-                      border: "none",
-                      background:
-                        changingPassword ||
-                        !currentPasswordInput.trim() ||
-                        !newPasswordInput.trim() ||
-                        newPasswordInput.trim().length < 6 ||
-                        newPasswordInput.trim() !== confirmPasswordInput.trim()
-                          ? "#cbd5e1"
-                          : theme.gradient || "linear-gradient(135deg, #0284c7 0%, #0369a1 100%)",
-                      color: "#ffffff",
-                      fontSize: "0.92rem",
-                      fontWeight: 900,
-                      cursor:
-                        changingPassword ||
-                        !currentPasswordInput.trim() ||
-                        !newPasswordInput.trim() ||
-                        newPasswordInput.trim().length < 6 ||
-                        newPasswordInput.trim() !== confirmPasswordInput.trim()
-                          ? "not-allowed"
-                          : "pointer",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      gap: "0.5rem",
-                      boxShadow:
-                        changingPassword ||
-                        !currentPasswordInput.trim() ||
-                        !newPasswordInput.trim() ||
-                        newPasswordInput.trim().length < 6 ||
-                        newPasswordInput.trim() !== confirmPasswordInput.trim()
-                          ? "none"
-                          : `0 4px 14px ${theme.primary}40`,
-                      transition: "all 0.15s ease"
-                    }}
-                  >
-                    {changingPassword ? <RefreshCw size={17} className="animate-spin" /> : <ShieldCheck size={18} />}
-                    <span>{changingPassword ? "Actualizando contraseña..." : "Actualizar mi Contraseña"}</span>
-                  </button>
-                </form>
-              </div>
-
-              {/* Panel Lateral: Consejos y Políticas de Seguridad */}
-              <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
-                <div
-                  className="sp-card-panel"
-                  style={{
-                    background: "#ffffff",
-                    borderRadius: "1rem",
-                    border: "1px solid #e2e8f0",
-                    padding: "1.5rem",
-                    boxShadow: "0 4px 14px rgba(0, 0, 0, 0.03)"
-                  }}
-                >
-                  <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "1rem" }}>
-                    <Shield size={19} color="#16a34a" />
-                    <h4 style={{ margin: 0, fontSize: "0.95rem", fontWeight: 900, color: "#0f172a" }}>
-                      Recomendaciones de Seguridad
-                    </h4>
-                  </div>
-
-                  <ul style={{ margin: 0, paddingLeft: "1.2rem", fontSize: "0.84rem", color: "#475569", lineHeight: 1.6, display: "flex", flexDirection: "column", gap: "0.6rem" }}>
-                    <li>
-                      <strong>Uso personal e intransferible:</strong> Tu número de cuenta y contraseña son tu firma digital en las pruebas y registros de laboratorio.
-                    </li>
-                    <li>
-                      <strong>Protección anti-suplantación:</strong> Al rendir evaluaciones se valida la sesión única y marca de agua con tu número de cuenta.
-                    </li>
-                    <li>
-                      <strong>Contraseña robusta:</strong> Te recomendamos combinar letras y números, y evitar fechas obvias o tu mismo número de cuenta.
-                    </li>
-                    <li>
-                      <strong>Recuerda tu nueva clave:</strong> Apenas se guarde, se aplicará de inmediato para cualquier nuevo inicio de sesión en cualquier dispositivo.
-                    </li>
-                  </ul>
-                </div>
-
-                <div
-                  style={{
-                    background: "linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%)",
-                    border: "1.5px solid #86efac",
-                    borderRadius: "1rem",
-                    padding: "1.25rem 1.4rem",
-                    display: "flex",
-                    alignItems: "flex-start",
-                    gap: "0.75rem"
-                  }}
-                >
-                  <CheckCircle2 size={22} color="#15803d" style={{ flexShrink: 0, marginTop: "0.1rem" }} />
-                  <div>
-                    <h5 style={{ margin: 0, fontSize: "0.9rem", fontWeight: 900, color: "#166534" }}>
-                      Sincronización Inmediata
-                    </h5>
-                    <p style={{ margin: "0.25rem 0 0", fontSize: "0.8rem", color: "#15803d", lineHeight: 1.45 }}>
-                      Tu nueva contraseña se guarda en los servidores seguros de Histolab al instante, sin necesidad de reiniciar tu navegador.
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
+          <StudentAccountView student={effectiveStudent} career={carreraKey} account={cuentaKey} notify={notify} />
         )}
 
         {/* MODAL IN-APP DE CONFIRMACIÓN DE ENTREGA (NO DESENFOCA NI DISPARA FALSOS POSITIVOS DE SEGURIDAD) */}
         {confirmSubmitModalOpen && activeQuizToTake && (
           <div
+            className="quiz-player-dialog"
             style={{
               position: "fixed",
               inset: 0,
@@ -6528,7 +3590,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
               </div>
 
               <p style={{ margin: 0, fontSize: "0.86rem", color: "#475569", lineHeight: 1.5 }}>
-                Una vez enviada, tus respuestas quedarán selladas definitivamente y no podrás modificarlas. Tu examen será registrado en el sistema y enviado para revisión docente.
+                Una vez enviada, tus respuestas quedarán selladas definitivamente y no podrás modificarlas. Tu examen será registrado en el sistema y enviado para revisión del instructor titular de la sección.
               </p>
 
               <div
@@ -6599,6 +3661,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
         {/* MODAL IN-APP DE CONFIRMACIÓN PARA SALIR DE LA PRUEBA */}
         {confirmExitModalOpen && (
           <div
+            className="quiz-player-dialog"
             style={{
               position: "fixed",
               inset: 0,

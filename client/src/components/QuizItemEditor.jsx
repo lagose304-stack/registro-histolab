@@ -1,3 +1,4 @@
+import GradeInput from "./GradeInput";
 import { isAutomaticQuizItem } from "../../../shared/quizAutoGrading.mjs";
 import React, { useId } from "react";
 import { Plus, Trash2 } from "lucide-react";
@@ -20,7 +21,7 @@ export default function QuizItemEditor({ item, index, onChange, onRemove }) {
         if (!window.confirm("Cambiar el tipo reemplazará sus opciones y respuestas modelo. ¿Continuar?")) return;
         onChange({ ...createQuizItem(type,item.id), instruccion:item.instruccion || "", etiqueta:item.etiqueta || "", puntos:item.puntos });
       }}>{QUIZ_ITEM_TYPES.map(type => <option value={type.id} key={type.id}>{type.label}</option>)}</select></label>
-      <label className="user-field">Puntos del apartado<input type="number" min="0" max="1" step="0.05" value={item.puntos ?? 1} onChange={event => patch({ puntos:Math.max(0,Math.min(1,Number(event.target.value)||0)) })} /><small>La suma de la pregunta puede llegar hasta 1 punto.</small></label>
+      <label className="user-field">Puntos del apartado<GradeInput max={1} value={item.puntos ?? 1} onValueChange={value => patch({ puntos:value === "" ? 0 : Number(value) })} /><small>La suma de la pregunta puede llegar hasta 1 punto.</small></label>
     </div>
     <label className="user-field">{item.tipo === "verdadero_falso" ? "Afirmación para el estudiante" : "Instrucción para el estudiante"}<textarea aria-label={item.tipo === "verdadero_falso" ? "Afirmación para el estudiante" : "Instrucción para el estudiante"} rows={2} value={item.instruccion || item.etiqueta || ""} placeholder={item.tipo === "verdadero_falso" ? "Ej. El epitelio carece de vasos sanguíneos." : "Explica claramente qué debe responder el estudiante."} onChange={event => patch({ instruccion:event.target.value, etiqueta:event.target.value })} /></label>
     {item.tipo === "seleccion_multiple" ? <div className="quiz-item-editor__answer-key">

@@ -1025,10 +1025,10 @@ export default function ReviewQuizSubmissionsView({
                             color: "#b91c1c",
                             border: "1px solid #fecaca"
                           }}
-                          title={`Auto-envío por 3 infracciones. ${entrega.auditoria.tiempo_fuera_segundos || 0}s fuera de pantalla`}
+                          title={`Auto-envío según la política de 3 salidas. ${entrega.auditoria.tiempo_fuera_segundos || 0}s fuera de pantalla`}
                         >
                           <ShieldAlert size={12} />
-                          <span>Infracción Crítica ({entrega.auditoria.strikes} salidas • {entrega.auditoria.tiempo_fuera_segundos || 0}s fuera)</span>
+                          <span>Cierre por salidas ({entrega.auditoria.strikes} salidas • {entrega.auditoria.tiempo_fuera_segundos || 0}s fuera)</span>
                         </span>
                       ) : entrega.auditoria.strikes > 0 ? (
                         <span
@@ -1439,12 +1439,14 @@ export default function ReviewQuizSubmissionsView({
                       }}
                     >
                       {selectedEntrega.auditoria.motivo_finalizacion === "expulsion_infracciones"
-                        ? "🚨 Auto-envío por 3 infracciones de salida"
+                        ? "Auto-envío según la política de 3 salidas"
                         : selectedEntrega.auditoria.motivo_finalizacion === "tiempo_agotado"
                         ? "⏳ Auto-envío por tiempo límite agotado"
                         : "✅ Finalizada y enviada por el estudiante"}
                     </span>
                   </div>
+
+                  <p style={{ margin: 0, fontSize: "0.8rem", lineHeight: 1.65, color: "#576b80" }}>Las incidencias son señales reportadas por el navegador. Una salida o interrupción no demuestra por sí sola que hubo trampa; revisa el contexto antes de tomar una decisión.</p>
 
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: "0.6rem", fontSize: "0.8rem" }}>
                     <div style={{ background: "#ffffff", padding: "0.45rem 0.7rem", borderRadius: "0.45rem", border: "1px solid rgba(0,0,0,0.06)" }}>
@@ -1596,7 +1598,7 @@ export default function ReviewQuizSubmissionsView({
                               </span>
 
                               <span style={{ fontSize: "0.8rem", fontWeight: 800, color: isBonus ? "#92400e" : "#475569" }}>
-                                Valor Total: {qMaxPts.toFixed(2)} pts {isBonus ? "(Extra)" : ""}
+                                Valor Total: {qMaxPts.toFixed(3)} pts {isBonus ? "(Extra)" : ""}
                               </span>
                             </div>
 
@@ -1612,7 +1614,7 @@ export default function ReviewQuizSubmissionsView({
                                   border: qEarned === qMaxPts ? "1px solid #86efac" : qEarned > 0 ? "1px solid #fde68a" : "1px solid #cbd5e1"
                                 }}
                               >
-                                Puntos reactivo: +{qEarned.toFixed(3)} / {qMaxPts.toFixed(2)} pts
+                                Puntos reactivo: +{qEarned.toFixed(3)} / {qMaxPts.toFixed(3)} pts
                               </span>
 
                               {isBonus && (
@@ -1712,7 +1714,7 @@ export default function ReviewQuizSubmissionsView({
                                   <div style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
                                     <span style={{ fontSize: "0.74rem", fontWeight: 800, color: "#475569" }}>Valor reactivo:</span>
                                     <span style={{ fontSize: "0.76rem", fontWeight: 900, color: "#0369a1", background: "#ffffff", padding: "0.1rem 0.45rem", borderRadius: "0.3rem", border: "1px solid #bae6fd" }}>
-                                      {maxPts.toFixed(2)} pt
+                                      {maxPts.toFixed(3)} pt
                                     </span>
                                     {currentEval && (
                                       <span
