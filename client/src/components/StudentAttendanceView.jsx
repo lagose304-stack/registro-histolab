@@ -1,6 +1,7 @@
 import React, { useId, useMemo } from "react";
 import { CalendarCheck, CheckCircle2, Clock, AlertCircle, ShieldCheck, ChevronDown } from "lucide-react";
 import "./StudentAttendanceView.css";
+import MakeupAttendanceBadge from "./MakeupAttendanceBadge";
 
 const attendanceStates = {
   Asistio: { id: "present", label: "Asistió", Icon: CheckCircle2 },
@@ -52,7 +53,7 @@ export default function StudentAttendanceView({ parciales, examStatus }) {
             <ul className="student-attendance__weeks">{group.attendanceWeeks.map(week => {
               const { Icon, label, id } = week.state;
               return <li className="student-attendance__week" key={week.semana} data-week={week.semana} data-exam={Boolean(week.esExamen)} data-state={id}>
-                <span className="student-attendance__week-icon"><CalendarCheck size={19} /></span><div><h4>Semana {week.semana}</h4>{week.nombre && week.nombre.toLocaleLowerCase("es") !== `semana ${week.semana}` && <p>{week.nombre}</p>}{week.esExamen && <small>Semana de examen</small>}</div><span className="student-attendance__badge"><Icon size={15} />{label}</span>
+                <span className="student-attendance__week-icon"><CalendarCheck size={19} /></span><div><h4>Semana {week.semana}</h4>{week.nombre && week.nombre.toLocaleLowerCase("es") !== `semana ${week.semana}` && <p>{week.nombre}</p>}{week.esExamen && <small>Semana de examen</small>}</div><div className="student-attendance__statuses"><span className="student-attendance__badge"><Icon size={15} />{label}</span>{id === "justified" && <MakeupAttendanceBadge value={week.reposicion} />}</div>
               </li>;
             })}</ul>
           </div>

@@ -18,18 +18,21 @@ import WeeklyQuizCreationView from "./WeeklyQuizCreationView";
 import ReviewQuizSubmissionsView from "./ReviewQuizSubmissionsView";
 import SectionAwardsView from "./SectionAwardsView";
 import LiveQuizControlView from "./LiveQuizControlView";
+import StudentMakeupsView from "./StudentMakeupsView";
 import { getNavState, setNavState } from "../utils/navigationState";
 import { hasFullSectionAccess, isInstructorTitular } from "../utils/sectionRoleUtils";
+import { normalizeInstructorRole } from "../../../shared/instructorRoles.mjs";
 
 const SECTION_MODULE_GROUPS = [
   {
     id: "general", title: "Módulos de la sección", hint: "Consulta el registro académico y el equipo docente.",
     modules: [
       { id: "matricula", label: "Estudiantes", description: "Matricula y administra estudiantes de esta sección.", Icon: GraduationCap, fullAccess: true },
+      { id: "instructores", label: "Instructores", description: "Consulta el equipo de la sección.", Icon: Users },
+      { id: "asignaciones", label: "Proporcionar asignaciones", description: "Distribuye las tareas por semana.", Icon: Layers, fullAccess: true },
       { id: "calificaciones", label: "Calificaciones", description: "Consulta el cuadro de notas.", Icon: FileSpreadsheet },
       { id: "asistencia", label: "Lista de asistencia", description: "Consulta el registro de asistencia.", Icon: Calendar },
-      { id: "instructores", label: "Instructores", description: "Consulta el equipo de la sección.", Icon: Users },
-      { id: "asignaciones", label: "Proporcionar asignaciones", description: "Distribuye las tareas por semana.", Icon: Layers, fullAccess: true }
+      { id: "reposiciones_estudiantes", label: "Reposiciones de estudiantes", description: "Solicita reposiciones y registra estudiantes invitados.", Icon: CalendarCheck }
     ]
   },
   {
@@ -40,21 +43,24 @@ const SECTION_MODULE_GROUPS = [
       { id: "subir_examen", label: "Subir nota de examen parcial", description: "Registra las notas de un parcial.", Icon: Award, fullAccess: true },
       { id: "crear_prueba", label: "Crear prueba semanal", description: "Prepara las preguntas de la semana.", Icon: FileSpreadsheet },
       { id: "control_en_vivo", label: "Control en vivo", description: "Abre y dirige una prueba en vivo.", Icon: Radio },
-      { id: "revisar_respuestas", label: "Revisar respuestas", description: "Califica las pruebas enviadas.", Icon: CheckCircle2 },
+      { id: "revisar_respuestas", label: "Revisar respuestas", description: "Califica las pruebas enviadas.", Icon: CheckCircle2 }
+    ]
+  },
+  {
+    id: "awards", title: "Premios de la sección", hint: "Reconoce el desempeño académico del grupo.",
+    modules: [
       { id: "premios", label: "Premios de la sección", description: "Consulta el cuadro de honor.", Icon: Trophy }
     ]
   },
   {
     id: "data", title: "Datos de la sección", hint: "Importa registros académicos.",
     modules: [
-      { id: "migrar_datos", label: "Migrar datos", description: "Importa notas, exámenes y asistencia.", Icon: Database, fullAccess: true }
+      { id: "migrar_datos", label: "Migrar datos", description: "Importa notas, exámenes y asistencia.", Icon: Database, creatorOnly: true }
     ]
   }
 ];
 
-const FULL_ACCESS_MODULES = new Set(SECTION_MODULE_GROUPS.flatMap(group =>
-  group.modules.filter(module => module.fullAccess).map(module => module.id)
-));
+const SECTION_MODULES = SECTION_MODULE_GROUPS.flatMap(group => group.modules);
 
 function InstructorContact({ instructor }) {
   if (!instructor) return null;
@@ -78,12 +84,14 @@ export default function CoordinatorSectionView({
   const isTitular = useMemo(() => isInstructorTitular(currentUser, seccion), [currentUser, seccion]);
 
   const hasFullAccess = hasFullSectionAccess(currentUser, seccion);
+  const isCreator = normalizeInstructorRole(currentUser?.rol) === "Creador";
+  const canAccessModule = module => Boolean(module) && (!module.creatorOnly || isCreator) && (!module.fullAccess || hasFullAccess);
 
   const [requestedModule, setActiveModuleState] = useState(
     () => initialNav.coordinatorSectionModule || null
   );
 
-  const activeModule = !hasFullAccess && FULL_ACCESS_MODULES.has(requestedModule) ? null : requestedModule;
+  const activeModule = canAccessModule(SECTION_MODULES.find(module => module.id === requestedModule)) ? requestedModule : null;
 
   const setActiveModule = (mod) => {
     setActiveModuleState(mod);
@@ -195,7 +203,7 @@ export default function CoordinatorSectionView({
       {activeModule === "matricula" ? (
         <SectionStudentsView seccion={seccion} hideBackButton hideGradebook notify={notify} />
       ) : !activeModule && SECTION_MODULE_GROUPS.map(({ id, title, hint, modules }) => {
-        const visibleModules = modules.filter(module => hasFullAccess || !module.fullAccess);
+        const visibleModules = modules.filter(canAccessModule);
         if (!visibleModules.length) return null;
         return (
           <section className="section-panel__group" aria-labelledby={`section-panel-${id}`} key={id}>
@@ -249,6 +257,7 @@ export default function CoordinatorSectionView({
           notify={notify}
         />
       )}
+      {activeModule === "reposiciones_estudiantes" && <StudentMakeupsView seccion={seccion} currentInstructor={currentInstructor} notify={notify} />}
 
       {activeModule === "pasar_asistencia" && (
         <WeeklyAttendanceTakingView

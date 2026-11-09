@@ -1,6 +1,7 @@
 import React, { useId } from "react";
 import { FileEdit, Clock, Radio, Lock, CheckCircle2, Eye, Play, RefreshCw, AlertCircle, Send, ChevronRight, ChevronDown } from "lucide-react";
 import "./StudentQuizzesView.css";
+import { getQuizPractice } from "../../../shared/quizSchedule.mjs";
 
 const sessionEnabled = session => Boolean(session && !["finalizada", "inactiva"].includes(session.estado) &&
   (session.habilitada || ["lobby", "en_pregunta", "esperando_siguiente"].includes(session.estado)));
@@ -16,7 +17,7 @@ const states = {
   graded: { label: "Calificada", Icon: CheckCircle2 }
 };
 
-export default function StudentQuizzesView({ quizzes, submissions, sessions, parciales = [], loading, error, onRefresh, onStart, onReview }) {
+export default function StudentQuizzesView({ quizzes, submissions, sessions, parciales = [], weeks = [], loading, error, onRefresh, onStart, onReview }) {
   const historyAccordionName = useId();
   const items = [...quizzes].sort((a, b) => Number(a.numero_semana) - Number(b.numero_semana)).map(quiz => {
     const submission = submissions[quiz.numero_semana];
@@ -40,6 +41,7 @@ export default function StudentQuizzesView({ quizzes, submissions, sessions, par
 
   const renderQuiz = ({ quiz, submission, session, state }) => {
     const { Icon, label } = states[state];
+    const schedule = getQuizPractice(weeks,quiz.numero_semana);
     const questions = Array.isArray(quiz.preguntas) ? quiz.preguntas : [];
     const times = questions.map(question => Number(question.tiempo_segundos || quiz.tiempo_por_pregunta_segundos || 90));
     const uniformTime = times.length > 0 && times.every(time => time === times[0]);
@@ -49,6 +51,8 @@ export default function StudentQuizzesView({ quizzes, submissions, sessions, par
     return <article className="student-quizzes__card" data-state={state} data-week={quiz.numero_semana} key={quiz.id || quiz.numero_semana}>
       <div className="student-quizzes__card-top"><span>Semana {quiz.numero_semana}</span><span className="student-quizzes__badge"><Icon size={14} />{label}</span></div>
       <h4>{quiz.titulo || `Prueba semanal ${quiz.numero_semana}`}</h4>
+      {schedule.practiceWeek && <p>{schedule.beforeExam ? "Se rinde el mismo día de esta práctica, antes de la semana de examen." : `Se rinde en la práctica de la semana ${schedule.practiceWeek}.`}</p>}
+      {quiz.reposicion && <p><strong>Reposición en sección {quiz.reposicion.seccion}</strong> · El resultado se registra en tu sección original.</p>}
       <div className="student-quizzes__metadata"><span><FileEdit size={15} />{questions.length} {questions.length === 1 ? "pregunta" : "preguntas"}</span>{duration > 0 && <span><Clock size={15} />{duration} min de duración</span>}{questions.length > 0 && <span><Clock size={15} />{uniformTime ? `${formatSeconds(times[0])} por pregunta` : "Tiempo variable por pregunta"}</span>}</div>
       {quiz.instrucciones && <details className="student-quizzes__instructions"><summary>Instrucciones de la prueba</summary><p>{quiz.instrucciones}</p></details>}
       <div className="student-quizzes__card-bottom">

@@ -8,6 +8,7 @@
   ],
   "description": "Base Full-Stack para Registro Histolab (React + Node.js/Express)",
   "scripts": {
+    "test:accounts": "node server/scripts/test_account_activation_sql.mjs && node server/scripts/test_account_activation.mjs && node server/scripts/test_student_auth_flow.mjs && node server/scripts/test_instructor_password.mjs && node server/scripts/test_student_deletion_sql.mjs && node server/scripts/test_student_deletion_api.mjs",
     "dev": "concurrently -n \"SERVER,CLIENT\" -c \"cyan,magenta\" \"npm run dev:server\" \"npm run dev:client\"",
     "dev:server": "npm run dev --prefix server",
     "dev:client": "npm run dev --prefix client",
@@ -20,6 +21,7 @@
     "deploy:pages": "npm run build:pages && wrangler pages deploy --cwd cloudflare --project-name=registrohistolab --branch=main --commit-dirty=true"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.15",
     "concurrently": "^9.1.2",
     "wrangler": "^4.129.0"
   }

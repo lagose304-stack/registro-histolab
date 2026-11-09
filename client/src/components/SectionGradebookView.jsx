@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { getMakeupOutcome } from "../../../shared/studentMakeups.mjs";
+import MakeupAttendanceBadge from "./MakeupAttendanceBadge";
 import {
   ArrowLeft,
   FileSpreadsheet,
@@ -1943,7 +1945,7 @@ export default function SectionGradebookView({
                             }}
                             title={`Semana ${sem}`}
                           >
-                            {getAsistenciaBadge(val)}
+                            <div className="attendance-with-makeup">{getAsistenciaBadge(val)}{val === "Falta justificada" && <MakeupAttendanceBadge value={getMakeupOutcome(est.asistencias, sem)} />}</div>
                           </td>
                         );
                       })}

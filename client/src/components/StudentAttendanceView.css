@@ -57,3 +57,6 @@
 @media(max-width: 499px) {
   .student-attendance__partial-count { order: 1; width: 100%; padding-left: calc(36px + .7rem); }
 }
+.student-attendance__statuses { display: grid; gap: .3rem; grid-column: 2; justify-items: start; }
+.student-attendance__statuses > .student-attendance__badge { grid-column: auto; }
+@media(min-width: 650px) { .student-attendance__statuses { grid-column: auto; } }

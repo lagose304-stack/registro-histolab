@@ -1,9 +1,10 @@
-import React, { useState } from "react";
+import React, { useState,lazy,Suspense } from "react";
 import { AlertCircle, ArrowRight, Eye, EyeOff, GraduationCap, Users } from "lucide-react";
 import { api } from "../services/api";
 import { safeStorage } from "../utils/safeStorage";
 import laboratorioLogo from "../assets/logos/laboratorio.png";
 import "./LoginInstructor.css";
+const AccountActivationView=lazy(()=>import("./AccountActivationView"));
 
 const CARRERAS = [
   ["Medicina", "Medicina"],
@@ -28,6 +29,7 @@ export default function LoginInstructor({
   // Estado común
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
+  const [activationOpen,setActivationOpen]=useState(false);
 
   // =========================================================================
   // 1. ESTADO DE FORMULARIO DE ESTUDIANTES
@@ -43,6 +45,9 @@ export default function LoginInstructor({
   });
 
   const [showStudentPassword, setShowStudentPassword] = useState(false);
+  const [studentSections, setStudentSections] = useState([]);
+  const [studentSection, setStudentSection] = useState("");
+  const clearStudentSections = () => { setStudentSections([]); setStudentSection(""); };
   const [studentData, setStudentData] = useState({
     numero_cuenta: safeStorage.getItem("histolab_remembered_student_account") || "",
     contrasena: ""
@@ -86,7 +91,8 @@ export default function LoginInstructor({
       const res = await api.auth.loginStudent({
         carrera: selectedCarrera,
         numero_cuenta: studentData.numero_cuenta.trim(),
-        contrasena: studentData.contrasena.trim()
+        contrasena: studentData.contrasena,
+        seccion_id: studentSection || undefined
       });
 
       if (res.success && res.estudiante) {
@@ -109,6 +115,12 @@ export default function LoginInstructor({
         }
       }
     } catch (err) {
+      if (err.reason === "SECTION_SELECTION_REQUIRED") {
+        setStudentSections(err.sections || []);
+        setStudentSection("");
+        setErrorMsg("");
+        return;
+      }
       const msg = err.message || "Credenciales incorrectas o estudiante no encontrado.";
       setErrorMsg(msg);
       notify(msg, "error");
@@ -169,12 +181,13 @@ export default function LoginInstructor({
             <p className="histolab-login__eyebrow">Laboratorio de Histología<br />UNAH</p>
           </div>
           <h1><span>Registro</span> HistoLab</h1>
+          <p className="histolab-login__description">Plataforma de gestión académica para consultar y administrar secciones, asistencias, evaluaciones y calificaciones.</p>
           <p className="histolab-login__badge">Próximamente 2027</p>
         </header>
 
         <section className="histolab-login__card" aria-labelledby="login-title">
-          <h2 id="login-title">Iniciar sesión</h2>
-          <p className="histolab-login__hint">Selecciona tu perfil para ingresar.</p>
+          <h2 id="login-title">{activationOpen==="recovery"?"Recuperar acceso":activationOpen?"Primer ingreso":"Iniciar sesión"}</h2>
+          <p className="histolab-login__hint">{activationOpen?"Verifica tu correo y crea tu contraseña personal.":"Selecciona tu perfil para ingresar."}</p>
 
           <div className="histolab-login__profiles" role="group" aria-label="Perfil de acceso">
             {PORTALS.map(({ id, label, Icon }) => (
@@ -196,11 +209,11 @@ export default function LoginInstructor({
             ))}
           </div>
 
-          <form onSubmit={isStudent ? handleStudentLoginSubmit : handleInstructorLoginSubmit} aria-busy={loading}>
+          {activationOpen ? <Suspense fallback={<p role="status">Cargando…</p>}><AccountActivationView key={`${activePortal}-${activationOpen}`} perfil={activePortal} purpose={activationOpen} onClose={()=>{setActivationOpen(false);setErrorMsg("");}}/></Suspense> : <form onSubmit={isStudent ? handleStudentLoginSubmit : handleInstructorLoginSubmit} aria-busy={loading}>
             {isStudent && (
               <label className="histolab-login__field">
                 Carrera
-                <select value={selectedCarrera} onChange={(e) => setSelectedCarrera(e.target.value)} required>
+                <select value={selectedCarrera} onChange={(e) => { setSelectedCarrera(e.target.value); clearStudentSections(); }} required>
                   <option value="" disabled>Selecciona tu carrera</option>
                   {CARRERAS.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
                 </select>
@@ -217,7 +230,7 @@ export default function LoginInstructor({
                   autoComplete="username"
                   placeholder="Ej. 20201001234"
                   value={studentData.numero_cuenta}
-                  onChange={(e) => setStudentData({ ...studentData, numero_cuenta: e.target.value })}
+                  onChange={(e) => { setStudentData({ ...studentData, numero_cuenta: e.target.value }); clearStudentSections(); }}
                   required
                 />
               </label>
@@ -250,7 +263,7 @@ export default function LoginInstructor({
                   spellCheck={false}
                   value={isStudent ? studentData.contrasena : instructorData.password}
                   onChange={(e) => {
-                    if (isStudent) setStudentData({ ...studentData, contrasena: e.target.value });
+                    if (isStudent) { setStudentData({ ...studentData, contrasena: e.target.value }); clearStudentSections(); }
                     else setInstructorData({ ...instructorData, password: e.target.value });
                   }}
                   required
@@ -264,6 +277,15 @@ export default function LoginInstructor({
                 </button>
               </div>
             </div>
+
+            {isStudent && studentSections.length > 0 && <label className="histolab-login__field">
+              Sección de ingreso
+              <select value={studentSection} onChange={event => setStudentSection(event.target.value)} required disabled={loading} autoFocus aria-describedby="student-section-hint">
+                <option value="">Selecciona tu sección</option>
+                {studentSections.map(section => <option value={section.id} key={section.id}>{section.codigo} · {section.periodo_academico} · {section.dia} {section.hora_inicio?.slice(0,5)}–{section.hora_fin?.slice(0,5)}</option>)}
+              </select>
+              <small id="student-section-hint">Tu cuenta tiene varias matrículas. Elige la sección que deseas consultar.</small>
+            </label>}
 
             <label className="histolab-login__remember">
               <input
@@ -285,10 +307,13 @@ export default function LoginInstructor({
               {loading ? "Iniciando sesión…" : "Ingresar"}
               {!loading && <ArrowRight size={19} aria-hidden="true" />}
             </button>
-          </form>
+            <button type="button" className="histolab-login__activation-link" disabled={loading} onClick={()=>{setActivationOpen("recovery");setErrorMsg("");}}>Olvidé mi contraseña</button>
+            <button type="button" className="histolab-login__activation-link" disabled={loading} onClick={()=>{setActivationOpen("activation");setErrorMsg("");}}>¿Es tu primera vez? Activa tu cuenta</button>
+          </form>}
         </section>
 
         <footer className="histolab-login__footer">
+          <nav aria-label="Información del servicio" className="histolab-login__legal"><a href="/privacidad/">Política de privacidad</a><a href="/condiciones/">Condiciones de uso</a><a href="mailto:registrohistolab@gmail.com">Contacto</a></nav>
           Registro HistoLab · Hecho por Elam Lagos · © {new Date().getFullYear()}
         </footer>
       </div>

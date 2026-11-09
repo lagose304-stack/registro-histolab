@@ -3,6 +3,7 @@ import { hasAdministrationAccess, normalizeInstructorRole } from "../../../share
 import dotenv from "dotenv";
 import { supabase, isSupabaseConfigured } from "../db/supabase.js";
 import { getInstructorByIdOrEmail, getStudentByCuentaAndCarrera, getStudentSession } from "../controllers/auth.controller.js";
+import { requiresAccountActivation, requiresStudentAccountActivation } from "../../../shared/accountActivation.mjs";
 
 dotenv.config();
 
@@ -32,6 +33,7 @@ export const authenticateInstructor = async (req, res, next) => {
     }
 
     if (decoded.rol === "ESTUDIANTE") return res.status(403).json({success:false,reason:"FORBIDDEN_ROLE",message:"Se requiere una sesión de instructor."});
+    if (!normalizeInstructorRole(decoded.rol)) return res.status(403).json({success:false,reason:"FORBIDDEN_ROLE",message:"Se requiere una sesión de instructor."});
 
     // Obtener el instructor actual desde la base de datos o memoria
     const instructor = await getInstructorByIdOrEmail(decoded.id, decoded.email);
@@ -51,6 +53,7 @@ export const authenticateInstructor = async (req, res, next) => {
         message: "Esta cuenta de instructor ha sido desactivada por seguridad."
       });
     }
+    if(requiresAccountActivation(instructor))return res.status(403).json({success:false,reason:"ACTIVATION_REQUIRED",message:"Activa tu cuenta para continuar."});
 
     const isCreator = normalizeInstructorRole(instructor.rol) === "Creador";
     if (isCreator || decoded.creator_session) {
@@ -97,6 +100,13 @@ export const authenticateInstructor = async (req, res, next) => {
   }
 };
 
+export function requireCreator(req, res, next) {
+  if (normalizeInstructorRole(req.instructor?.rol) !== "Creador") {
+    return res.status(403).json({ success: false, message: "Solo el Creador puede migrar datos." });
+  }
+  next();
+}
+
 export function requireAdministration(req, res, next) {
   if (!hasAdministrationAccess(req.instructor?.rol)) {
     return res.status(403).json({
@@ -138,7 +148,12 @@ export const authenticateStudent = async (req, res, next) => {
       });
     }
 
-    const student = await getStudentByCuentaAndCarrera(decoded.numero_cuenta, decoded.carrera);
+    let student;
+    try {
+      student = await getStudentByCuentaAndCarrera(decoded.numero_cuenta, decoded.carrera, decoded.id);
+    } catch {
+      return res.status(503).json({ success: false, reason: "AUTH_UNAVAILABLE", message: "No pudimos verificar tu sesión. Intenta nuevamente en unos momentos." });
+    }
 
     if (!student) {
       return res.status(401).json({
@@ -155,6 +170,7 @@ export const authenticateStudent = async (req, res, next) => {
         message: "Esta cuenta de estudiante ha sido desactivada."
       });
     }
+    if(requiresStudentAccountActivation(student))return res.status(403).json({success:false,reason:"ACTIVATION_REQUIRED",message:"Activa tu cuenta para continuar."});
 
     // 🔒 VALIDACIÓN DE SESIÓN CONCURRENTE / ÚNICA:
     // Verifica contra la base de datos (current_session_token) o el registro en memoria

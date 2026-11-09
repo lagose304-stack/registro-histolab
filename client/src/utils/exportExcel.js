@@ -1,5 +1,6 @@
 import { getCanonicalExamGrade, getCanonicalManualGrade, getCanonicalQuizGrade } from "./academicEngine";
 import ExcelJS from "exceljs";
+import { getMakeupOutcome } from "../../../shared/studentMakeups.mjs";
 import { getStudentDerechoStatus } from "./gradebookUtils";
 
 /**
@@ -396,7 +397,9 @@ export async function exportStyledExcel({
           fontColor = "FF15803D";
           bold = true;
         } else if (val === "Falta justificada") {
-          cellValue = "FJ";
+          const outcome = getMakeupOutcome(est.asistencias, col.attendanceWeek || col.key.match(/^asistencia_(\d+)$/)?.[1]);
+          cellValue = outcome ? `FJ\n${outcome}` : "FJ";
+          if (outcome) { row.height = Math.max(row.height || 24, 42); cell.note = `Falta justificada · ${outcome}. La asistencia original se conserva.`; }
           fontColor = "FFB45309";
           bold = true;
           bg = "FFFEF3C7";
@@ -452,7 +455,7 @@ export async function exportStyledExcel({
 
       cell.value = cellValue;
       cell.font = { name: "Arial", size: 8.5, bold, color: { argb: fontColor } };
-      cell.alignment = { vertical: "middle", horizontal: col.align || "center" };
+      cell.alignment = { vertical: "middle", horizontal: col.align || "center", wrapText: typeof cellValue === "string" && cellValue.includes("\n") };
       cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: bg } };
       if (numFormat) cell.numFmt = numFormat;
     });

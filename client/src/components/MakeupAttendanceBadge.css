@@ -1,0 +1,3 @@
+.makeup-attendance-badge { display: inline-flex; align-items: center; justify-content: center; width: fit-content; max-width: 100%; padding: .2rem .45rem; border: 1px solid #acd0bb; border-radius: .4rem; background: #eef8f2; color: #276a48; font-size: .75rem; font-weight: 750; line-height: 1.4; white-space: nowrap; }
+.makeup-attendance-badge[data-result="No repuso"] { border-color: #dfb3bb; background: #fff1f3; color: #963447; }
+.attendance-with-makeup { display: grid; justify-items: center; gap: .3rem; }

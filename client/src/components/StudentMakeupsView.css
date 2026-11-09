@@ -1,0 +1,50 @@
+.section-panel > .makeups { width: 100%; max-width: none; margin-inline: 0; }
+.makeups { min-width: 0; overflow-wrap: anywhere; }
+.makeups svg { flex: none; }
+.makeups__hero { display: flex; flex-wrap: wrap; gap: .9rem; align-items: center; padding: 1rem; border: 1px solid #adc6d8; border-top: 3px solid #0284c7; border-radius: .85rem; background: #fff; }
+.makeups__hero > span { display: grid; place-items: center; width: 48px; height: 48px; border: 1px solid #bfdaea; border-radius: .75rem; background: #eff7fc; color: #0284c7; }
+.makeups__hero > div { flex: 1 1 15rem; }
+.makeups__hero h1 { font-size: 1.5rem; margin-block: .25rem; }
+.makeups__hero p { font-size: .85rem; color: #57758a; }
+.makeups__notice, .makeups__feedback { display: flex; flex-wrap: wrap; align-items: flex-start; gap: .6rem; padding: .85rem; border: 1px solid #bfd4e1; border-radius: .7rem; background: #f2f8fc; font-size: .85rem; color: #42677f; }
+.makeups__notice p, .makeups__feedback p { flex: 1 1 12rem; }
+.makeups__feedback, .makeups__feedback--error { color: #8d3042; background: #fff2f4; border-color: #e0b4bf; }
+.makeups__feedback--success { color: #2c6c4e; background: #f0f8f3; border-color: #b9d6c6; }
+.makeups__panel, .makeups__card { display: grid; align-content: start; min-width: 0; gap: .8rem; padding: 1rem; border: 1px solid #b0c8d8; border-radius: .85rem; background: #fff; }
+.makeups__panel > header, .makeups__card > header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: .6rem; }
+.makeups__panel h2, .makeups__card h2 { font-size: 1.05rem; }
+.makeups__panel h2 { scroll-margin-top: 6rem; }
+.makeups__panel form, .makeups__receiving { display: grid; min-width: 0; gap: 1rem; }
+.makeups__panel textarea { resize: vertical; min-height: 7rem; width: 100%; min-width: 0; padding: .65rem; font: inherit; border: 1px solid #adc6d8; border-radius: .6rem; }
+.makeups__panel select, .makeups__toolbar select { width: 100%; min-width: 0; min-height: 44px; padding: .5rem; border: 1px solid #adc6d8; border-radius: .6rem; background: #fff; font: inherit; font-size: .875rem; color: #244e68; }
+.makeups__toolbar { display: grid; align-items: end; gap: .7rem; }
+.makeups__search { display: flex; align-items: center; gap: .5rem; padding-inline: .7rem; min-width: 0; min-height: 44px; border: 1px solid #adc6d8; border-radius: .65rem; background: #fff; }
+.makeups__search input { width: 100%; min-width: 0; padding: .65rem 0; border: 0; background: transparent; font: inherit; outline: none; }
+.makeups__search:focus-within { outline: 2px solid #0284c7; }
+.makeups__count, .makeups__account { color: #59798e; font-size: .85rem; }
+.makeups__pagination { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: .75rem; }
+.makeups__empty { padding: 1.2rem; border: 1px dashed #abc3d3; border-radius: .7rem; background: #fff; color: #57758a; }
+.makeups__list { display: grid; align-items: start; gap: 1rem; list-style: none; }
+.makeups__state { padding: .25rem .5rem; border: 1px solid #c9d6e0; border-radius: .4rem; background: #f2f6f9; font-size: .75rem; font-weight: 750; }
+.makeups__state[data-state="solicitada"] { border-color: #ddc48d; background: #fff8e8; color: #876427; }
+.makeups__state[data-state="completada"] { border-color: #b3d4c1; background: #eef8f2; color: #2e7050; }
+.makeups__state[data-state="asignada"] { border-color: #b3cfe4; background: #eff7fd; color: #236587; }
+.makeups__route { display: flex; align-items: center; gap: .75rem; padding: .75rem; border: 1px solid #d4e1ea; border-radius: .65rem; background: #f7fafc; }
+.makeups__route > span { display: grid; flex: 1; min-width: 0; gap: .2rem; }
+.makeups__route small { color: #617e91; font-size: .75rem; }
+.makeups__card > p:has(svg), .makeups__card footer p { display: flex; align-items: center; gap: .5rem; font-size: .85rem; }
+.makeups__card summary { cursor: pointer; padding-block: .5rem; font-size: .85rem; font-weight: 700; }
+.makeups__card details p { white-space: pre-wrap; font-size: .85rem; color: #56778d; }
+.makeups__card footer { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
+.makeups__card footer:empty { display: none; }
+.makeups__attendance { display: grid; gap: .7rem; padding: .85rem; border: 1px solid #cbdde7; border-radius: .65rem; background: #f7fafc; }
+.makeups h3 { font-size: .95rem; }
+.makeups__attendance p, .makeups__receiving form > p { color: #55778e; font-size: .85rem; }
+.makeups__attendance small { color: #627d90; }
+.makeups__attendance-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
+.makeups__attendance-actions button { flex: 1 1 10rem; }
+.makeups__attendance-actions button[aria-pressed="true"] { border-color: #0284c7; background: #eaf5fc; color: #075d7d; }
+.makeups__manual > span { display: flex; align-items: center; gap: .5rem; }
+.makeups__manual input { width: 8rem; min-width: 0; min-height: 44px; padding: .5rem; border: 1px solid #a9c2d4; border-radius: .5rem; font: inherit; }
+.makeups button:focus-visible, .makeups :is(input,select,textarea,summary):focus-visible { outline: 3px solid #0284c7; outline-offset: 2px; }
+@media (min-width: 44rem) { .makeups__toolbar { grid-template-columns: minmax(0,1.5fr) minmax(0,1fr) auto; } .makeups__toolbar:has(> :nth-child(4)) { grid-template-columns: minmax(0,1.4fr) minmax(0,1fr) minmax(0,1fr) auto; } .makeups__list { grid-template-columns: repeat(2,minmax(0,1fr)); } }

@@ -12,8 +12,6 @@ import {
 import { api } from "../services/api";
 import { ASSIGNABLE_INSTRUCTOR_ROLES } from "../../../shared/instructorRoles.mjs";
 
-const DEFAULT_INSTRUCTOR_PASSWORD = "histolab321";
-
 export default function UserManagementModal({
   mode = "create", // 'create' | 'edit' | 'delete'
   instructors = [],
@@ -37,7 +35,6 @@ export default function UserManagementModal({
     primer_apellido: "",
     segundo_apellido: "",
     correo: "",
-    password: mode === "create" ? DEFAULT_INSTRUCTOR_PASSWORD : "",
     rol: "Instructor",
     coordinacion: "",
     activo: true
@@ -51,7 +48,6 @@ export default function UserManagementModal({
       primer_apellido: "",
       segundo_apellido: "",
       correo: "",
-      password: mode === "create" ? DEFAULT_INSTRUCTOR_PASSWORD : "",
       rol: "Instructor",
       coordinacion: "",
       activo: true
@@ -81,7 +77,6 @@ export default function UserManagementModal({
       primer_apellido: instructor.primer_apellido || "",
       segundo_apellido: instructor.segundo_apellido || "",
       correo: instructor.correo || "",
-      password: "", // Contraseña vacía por defecto al editar
       rol: instructor.rol || "Instructor",
       coordinacion: instructor.coordinacion || "",
       activo: instructor.activo !== undefined ? instructor.activo : true
@@ -104,11 +99,8 @@ export default function UserManagementModal({
 
     try {
       if (mode === "create") {
-        if (!formData.primer_nombre || !formData.primer_apellido || !formData.correo || !formData.numero_cuenta || !formData.password) {
-          throw new Error("Por favor completa todos los campos requeridos (Nombre, Apellido, Cuenta, Correo y Contraseña).");
-        }
-        if (formData.password.length < 6) {
-          throw new Error("La contraseña debe tener al menos 6 caracteres.");
+        if (!formData.primer_nombre || !formData.primer_apellido || !formData.correo || !formData.numero_cuenta) {
+          throw new Error("Por favor completa nombre, apellido, cuenta y correo.");
         }
 
         const res = await api.auth.createInstructor(formData);
@@ -236,18 +228,7 @@ export default function UserManagementModal({
               <div className="user-dialog__grid">
                 <label className="user-field">Número de cuenta <input name="numero_cuenta" required autoComplete="off" value={formData.numero_cuenta} onChange={updateField} /></label>
                 <label className="user-field">Correo electrónico <input name="correo" type="email" required autoComplete="off" value={formData.correo} onChange={updateField} /></label>
-                <div className="user-field">
-                  <label htmlFor="user-password">{isCreate ? "Contraseña" : "Nueva contraseña (opcional)"}</label>
-                  <div className="user-field__password">
-                    <input id="user-password" name="password" type={showPassword ? "text" : "password"}
-                      required={isCreate} autoComplete="new-password" value={formData.password} onChange={updateField} />
-                    <button type="button" className="user-button user-button--icon" onClick={() => setShowPassword(previous => !previous)}
-                      aria-label={showPassword ? "Ocultar contraseña" : "Mostrar contraseña"}>
-                      {showPassword ? <EyeOff size={19} aria-hidden="true" /> : <Eye size={19} aria-hidden="true" />}
-                    </button>
-                  </div>
-                  <small>{isCreate ? "Mínimo 6 caracteres." : "Déjala en blanco para conservar la actual."}</small>
-                </div>
+                <p className="user-dialog__warning">El instructor crea su contraseña desde «¿Es tu primera vez?» usando un código enviado a su correo.</p>
                 <label className="user-field">
                   Rol
                   <select name="rol" value={formData.rol} onChange={updateField}>

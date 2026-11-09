@@ -1,5 +1,5 @@
 import { generateSectionCode, normalizeSectionCareer } from "../../../shared/sectionCode.mjs";
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import {
   X,
@@ -91,6 +91,12 @@ export default function SectionManagementModal({
   onSuccess,
   notify
 }) {
+  const dialogRef = useRef(null);
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    dialog.showModal();
+    return () => dialog.close();
+  }, []);
   const [loading, setLoading] = useState(false);
   const [targetId, setTargetId] = useState(selectedSection?.id || "");
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
@@ -293,36 +299,26 @@ export default function SectionManagementModal({
   };
 
   return createPortal(
-    <div
-      className="section-editor-overlay"
-      style={{
-        position: "fixed",
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        backgroundColor: "rgba(15, 23, 42, 0.7)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        zIndex: 999999,
-        boxSizing: "border-box"
-      }}
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
+    <dialog
+      ref={dialogRef}
+      className="user-dialog section-editor-dialog"
+      aria-labelledby="section-editor-title"
+      onCancel={event => {
+        event.preventDefault();
+        if (!loading) onClose();
       }}
     >
       <div
         className="section-editor-panel"
         style={{
           background: "#ffffff",
-          borderRadius: "1.25rem",
+          borderRadius: ".85rem",
           width: "100%",
           maxWidth: "700px",
           display: "flex",
           flexDirection: "column",
           boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.35)",
-          border: "1px solid #e2e8f0",
+          border: "1px solid #adc6d8",
           overflow: "hidden",
           position: "relative",
           zIndex: 1000000
@@ -332,38 +328,23 @@ export default function SectionManagementModal({
         {/* Encabezado del Modal */}
         <div
           style={{
-            padding: "1.2rem 1.5rem",
+            padding: "1rem",
             borderBottom: "1px solid #e2e8f0",
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
-            background:
-              mode === "create"
-                ? "linear-gradient(135deg, #f0fdfa 0%, #ffffff 100%)"
-                : mode === "edit"
-                ? "linear-gradient(135deg, #fffbeb 0%, #ffffff 100%)"
-                : "linear-gradient(135deg, #fff1f2 0%, #ffffff 100%)",
+            background: mode === "delete" ? "#fff1f2" : "#f3f8fb",
             flexShrink: 0
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flex: 1, minWidth: 0 }}>
             <div
               style={{
                 width: "42px",
                 height: "42px",
                 borderRadius: "0.75rem",
-                background:
-                  mode === "create"
-                    ? "#ccfbf1"
-                    : mode === "edit"
-                    ? "#fef3c7"
-                    : "#fee2e2",
-                color:
-                  mode === "create"
-                    ? "#0f766e"
-                    : mode === "edit"
-                    ? "#d97706"
-                    : "#dc2626",
+                  background: mode === "delete" ? "#fee2e2" : "#e0f2f8",
+                  color: mode === "delete" ? "#b33549" : "#075d7d",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
@@ -374,14 +355,14 @@ export default function SectionManagementModal({
               {mode === "edit" && <Edit3 size={22} />}
               {mode === "delete" && <Trash2 size={22} />}
             </div>
-            <div>
-              <h2 style={{ margin: 0, fontSize: "1.2rem", fontWeight: 800, color: "#0f172a" }}>
-                {mode === "create" && "Crear Nueva Sección"}
-                {mode === "edit" && "Editar Sección"}
-                {mode === "delete" && "Eliminar Sección"}
+            <div style={{ minWidth: 0 }}>
+              <h2 id="section-editor-title" style={{ margin: 0, fontSize: "1.1rem", fontWeight: 800, color: "#142c42" }}>
+                {mode === "create" && "Crear sección"}
+                {mode === "edit" && "Editar sección"}
+                {mode === "delete" && "Eliminar sección"}
               </h2>
               <span style={{ fontSize: "0.8rem", color: "#64748b" }}>
-                {mode === "create" && "Registrar una nueva sección de laboratorio con horarios y cupos"}
+                {mode === "create" && "Horario, carrera y titular de sección"}
                 {mode === "edit" && selectedSection && `Sección ${selectedSection.codigo} · ${selectedSection.carrera}`}
                 {mode === "delete" && "Dar de baja y eliminar una sección del sistema"}
               </span>
@@ -390,12 +371,14 @@ export default function SectionManagementModal({
 
           <button
             onClick={onClose}
+            disabled={loading}
+            aria-label="Cerrar ventana"
             style={{
               background: "#f1f5f9",
               border: "none",
               borderRadius: "50%",
-              width: "34px",
-              height: "34px",
+              width: "44px",
+              height: "44px",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
@@ -411,7 +394,7 @@ export default function SectionManagementModal({
         </div>
 
         {/* Cuerpo del Formulario con Scroll interno */}
-        <div style={{ flex: 1, overflowY: "auto", padding: "1.5rem" }}>
+        <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "1rem" }}>
           <form id="section-mgmt-form" onSubmit={handleSubmit} autoComplete="off" style={{ display: "flex", flexDirection: "column", gap: "1.1rem" }}>
             {/* Banner de error interactivo en el formulario */}
             {inlineError && (
@@ -828,9 +811,10 @@ export default function SectionManagementModal({
         {/* Footer fijo del Modal */}
         <div
           style={{
-            padding: "1rem 1.5rem",
+            padding: "1rem",
             borderTop: "1px solid #e2e8f0",
             display: "flex",
+            flexWrap: "wrap",
             alignItems: "center",
             justifyContent: "flex-end",
             gap: "0.75rem",
@@ -844,6 +828,7 @@ export default function SectionManagementModal({
             disabled={loading}
             style={{
               padding: "0.6rem 1.1rem",
+              flex: "1 1 10rem",
               borderRadius: "0.6rem",
               border: "1px solid #cbd5e1",
               background: "#ffffff",
@@ -862,6 +847,7 @@ export default function SectionManagementModal({
             disabled={loading || (mode === "edit" && !targetId)}
             style={{
               padding: "0.6rem 1.4rem",
+              flex: "1 1 10rem",
               borderRadius: "0.6rem",
               border: "none",
               fontSize: "0.88rem",
@@ -871,18 +857,8 @@ export default function SectionManagementModal({
               alignItems: "center",
               gap: "0.45rem",
               color: "#ffffff",
-              background:
-                mode === "create"
-                  ? "linear-gradient(135deg, #0d9488 0%, #0f766e 100%)"
-                  : mode === "edit"
-                  ? "linear-gradient(135deg, #d97706 0%, #b45309 100%)"
-                  : "linear-gradient(135deg, #dc2626 0%, #b91c1c 100%)",
-              boxShadow:
-                mode === "create"
-                  ? "0 4px 12px rgba(13, 148, 136, 0.3)"
-                  : mode === "edit"
-                  ? "0 4px 12px rgba(217, 119, 6, 0.3)"
-                  : "0 4px 12px rgba(220, 38, 38, 0.3)"
+              background: mode === "delete" ? "#b33549" : "#075d7d",
+              justifyContent: "center"
             }}
           >
             {loading ? (
@@ -890,7 +866,7 @@ export default function SectionManagementModal({
             ) : mode === "create" ? (
               <>
                 <PlusCircle size={16} />
-                Guardar y Crear Sección
+                Crear sección
               </>
             ) : mode === "edit" ? (
               <>
@@ -906,7 +882,7 @@ export default function SectionManagementModal({
           </button>
         </div>
       </div>
-    </div>,
+    </dialog>,
     document.body
   );
 }

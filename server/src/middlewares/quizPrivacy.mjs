@@ -5,6 +5,7 @@ export function studentQuiz(quiz) {
   if (!quiz || !(quiz.publicada === true || String(quiz.publicada) === "true" || quiz.estado === "publicada")) return null;
   const output = pick(quiz, ["id","seccion_id","carrera","numero_semana","titulo","descripcion","instrucciones","publicada","estado","duracion_minutos","tiempo_limite_minutos","tiempo_por_pregunta_segundos","puntaje_total","tiene_bonus","puntaje_maximo_con_bonus","habilitada_en_vivo","control_en_vivo"]);
   const questions = typeof quiz.preguntas === "string" ? JSON.parse(quiz.preguntas) : quiz.preguntas || [];
+  if (quiz.reposicion) output.reposicion = pick(quiz.reposicion,["id","seccion","semana"]);
   output.preguntas = questions.map(question => ({ ...pick(question,["id","numero","enunciado","imagen_url","puntos","tiempo_segundos","es_bonus"]), items: (question.items || []).map(item => {
     const clean = pick(item,["id","tipo","instruccion","etiqueta","puntos","cantidad","texto_completar"]);
     if (item.opciones) clean.opciones = item.opciones.map(option => pick(option,["id","texto"]));

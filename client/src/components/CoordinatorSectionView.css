@@ -101,11 +101,19 @@
 
 .section-panel__modules {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: .55rem;
   margin: 0;
   padding: 0;
   list-style: none;
+}
+
+@media (min-width: 640px) {
+  .section-panel__modules { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (min-width: 1024px) {
+  .section-panel__modules { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 
 .section-panel__module {

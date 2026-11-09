@@ -8,6 +8,7 @@ import { hasAdministrationAccess } from "../../../shared/instructorRoles.mjs";
 import { isInstructorTitular, isSectionAssignedToInstructor, matchesInstructor } from "../../../shared/sectionAccess.mjs";
 import { synchronizeQuizAssignments } from "../../../shared/quizAssignments.mjs";
 import { studentQuiz, studentLiveState } from "./quizPrivacy.mjs";
+import { studentMakeups, quizzesForMakeups } from "../services/studentMakeups.js";
 
 // Decode is only a dispatcher: both branches verify the signature and current account.
 export function authenticateQuiz(req,res,next) {
@@ -34,6 +35,21 @@ export function quizAccess({ student = false, kind = "quiz", permission = "read"
           req.body.numero_cuenta = account;
           req.body.nombre_completo = req.student.nombre_completo;
           req.body.carrera = req.student.carrera;
+        }
+        // La matrícula sigue en origen. Solo estas rutas y esta semana se redirigen.
+        const makeups = await studentMakeups(sectionId, account);
+        req.studentMakeups = makeups;
+        const makeup = makeups.find(item => Number(item.numero_semana) === Number(week));
+        if (makeup) {
+          req.makeup = makeup;
+          req.params.seccion_id = makeup.seccion_destino_id;
+        } else if (!week && kind === "quiz") req.makeupQuizzes = await quizzesForMakeups(makeups);
+        else if (!week && kind === "live" && makeups.length) {
+          const { data, error } = await supabase.from("sesiones_pruebas_en_vivo").select("seccion_id,numero_semana,estado,habilitada")
+            .in("seccion_id", [...new Set(makeups.map(item => item.seccion_destino_id))]).in("estado", ["lobby", "en_pregunta", "esperando_siguiente"]).eq("habilitada", true);
+          if (error) throw error;
+          const live = (data || []).find(item => makeups.some(row => row.seccion_destino_id === item.seccion_id && Number(row.numero_semana) === Number(item.numero_semana)));
+          if (live) { req.params.seccion_id = live.seccion_id; req.makeupLiveWeek = live.numero_semana; }
         }
       } else {
         if (!req.instructor) return res.status(401).json({success:false,message:"Inicia sesión."});
@@ -66,7 +82,7 @@ export function quizAccess({ student = false, kind = "quiz", permission = "read"
             if (!(week ? allowedWeeks.includes(Number(week)) : allowedWeeks.length || emptyOwnCatalog)) return res.status(403).json({success:false,message:"No tienes asignada esta operación en la semana solicitada."});
           }
         }
-        if (req.body && kind === "control") { req.body.es_titular = full; req.body.carrera=section.carrera; }
+        if (req.body && kind === "control") { req.body.es_titular = full; req.body.carrera=section.carrera; req.quizSection=section; req.quizFullAccess=full; }
       }
       // Bind destructive identifiers to the checked resource, never to body/query overrides.
       if (record) req.quizSubmission = record;
@@ -74,6 +90,15 @@ export function quizAccess({ student = false, kind = "quiz", permission = "read"
       res.json = payload => {
         if (payload?.success && payload.data) {
           let data=payload.data;
+          if (req.student && kind === "quiz" && !week && Array.isArray(data)) {
+            const replaced = new Set((req.studentMakeups || []).map(item => Number(item.numero_semana)));
+            data = [...data.filter(item => !replaced.has(Number(item.numero_semana))), ...(req.makeupQuizzes || [])].sort((a,b) => Number(a.numero_semana)-Number(b.numero_semana));
+            payload = { ...payload, reposiciones: (req.studentMakeups || []).map(item => ({ id: item.id, semana: item.numero_semana, seccion: item.destino_codigo, practica_at: item.practica_at, estado: item.estado })) };
+          }
+          if (req.student && kind === "quiz" && week && req.makeup && data) data = { ...data, reposicion: { id: req.makeup.id, seccion: req.makeup.destino_codigo, semana: req.makeup.numero_semana } };
+          if (req.student && kind === "live" && !week && payload.activa && !req.makeupLiveWeek && (req.studentMakeups || []).some(item => Number(item.numero_semana) === Number(data.numero_semana))) {
+            payload = { ...payload, activa: false }; data = null;
+          }
           if (req.student && kind === "quiz") data=Array.isArray(data)?data.map(studentQuiz).filter(Boolean):studentQuiz(data);
           if (req.student && kind === "live") data=studentLiveState(data);
           // Awards need all weeks' grades, but never answer sheets or audit data.

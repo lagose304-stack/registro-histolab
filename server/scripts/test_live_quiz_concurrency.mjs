@@ -4,6 +4,10 @@ import vm from "node:vm";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
+import { getAcademicDate } from "../../shared/academicWeek.mjs";
+const today = getAcademicDate();
+const scheduling = { weeks: [{numero_semana:1,es_examen:false},{numero_semana:2,fecha_inicio:today,fecha_fin:today,es_examen:false}], events: [] };
+const quizSection = { id:"isolated-pilot",carrera:"Medicina",dia:["Domingo","Lunes","Martes","Miércoles","Jueves","Viernes","Sábado"][new Date(`${today}T00:00:00Z`).getUTCDay()],hora_inicio:"00:00",hora_fin:"23:59" };
 
 let row;
 let pauseWrite = null;
@@ -43,14 +47,16 @@ const bundle = await build({
   bundle: true, platform: "node", format: "cjs", write: false, logLevel: "silent",
   plugins: [{ name: "isolate-storage", setup(builder) {
     builder.onResolve({ filter: /db\/supabase\.js$/ }, () => ({ path: "database", namespace: "pilot" }));
+    builder.onResolve({ filter: /services\/quizSchedule\.js$/ }, () => ({ path: "scheduling", namespace: "pilot" }));
     builder.onResolve({ filter: /^node:fs$/ }, () => ({ path: "filesystem", namespace: "pilot" }));
     builder.onLoad({ filter: /.*/, namespace: "pilot" }, args => ({ contents: args.path === "database"
       ? "export const isSupabaseConfigured=true; export const supabase=globalThis.database;"
+      : args.path === "scheduling" ? "export const loadQuizSchedule=async()=>globalThis.scheduling;"
       : "export default { existsSync:()=>false, mkdirSync:()=>{}, writeFileSync:()=>{} };", loader: "js" }));
   }}]
 });
 const module = { exports: {} };
-vm.runInNewContext(bundle.outputFiles[0].text, { module, exports: module.exports, database, console, process: { cwd: () => path.resolve("server") }, require: key => {
+vm.runInNewContext(bundle.outputFiles[0].text, { module, exports: module.exports, database, scheduling, console, process: { cwd: () => path.resolve("server") }, require: key => {
   if (key === "node:path") return path;
   if (key === "node:url") return { fileURLToPath };
   throw new Error(`Unexpected import: ${key}`);
@@ -65,7 +71,7 @@ function initial() {
 async function call(handler, body = {}) {
   let code = 200, result;
   const response = { status(value) { code = value; return response; }, setHeader() {}, json(value) { result = value; return response; } };
-  await handler({ params, body, headers: {}, socket: {} }, response);
+  await handler({ params, body, headers: {}, socket: {}, quizSection, quizFullAccess: true }, response);
   assert.equal(code, 200, JSON.stringify(result));
   return result;
 }

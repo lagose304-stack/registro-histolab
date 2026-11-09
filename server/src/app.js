@@ -11,6 +11,7 @@ import estudiantesRoutes from "./routes/estudiantes.routes.js";
 import semanasRoutes from "./routes/semanas.routes.js";
 import asignacionesRoutes from "./routes/asignaciones.routes.js";
 import pruebasRoutes from "./routes/pruebas.routes.js";
+import studentMakeupsRoutes from "./routes/studentMakeups.routes.js";
 
 dotenv.config();
 
@@ -60,6 +61,7 @@ app.use("/api/estudiantes", estudiantesRoutes);
 app.use("/api/semanas", semanasRoutes);
 app.use("/api/asignaciones", asignacionesRoutes);
 app.use("/api/pruebas", pruebasRoutes);
+app.use("/api/reposiciones-estudiantes", studentMakeupsRoutes);
 
 // Ruta raíz de bienvenida
 app.get("/", (req, res) => {

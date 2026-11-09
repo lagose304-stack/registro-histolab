@@ -1,4 +1,6 @@
 import { quizItemLabel } from "../../../shared/quizItems.mjs";
+import { getQuizWindow } from "../../../shared/quizSchedule.mjs";
+import { isAttendanceExamWeek } from "../../../shared/attendanceWindow.mjs";
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { Radio, Play, SkipForward, Square, RefreshCw, Users, Clock, CheckCircle2, AlertTriangle, ArrowLeft, Lock, User, Search, Wifi, WifiOff } from "lucide-react";
 import { api } from "../services/api";
@@ -8,7 +10,6 @@ import {
   hasFullSectionAccess,
   isWeekAssignedToUser,
   getAssignedRecordForWeek,
-  checkSectionSchedule,
   SECTION_ROLES
 } from "../utils/sectionRoleUtils";
 
@@ -34,6 +35,7 @@ export default function LiveQuizControlView({
   const sessionKeyRef = useRef("");
   const controlEpochRef = useRef(0);
   const [semanasConfig, setSemanasConfig] = useState([]);
+  const [scheduleEvents, setScheduleEvents] = useState([]);
   const [sectionQuizzes, setSectionQuizzes] = useState([]);
   const [studentsList, setStudentsList] = useState([]);
   const [asignaciones, setAsignaciones] = useState([]);
@@ -85,8 +87,9 @@ export default function LiveQuizControlView({
 
   // Semanas visibles según permisos: el titular ve todas; el asignado solo donde tiene Crear/Revisar prueba
   const visibleSemanasConfig = useMemo(() => {
-    if (hasFullAccess) return semanasConfig;
-    return semanasConfig.filter((s) => {
+    const regular = semanasConfig.filter(week => !isAttendanceExamWeek(week));
+    if (hasFullAccess) return regular;
+    return regular.filter((s) => {
       const num = Number(s.numero_semana);
       return num && isWeekAssignedToUser(asignaciones, QUIZ_ROLES, num, currentUser, seccion);
     });
@@ -99,15 +102,17 @@ export default function LiveQuizControlView({
     setLoadError("");
 
     try {
-      const [resSemanas, resTemario, resQuizzes, resStudents, resAsig] = await Promise.all([
+      const [resSemanas, resTemario, resQuizzes, resStudents, resAsig, resEvents] = await Promise.all([
         api.semanas.getConfig(carrera),
         api.temario.getAll({ carrera }),
         api.pruebas.getBySeccion(seccion.id),
         api.estudiantes.getBySeccion(seccion.id, carrera),
-        api.asignaciones.getBySeccion(seccion.id)
+        api.asignaciones.getBySeccion(seccion.id),
+        api.semanas.getSectionAttendanceEvents(seccion.id)
       ]);
 
       if (resSemanas?.data) setSemanasConfig(resSemanas.data);
+      setScheduleEvents(resEvents?.data || []);
       if (resTemario?.data && Array.isArray(resTemario.data)) setTemario(resTemario.data);
       if (resQuizzes?.data) setSectionQuizzes(resQuizzes.data);
       if (resStudents?.data) setStudentsList(resStudents.data);
@@ -174,16 +179,18 @@ export default function LiveQuizControlView({
     if (visibleSemanasConfig.length > 0) {
       const exists = visibleSemanasConfig.some((w) => Number(w.numero_semana) === Number(selectedSemana));
       if (!exists) {
-        const firstPub = visibleSemanasConfig.find((w) => {
+        const ready = visibleSemanasConfig.filter(week => getQuizWindow(seccion,semanasConfig,week.numero_semana,new Date(),scheduleEvents).isPracticeDay);
+        const candidates = ready.length ? ready : visibleSemanasConfig;
+        const firstPub = candidates.find((w) => {
           const q = sectionQuizzes.find((quiz) => Number(quiz.numero_semana) === Number(w.numero_semana));
           return q?.publicada === true || q?.estado === "publicada";
         });
-        setSelectedSemana(Number(firstPub ? firstPub.numero_semana : visibleSemanasConfig[0].numero_semana));
+        setSelectedSemana(Number(firstPub ? firstPub.numero_semana : candidates[0].numero_semana));
       }
     } else if (!hasFullAccess) {
       setSelectedSemana(null);
     }
-  }, [visibleSemanasConfig, selectedSemana, sectionQuizzes, hasFullAccess]);
+  }, [visibleSemanasConfig, selectedSemana, sectionQuizzes, hasFullAccess, seccion, semanasConfig, scheduleEvents]);
 
   // Registro del docente asignado a la semana seleccionada
   const assignedRecord = useMemo(() => {
@@ -299,14 +306,10 @@ export default function LiveQuizControlView({
       return;
     }
 
-    // Regla de horario exclusivo: el instructor asignado ÚNICAMENTE puede habilitar la prueba en vivo el mismo día y dentro del rango de horario de la sección
-    if (accion === "habilitar" && !hasFullAccess) {
-      const currentSched = checkSectionSchedule(seccion);
-      if (!currentSched.isWithin) {
-        notifyRef.current(
-          `Acceso denegado: Como instructor asignado, únicamente puedes habilitar la prueba en vivo el día ${seccion?.dia} dentro del horario exclusivo de la sección (${seccion?.hora_inicio} - ${seccion?.hora_fin || "Fin"}). ${currentSched.reason}`,
-          "error"
-        );
+    if (["habilitar","iniciar_pregunta","siguiente_pregunta"].includes(accion)) {
+      const window = getQuizWindow(seccion,semanasConfig,selectedSemana,new Date(),scheduleEvents);
+      if (!window.isPracticeDay || (!hasFullAccess && accion !== "siguiente_pregunta" && !window.isOpen)) {
+        setActionError(window.reason);
         return;
       }
     }
@@ -372,8 +375,14 @@ export default function LiveQuizControlView({
   };
   const [stateLabel,stateDescription] = stateDetails[state] || stateDetails.inactiva;
   const controlDisabled = actionLoading || !canControl || !sessionSynced || Boolean(syncError);
+  const quizWindow = getQuizWindow(seccion,semanasConfig,selectedSemana,new Date(),scheduleEvents);
+  const canStartNow = quizWindow.isPracticeDay && (hasFullAccess || quizWindow.isOpen);
+  const dueToday = semanasConfig.filter(week => getQuizWindow(seccion,semanasConfig,week.numero_semana,new Date(),scheduleEvents).isPracticeDay).map(week => Number(week.numero_semana));
   const questionDuration = Number(currentQuestion?.tiempo_segundos || activeQuiz?.tiempo_por_pregunta_segundos || 90);
-  const students = studentsList.map(student => {
+  const enrolled = new Set(studentsList.map(student => String(student.numero_cuenta || "").trim()));
+  const invited = Object.entries(connectedMap).filter(([account, connection]) => !enrolled.has(account) && connection?.reposicion)
+    .map(([numero_cuenta, connection]) => ({ numero_cuenta, nombre_completo: connection.nombre_completo, reposicion: connection.reposicion }));
+  const students = [...studentsList, ...invited].map(student => {
     const key=String(student.numero_cuenta || "").trim();
     const connection=connectedMap[key];
     const connected=Boolean(connection && (!connection.ultimo_ping || nowTs-connection.ultimo_ping<60000));
@@ -412,14 +421,14 @@ export default function LiveQuizControlView({
                 <p className="live-quiz-panel__description">{stateDescription}</p>
                 {state==="en_pregunta" && <div className="live-quiz-panel__timer" data-urgent={localSecondsRemaining<=15}><span><Clock size={18} aria-hidden="true" /> Tiempo restante</span><strong role="timer" aria-label="Tiempo restante de la pregunta">{formatTimer(localSecondsRemaining)}</strong><small>Pregunta {currentQIdx+1}{isBonusQuestion?" · Bonus":""} · {formatTimer(questionDuration)} de duración</small><progress max={questionDuration} value={Math.max(0,Math.min(questionDuration,localSecondsRemaining))} aria-label="Tiempo disponible" /></div>}
                 <ol className="live-quiz-panel__progress" aria-label="Avance de preguntas">{activeQuiz.preguntas?.map((question,index)=><li key={question.id || index} data-current={index===currentQIdx && ["en_pregunta","esperando_siguiente"].includes(state)} data-done={state==="finalizada" || index<currentQIdx}><span>{index===5?"Bonus":index+1}</span></li>)}</ol>
-                {!hasFullAccess && !checkSectionSchedule(seccion).isWithin && (state==="inactiva" || state==="finalizada") && <p className="live-quiz-panel__notice">La sala se puede habilitar durante el horario asignado a la sección: {seccion?.dia}, {seccion?.hora_inicio} – {seccion?.hora_fin}.</p>}
+                <div className="live-quiz-panel__notice"><strong>Prueba de la práctica {selectedSemana}{quizWindow.practiceWeek ? ` · Se rinde en la práctica ${quizWindow.practiceWeek}` : ""}</strong><p>{quizWindow.reason}</p>{dueToday.length > 1 && <p>En esta práctica corresponden las pruebas de las semanas {dueToday.join(" y ")}. Habilita y dirige cada una por separado; sus calificaciones se guardan en su semana de origen.</p>}</div>
                 {syncError && <p className="user-dialog__error" role="alert">{syncError} Los controles se habilitarán al recuperar la conexión.</p>}
                 {actionError && <p className="user-dialog__error" role="alert">{actionError}</p>}
                 <div className="live-quiz-panel__actions">
-                  {(state==="inactiva" || state==="finalizada") && actionButton(state==="finalizada"?"Abrir sala nuevamente":"Abrir sala de espera",Radio,"habilitar",{duracion_segundos:activeQuiz.tiempo_por_pregunta_segundos || 90},true,!hasFullAccess && !checkSectionSchedule(seccion).isWithin)}
-                  {state==="lobby" && <>{actionButton("Iniciar pregunta 1",Play,"iniciar_pregunta",{pregunta_idx:0,duracion_segundos:activeQuiz.preguntas?.[0]?.tiempo_segundos || 90},true)}{actionButton("Cerrar sala",Square,"deshabilitar")}</>}
+                  {(state==="inactiva" || state==="finalizada") && actionButton(state==="finalizada"?"Abrir sala nuevamente":"Abrir sala de espera",Radio,"habilitar",{duracion_segundos:activeQuiz.tiempo_por_pregunta_segundos || 90},true,!canStartNow)}
+                  {state==="lobby" && <>{actionButton("Iniciar pregunta 1",Play,"iniciar_pregunta",{pregunta_idx:0,duracion_segundos:activeQuiz.preguntas?.[0]?.tiempo_segundos || 90},true,!canStartNow)}{actionButton("Cerrar sala",Square,"deshabilitar")}</>}
                   {state==="en_pregunta" && <>{actionButton("Terminar tiempo de la pregunta",Square,"tiempo_agotado",{},true)}{actionButton("Finalizar prueba",Square,"finalizar")}</>}
-                  {state==="esperando_siguiente" && <>{currentQIdx<totalPreguntas-1?actionButton(`Iniciar pregunta ${currentQIdx+2}${currentQIdx+1===5?" · Bonus":""}`,SkipForward,"siguiente_pregunta",{duracion_segundos:activeQuiz.preguntas?.[currentQIdx+1]?.tiempo_segundos || 90},true):actionButton("Finalizar y recoger entregas",CheckCircle2,"finalizar",{},true)}{currentQIdx<totalPreguntas-1 && actionButton("Finalizar prueba",Square,"finalizar")}</>}
+                  {state==="esperando_siguiente" && <>{currentQIdx<totalPreguntas-1?actionButton(`Iniciar pregunta ${currentQIdx+2}${currentQIdx+1===5?" · Bonus":""}`,SkipForward,"siguiente_pregunta",{duracion_segundos:activeQuiz.preguntas?.[currentQIdx+1]?.tiempo_segundos || 90},true,!quizWindow.isPracticeDay):actionButton("Finalizar y recoger entregas",CheckCircle2,"finalizar",{},true)}{currentQIdx<totalPreguntas-1 && actionButton("Finalizar prueba",Square,"finalizar")}</>}
                   {state==="finalizada" && actionButton("Deshabilitar sesión",Lock,"deshabilitar")}
                 </div>
               </section>
@@ -431,10 +440,10 @@ export default function LiveQuizControlView({
               </section>}
             </div>
             <aside className="live-quiz-panel__students" aria-labelledby="live-students-title">
-              <header><div><h3 id="live-students-title">Estudiantes</h3><p>{connectedCount} conectados de {studentsList.length}</p></div><Users size={20} aria-hidden="true" /></header>
+              <header><div><h3 id="live-students-title">Estudiantes</h3><p>{connectedCount} conectados · {studentsList.length} matriculados{invited.length > 0 && ` · ${invited.length} en reposición`}</p></div><Users size={20} aria-hidden="true" /></header>
               <label className="user-directory__search"><Search size={17} aria-hidden="true" /><input type="search" aria-label="Buscar estudiante" placeholder="Nombre o cuenta" value={studentSearch} onChange={event=>setStudentSearch(event.target.value)} /></label>
               <label className="user-field">Mostrar<select aria-label="Filtrar estudiantes por conexión" value={studentFilter} onChange={event=>setStudentFilter(event.target.value)}><option value="all">Todo el grupo</option><option value="connected">Conectados</option><option value="offline">Sin conexión</option></select></label>
-              {!shownStudents.length?<p className="live-quiz-panel__empty">{studentsList.length?"Ningún estudiante coincide con los filtros.":"Aún no hay estudiantes matriculados."}</p>:<ul>{shownStudents.map(student=><li key={student.key} data-connected={student.connected}><div><strong>{student.nombre_completo || "Estudiante"}</strong><small>{student.key}</small></div><span className="live-quiz-panel__student-state" data-answered={student.answered}>{!student.connected?"Sin conexión":state==="en_pregunta"?student.answered?"Respondió":"Respondiendo":state==="lobby"?"En sala":"Conectado"}</span></li>)}</ul>}
+              {!shownStudents.length?<p className="live-quiz-panel__empty">{students.length?"Ningún estudiante coincide con los filtros.":"Aún no hay estudiantes matriculados."}</p>:<ul>{shownStudents.map(student=><li key={student.key} data-connected={student.connected}><div><strong>{student.nombre_completo || "Estudiante"}</strong><small>{student.key}{student.reposicion && ` · Reposición desde ${student.reposicion.origen}`}</small></div><span className="live-quiz-panel__student-state" data-answered={student.answered}>{!student.connected?"Sin conexión":state==="en_pregunta"?student.answered?"Respondió":"Respondiendo":state==="lobby"?"En sala":"Conectado"}</span></li>)}</ul>}
             </aside>
           </div>
         </>}

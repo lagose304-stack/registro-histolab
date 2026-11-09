@@ -671,7 +671,7 @@ export default function SectionDataMigrationView({
         total: est.total ?? 0
       }));
 
-      const response = await api.estudiantes.saveBatch(seccion.id, updates, carrera);
+      const response = await api.estudiantes.saveMigration(seccion.id, updates, carrera);
       if (response?.success === false) throw new Error(response.message || "No se pudieron guardar los datos.");
       savedStudentsRef.current = estudiantes;
       setEditedAccounts(new Set());

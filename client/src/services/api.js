@@ -9,7 +9,7 @@ const RAW_BASE = (import.meta.env.VITE_API_URL || "").trim().replace(/\/+$/, "")
 const API_BASE = RAW_BASE ? `${RAW_BASE}/api` : "/api";
 
 function getAuthHeaders() {
-  const token = safeStorage.getItem("histolab_instructor_token") || safeStorage.getItem("histolab_student_token");
+  const token = safeStorage.getItem("histolab_student_token") || safeStorage.getItem("histolab_instructor_token");
   const headers = { "Content-Type": "application/json" };
   if (token) {
     headers["Authorization"] = `Bearer ${token}`;
@@ -21,6 +21,7 @@ async function handleResponse(response) {
   const data = await response.json().catch(() => ({}));
   
   if (!response.ok) {
+    if(response.status===403&&data.reason==="ACTIVATION_REQUIRED"&&(safeStorage.getItem("histolab_instructor_token")||safeStorage.getItem("histolab_student_token")))window.dispatchEvent(new CustomEvent("histolab:session_expired",{detail:{reason:data.reason,message:data.message}}));
     // Si la sesión fue revocada por concurrencia u otro dispositivo
     if (response.status === 401) {
       if (data.reason === "CONCURRENT_SESSION_DETECTED") {
@@ -39,14 +40,36 @@ async function handleResponse(response) {
     const error = new Error(errorMsg);
     error.status = response.status;
     error.reason = data.reason;
+    if (data.reason === "SECTION_SELECTION_REQUIRED" && Array.isArray(data.sections)) error.sections = data.sections;
     throw error;
   }
   return data;
 }
 
 export const api = {
+  reposicionesEstudiantes: {
+    async list(section, filters = {}) { const params = new URLSearchParams({ ...filters, ...(section ? { seccion_id: section } : {}) }); return handleResponse(await fetch(`${API_BASE}/reposiciones-estudiantes?${params}`, { headers: getAuthHeaders() })); },
+    async options(section) { return handleResponse(await fetch(`${API_BASE}/reposiciones-estudiantes/seccion/${encodeURIComponent(section)}/opciones`, { headers: getAuthHeaders() })); },
+    async create(payload) { return handleResponse(await fetch(`${API_BASE}/reposiciones-estudiantes`, { method: "POST", headers: getAuthHeaders(), body: JSON.stringify(payload) })); },
+    async destinations(id) { return handleResponse(await fetch(`${API_BASE}/reposiciones-estudiantes/${encodeURIComponent(id)}/destinos`, { headers: getAuthHeaders() })); },
+    async resolve(id, payload) { return handleResponse(await fetch(`${API_BASE}/reposiciones-estudiantes/${encodeURIComponent(id)}/resolver`, { method: "PUT", headers: getAuthHeaders(), body: JSON.stringify(payload) })); },
+    async receiving(id) { return handleResponse(await fetch(`${API_BASE}/reposiciones-estudiantes/${encodeURIComponent(id)}/recepcion`, { headers: getAuthHeaders() })); },
+    async saveReceiving(id, payload) { return handleResponse(await fetch(`${API_BASE}/reposiciones-estudiantes/${encodeURIComponent(id)}/recepcion`, { method: "PUT", headers: getAuthHeaders(), body: JSON.stringify(payload) })); }
+  },
   // Autenticación y Control de Sesión de Instructores
   auth: {
+    async activationStatus() { return handleResponse(await fetch(`${API_BASE}/auth/activation/status`)); },
+    async requestActivation(payload) { return handleResponse(await fetch(`${API_BASE}/auth/activation/request`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)})); },
+    async verifyActivation(payload) { return handleResponse(await fetch(`${API_BASE}/auth/activation/verify`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)})); },
+    async finishActivation(payload) { return handleResponse(await fetch(`${API_BASE}/auth/activation/finish`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)})); },
+    async changeInstructorPassword(payload) {
+      const res = await fetch(`${API_BASE}/auth/change-password`, {
+        method: "POST",
+        headers: getAuthHeaders(),
+        body: JSON.stringify(payload)
+      });
+      return await handleResponse(res);
+    },
     async login(credentials) {
       const res = await fetch(`${API_BASE}/auth/login`, {
         method: "POST",
@@ -55,6 +78,9 @@ export const api = {
       });
       const result = await handleResponse(res);
       if (result.token) {
+        safeStorage.removeItem("histolab_student_token");
+        safeStorage.removeItem("histolab_student_user");
+        safeStorage.removeItem("histolab_student_session_id");
         safeStorage.setItem("histolab_instructor_token", result.token);
         safeStorage.setItem("histolab_instructor_user", JSON.stringify(result.instructor));
         if (result.sessionId) {
@@ -142,14 +168,17 @@ export const api = {
     },
 
     // Autenticación y Control de Sesión de Estudiantes
-    async loginStudent({ carrera, numero_cuenta, contrasena }) {
+    async loginStudent({ carrera, numero_cuenta, contrasena, seccion_id }) {
       const res = await fetch(`${API_BASE}/auth/student-login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ carrera, numero_cuenta, contrasena })
+        body: JSON.stringify({ carrera, numero_cuenta, contrasena, seccion_id })
       });
       const result = await handleResponse(res);
       if (result.token && result.estudiante) {
+        safeStorage.removeItem("histolab_instructor_token");
+        safeStorage.removeItem("histolab_instructor_user");
+        safeStorage.removeItem("histolab_session_id");
         safeStorage.setItem("histolab_student_token", result.token);
         safeStorage.setItem("histolab_student_user", JSON.stringify(result.estudiante));
         if (result.sessionId) {
@@ -194,8 +223,8 @@ export const api = {
     },
 
     async logoutStudent() {
+      const token = safeStorage.getItem("histolab_student_token");
       try {
-        const token = safeStorage.getItem("histolab_student_token");
         if (token) {
           await fetch(`${API_BASE}/auth/student-logout`, {
             method: "POST",
@@ -206,9 +235,11 @@ export const api = {
           }).catch(() => {});
         }
       } finally {
-        safeStorage.removeItem("histolab_student_token");
-        safeStorage.removeItem("histolab_student_user");
-        safeStorage.removeItem("histolab_student_session_id");
+        if (safeStorage.getItem("histolab_student_token") === token) {
+          safeStorage.removeItem("histolab_student_token");
+          safeStorage.removeItem("histolab_student_user");
+          safeStorage.removeItem("histolab_student_session_id");
+        }
       }
     },
 
@@ -422,8 +453,9 @@ export const api = {
 
   // Gestión de Estudiantes por Sección
   estudiantes: {
-    async getByCuenta(carrera, numeroCuenta) {
-      const res = await fetch(`${API_BASE}/estudiantes/${encodeURIComponent(carrera)}/${encodeURIComponent(numeroCuenta)}`, {
+    async getByCuenta(carrera, numeroCuenta, sectionId = null) {
+      const query = sectionId ? `?seccion_id=${encodeURIComponent(sectionId)}` : "";
+      const res = await fetch(`${API_BASE}/estudiantes/${encodeURIComponent(carrera)}/${encodeURIComponent(numeroCuenta)}${query}`, {
         headers: getAuthHeaders()
       });
       return await handleResponse(res);
@@ -460,6 +492,12 @@ export const api = {
     async saveManualGrades(sectionId, week, updates) {
       return handleResponse(await fetch(`${API_BASE}/estudiantes/seccion/${encodeURIComponent(sectionId)}/manuales/${week}`, {
         method: "PUT", headers: getAuthHeaders(), body: JSON.stringify({ updates })
+      }));
+    },
+
+    async saveMigration(seccionId, updates, carrera = null) {
+      return handleResponse(await fetch(`${API_BASE}/estudiantes/seccion/${encodeURIComponent(seccionId)}/migracion`, {
+        method: "PUT", headers: getAuthHeaders(), body: JSON.stringify({ updates, carrera })
       }));
     },
 

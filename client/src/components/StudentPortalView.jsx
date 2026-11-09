@@ -3,6 +3,7 @@ import StudentQuizPlayer from "./StudentQuizPlayer";
 import StudentQuizzesView from "./StudentQuizzesView";
 import StudentAccountView from "./StudentAccountView";
 import StudentAttendanceView from "./StudentAttendanceView";
+import { getMakeupOutcome } from "../../../shared/studentMakeups.mjs";
 import StudentGradesView from "./StudentGradesView";
 import StudentDashboard from "./StudentDashboard";
 import "./StudentDashboard.css";
@@ -125,7 +126,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
         const cached = safeStorage.getItem(`histolab_student_user_${cKey}`);
         if (cached) {
           const parsed = JSON.parse(cached);
-          if (parsed && parsed.numero_cuenta === cKey) {
+          if (parsed && parsed.numero_cuenta === cKey && parsed.id === student?.id && parsed.seccion_id === student?.seccion_id) {
             return parsed;
           }
         }
@@ -145,6 +146,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
     if (savedActiveQuizSession?.quiz) return [savedActiveQuizSession.quiz];
     return [];
   });
+  const [makeupAssignments, setMakeupAssignments] = useState([]);
   const [loadingQuizzes, setLoadingQuizzes] = useState(true);
   const [quizLoadError, setQuizLoadError] = useState("");
   const quizLoadRequestRef = useRef(0);
@@ -300,7 +302,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
           api.temario.getAll({ carrera: carreraKey }),
           api.temario.getPuntajes(carreraKey),
           cuentaKey
-            ? api.estudiantes.getByCuenta(carreraKey, cuentaKey)
+            ? api.estudiantes.getByCuenta(carreraKey, cuentaKey, student?.seccion_id)
             : Promise.resolve({ data: null })
         ]);
         if (!Array.isArray(resSemanas?.data) || !Array.isArray(resTemario?.data) ||
@@ -335,7 +337,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
     return () => {
       isMounted = false;
     };
-  }, [carreraKey, cuentaKey, academicReload]);
+  }, [carreraKey, cuentaKey, student?.seccion_id, academicReload]);
 
   // Resolver el ID real de la sección del estudiante con múltiples niveles de contingencia
   const resolveStudentSectionId = useCallback(async () => {
@@ -396,6 +398,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
       if (request !== quizLoadRequestRef.current) return;
       setLiveSessionsMap(liveMap);
       setOnlineQuizzes(publishedOrLive);
+      setMakeupAssignments(Array.isArray(res.reposiciones) ? res.reposiciones : []);
       setExistingSubmissions(Object.fromEntries(submissionEntries.filter(([, submission]) => submission)));
       if (cuentaKey) res.data.forEach(quiz => {
         api.pruebas.sendLiveHeartbeat(secId, quiz.numero_semana, {
@@ -896,6 +899,14 @@ export default function StudentPortalView({ student, notify = () => {} }) {
     // Si ya tenemos activeQuizToTake activo (ej. restaurado directamente al montar desde safeStorage)
     if (activeQuizToTake) {
       const sem = activeQuizToTake.numero_semana;
+      const replacement = onlineQuizzes.find(quiz => Number(quiz.numero_semana) === Number(sem) && quiz.reposicion);
+      if (replacement && replacement.id !== activeQuizToTake.id) {
+        clearActiveAttemptFromDisk(sem);
+        setActiveQuizToTake(null);
+        setQuizAnswers({});
+        notify("Tienes una prueba de reposición asignada. Ingresa desde el catálogo actualizado.", "info");
+        return;
+      }
       if (existingSubmissions[sem]) {
         autoSubmitTriggeredRef.current = true;
         clearActiveAttemptFromDisk(sem);
@@ -907,6 +918,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
       if (activeRaw) {
         try {
           const saved = JSON.parse(activeRaw);
+          if (saved?.quiz?.id && saved.quiz.id !== activeQuizToTake.id) { clearActiveAttemptFromDisk(sem); return; }
           if (saved) {
             if (saved.shuffledQuestions && saved.shuffledQuestions.length > 0) {
               setShuffledQuestions(saved.shuffledQuestions);
@@ -972,6 +984,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
       if (activeRaw) {
         try {
           const saved = JSON.parse(activeRaw);
+          if (saved?.quiz?.id && saved.quiz.id !== quiz.id) { clearActiveAttemptFromDisk(sem); continue; }
           if (saved) {
             const now = Date.now();
             // Intento vigente: restaurar íntegramente
@@ -1676,6 +1689,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
           semana: sem,
           nombre: getWeekDisplayName(w),
           estado: val || "Sin registrar",
+          reposicion: getMakeupOutcome(asistencias, sem),
           esExamen: Boolean(w.es_examen)
         };
       });
@@ -2548,6 +2562,10 @@ export default function StudentPortalView({ student, notify = () => {} }) {
               ].map(({ id, label, short, Icon }) => <button type="button" key={id} aria-label={label} aria-current={activeTab === id ? "page" : undefined} onClick={() => navigatePortal(id)}><Icon size={20} /><span className="student-portal__nav-label">{label}</span><span className="student-portal__nav-short" aria-hidden="true">{short}</span>{id === "pruebas" && (anyLiveQuiz || activeLiveBannerSession) && <span className="student-portal__live-dot" aria-label="Prueba en vivo disponible" />}</button>)}
             </nav>
 
+            {!activeQuizToTake && makeupAssignments.filter(item => item.estado === "asignada").map(item => <div className="student-makeup-notice" key={item.id}>
+              <CalendarCheck size={21} aria-hidden="true" /><div><strong>Reposición asignada · Semana {item.semana}</strong><p>Sección {item.seccion} · {new Intl.DateTimeFormat("es-HN", { dateStyle: "medium", timeStyle: "short", timeZone: "America/Tegucigalpa" }).format(new Date(item.practica_at))}. Tu matrícula y las notas se conservan en tu sección original.</p></div><button type="button" className="student-portal__button" onClick={() => navigatePortal("pruebas")}>Ver prueba</button>
+            </div>)}
+
             {academicError && ["inicio", "calificaciones", "asistencia"].includes(activeTab) && <div className="student-portal__error" role="alert"><AlertCircle size={22} /><p>{academicError}</p><button type="button" className="student-portal__button" onClick={() => setAcademicReload(value => value + 1)}>Reintentar carga</button></div>}
             {loadingAcademic && ["calificaciones", "asistencia"].includes(activeTab) && <div className="student-dashboard__loading" role="status"><RefreshCw size={24} className="animate-spin" /><p>Cargando tu información académica…</p></div>}
             {activeTab === "inicio" && <StudentDashboard summary={academicSummary} attendance={attendanceStats} examStatus={derechoExamenesStatus} section={seccion} loading={loadingAcademic} error={academicError} onNavigate={navigatePortal} />}
@@ -3273,7 +3291,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                 </div>
               </div>
             ) : (
-              <StudentQuizzesView quizzes={onlineQuizzes} submissions={existingSubmissions} sessions={liveSessionsMap} parciales={parcialesData}
+              <StudentQuizzesView quizzes={onlineQuizzes} submissions={existingSubmissions} sessions={liveSessionsMap} parciales={parcialesData} weeks={semanasConfig}
                 loading={loadingQuizzes} error={quizLoadError} onRefresh={loadStudentQuizzes}
                 onStart={handleStartQuiz} onReview={handleOpenReview} />
             )}

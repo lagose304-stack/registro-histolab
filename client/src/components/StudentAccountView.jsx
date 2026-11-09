@@ -2,6 +2,7 @@ import React, { useId, useState } from "react";
 import { KeyRound, Lock, Eye, EyeOff, CheckCircle2, Circle, AlertCircle, RefreshCw, User, GraduationCap, Building2, Info } from "lucide-react";
 import { api } from "../services/api";
 import "./StudentAccountView.css";
+import {validActivationPassword} from "../../../shared/accountActivation.mjs";
 
 export default function StudentAccountView({ student, career, account, notify = () => {} }) {
   const formId = useId();
@@ -11,10 +12,10 @@ export default function StudentAccountView({ student, career, account, notify = 
   const [visible, setVisible] = useState({ current: false, next: false, confirm: false });
   const [saving, setSaving] = useState(false);
   const [feedback, setFeedback] = useState(null);
-  const cleanCurrent = currentPassword.trim();
-  const cleanNew = newPassword.trim();
-  const cleanConfirm = confirmation.trim();
-  const longEnough = cleanNew.length >= 6;
+  const cleanCurrent = currentPassword;
+  const cleanNew = newPassword;
+  const cleanConfirm = confirmation;
+  const longEnough = validActivationPassword(cleanNew);
   const different = Boolean(cleanNew && cleanCurrent && cleanNew !== cleanCurrent);
   const matches = Boolean(cleanNew && cleanConfirm && cleanNew === cleanConfirm);
   const canSave = Boolean(cleanCurrent && longEnough && different && matches);
@@ -28,7 +29,7 @@ export default function StudentAccountView({ student, career, account, notify = 
     setFeedback(null);
     const error = !cleanCurrent ? "Ingresa tu contraseña actual."
       : !cleanNew ? "Ingresa una nueva contraseña."
-      : !longEnough ? "La nueva contraseña debe tener un mínimo de 6 caracteres."
+      : !longEnough ? "Usa al menos 12 caracteres y evita contraseñas demasiado largas."
       : !different ? "La nueva contraseña debe ser diferente a la actual."
       : !matches ? "La confirmación de la nueva contraseña no coincide." : null;
     if (error) { setFeedback({ type: "error", message: error }); return; }
@@ -52,7 +53,7 @@ export default function StudentAccountView({ student, career, account, notify = 
 
   const fields = [
     { id: "current", label: "Contraseña actual", value: currentPassword, setter: setCurrentPassword, autocomplete: "current-password", placeholder: "Ingresa tu contraseña actual" },
-    { id: "next", label: "Nueva contraseña", value: newPassword, setter: setNewPassword, autocomplete: "new-password", placeholder: "Mínimo 6 caracteres" },
+    { id: "next", label: "Nueva contraseña", value: newPassword, setter: setNewPassword, autocomplete: "new-password", placeholder: "Mínimo 12 caracteres" },
     { id: "confirm", label: "Confirmar nueva contraseña", value: confirmation, setter: setConfirmation, autocomplete: "new-password", placeholder: "Repite tu nueva contraseña" }
   ];
 
@@ -65,7 +66,7 @@ export default function StudentAccountView({ student, career, account, notify = 
           <div><Lock size={17} /><input id={`${formId}-${field.id}`} name={field.id === "current" ? "current-password" : field.id === "next" ? "new-password" : "confirm-password"} type={visible[field.id] ? "text" : "password"} value={field.value} onChange={changeValue(field.setter)} autoComplete={field.autocomplete} autoCapitalize="none" spellCheck={false} required placeholder={field.placeholder} aria-describedby={field.id === "current" ? undefined : `${formId}-requirements`} aria-invalid={field.id === "confirm" && cleanConfirm ? !matches : field.id === "next" && cleanNew ? !(longEnough && (!cleanCurrent || different)) : undefined} /><button type="button" aria-label={`${visible[field.id] ? "Ocultar" : "Mostrar"} ${field.label.toLocaleLowerCase("es")}`} aria-pressed={visible[field.id]} onClick={() => setVisible(previous => ({ ...previous, [field.id]: !previous[field.id] }))}>{visible[field.id] ? <EyeOff size={19} /> : <Eye size={19} />}</button></div>
         </div>)}
         <ul className="student-account__requirements" id={`${formId}-requirements`}>
-          {[[longEnough, "Mínimo 6 caracteres"], [different, "Diferente a tu contraseña actual"], [matches, "La confirmación coincide"]].map(([complete, label]) => <li key={label} data-complete={complete}>{complete ? <CheckCircle2 size={16} /> : <Circle size={16} />}<span>{label}</span></li>)}
+            {[[longEnough, "Mínimo 12 caracteres"], [different, "Diferente a tu contraseña actual"], [matches, "La confirmación coincide"]].map(([complete, label]) => <li key={label} data-complete={complete}>{complete ? <CheckCircle2 size={16} /> : <Circle size={16} />}<span>{label}</span></li>)}
         </ul>
         {cleanConfirm && !matches && <p className="student-account__mismatch">Las contraseñas no coinciden. Revisa la confirmación.</p>}
         <button className="student-account__submit" type="submit" disabled={!canSave || saving}>{saving ? <RefreshCw size={18} className="animate-spin" /> : <KeyRound size={18} />}{saving ? "Actualizando contraseña…" : "Actualizar contraseña"}</button>
@@ -75,8 +76,8 @@ export default function StudentAccountView({ student, career, account, notify = 
     </form>
     <aside className="student-account__sidebar">
       <section className="student-account__identity" aria-labelledby={`${formId}-identity`}><h4 id={`${formId}-identity`}>Datos de acceso</h4><dl><div><dt><User size={16} />Estudiante</dt><dd>{student?.nombre_completo || "Por confirmar"}</dd></div><div><dt><KeyRound size={16} />Cuenta</dt><dd>{account || "Por confirmar"}</dd></div><div><dt><GraduationCap size={16} />Carrera</dt><dd>{career || "Por confirmar"}</dd></div><div><dt><Building2 size={16} />Sección</dt><dd>{sectionCode || "Por confirmar"}</dd></div></dl><p>Si alguno de estos datos necesita corregirse, comunícate con el instructor titular de tu sección.</p></section>
-      <details className="student-account__help"><summary><Info size={18} /><span>¿Es tu primer cambio de contraseña?</span></summary><p>Si tu cuenta conserva la clave inicial, usa <strong>histolab123</strong> como contraseña actual. Si ya la cambiaste, ingresa la que utilizas para iniciar sesión.</p></details>
-      <section className="student-account__tips"><h4>Cuida tu acceso</h4><p>Tu cuenta es personal. Elige una clave que recuerdes y evita compartirla.</p><p>Si no recuerdas tu contraseña actual, comunícate con el instructor titular de tu sección.</p></section>
+        <details className="student-account__help"><summary><Info size={18} /><span>Acerca de tu contraseña</span></summary><p>Usa la contraseña que creaste al activar tu cuenta. Si aún no la has activado, vuelve al inicio de sesión y elige «¿Es tu primera vez?».</p></details>
+      <section className="student-account__tips"><h4>Cuida tu acceso</h4><p>Tu cuenta es personal. Elige una clave que recuerdes y evita compartirla.</p><p>Si no recuerdas tu contraseña actual, vuelve al inicio de sesión y elige «Olvidé mi contraseña» para recibir un código en tu correo registrado.</p></section>
     </aside>
   </section>;
 }

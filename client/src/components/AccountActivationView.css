@@ -1,0 +1,22 @@
+.account-activation { display:grid; gap:1rem; min-width:0; overflow-wrap:anywhere; color:#173f58; }
+.account-activation h2 { margin:0; font-size:clamp(1.4rem,4vw,1.9rem); line-height:1.2; }
+.account-activation h2:focus { outline:none; }
+.account-activation p { margin:0; font-size:.9rem; line-height:1.6; color:#4d667a; }
+.account-activation form { display:grid; gap:1rem; min-width:0; }
+.account-activation small { color:#536e81; line-height:1.5; font-size:.8rem; }
+.account-activation__back { display:flex; align-items:center; justify-content:center; gap:.4rem; min-height:44px; padding:.5rem; border:1px solid transparent; border-radius:.6rem; background:transparent; color:#116586; font:inherit; font-size:.85rem; cursor:pointer; }
+.account-activation__back:hover { background:#edf6fb; }
+.account-activation button:disabled { opacity:.55; cursor:default; }
+.account-activation button:focus-visible { outline:3px solid #0284c7; outline-offset:2px; }
+.account-activation__icon { display:grid; place-items:center; width:48px; height:48px; background:#edf7fc; color:#0877a0; border:1px solid #b8d9e9; border-radius:.85rem; }
+.account-activation__steps { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); list-style:none; margin:0; padding:0; gap:.4rem; }
+.account-activation__steps li { display:grid; justify-items:center; gap:.35rem; padding:.6rem .2rem; border-bottom:2px solid #d7e3eb; font-size:.75rem; color:#587386; }
+.account-activation__steps li span { display:grid; place-items:center; width:24px; height:24px; border-radius:50%; background:#ecf2f6; font-weight:750; }
+.account-activation__steps li[aria-current] { border-color:#0782ae; color:#075c7f; font-weight:750; }
+.account-activation__steps li[aria-current] span { background:#0877a0; color:#fff; }
+.account-activation__steps li[data-done="true"] { border-color:#69a68a; color:#2d7454; }
+.account-activation__pin { font-size:1.6rem; letter-spacing:.35em; text-align:center; font-variant-numeric:tabular-nums; }
+.account-activation__notice { display:grid; gap:.75rem; padding:.85rem; border:1px solid #bfd5e2; border-radius:.75rem; background:#f3f8fb; }
+.account-activation__notice button { min-height:44px; display:flex; align-items:center; justify-content:center; gap:.5rem; border:1px solid #adcbdc; border-radius:.6rem; background:#fff; color:#175a7c; cursor:pointer; font:inherit; font-size:.85rem; }
+.account-activation__captcha { min-width:0; width:100%; }
+.histolab-login__activation-link { min-height:44px; padding:.5rem; background:transparent; border:0; color:#126586; text-decoration:underline; text-underline-offset:3px; font:inherit; font-size:.85rem; cursor:pointer; }

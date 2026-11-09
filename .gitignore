@@ -30,3 +30,9 @@ Thumbs.db
 # Secretos locales de Workers
 .dev.vars
 .dev.vars.*
+.gmail-client*.json
+server/.gmail-client*.json
+
+# Copias locales privadas y caché de herramientas
+server/data/*_data.json
+supabase/.temp/

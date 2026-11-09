@@ -5,7 +5,7 @@ import Notification from "./components/Notification";
 import { api } from "./services/api";
 import { AlertTriangle } from "lucide-react";
 
-import { clearNavState } from "./utils/navigationState";
+import { clearNavState, setNavState } from "./utils/navigationState";
 
 const DashboardInstructor = lazy(() => import("./components/DashboardInstructor"));
 const StudentPortalView = lazy(() => import("./components/StudentPortalView"));
@@ -48,6 +48,7 @@ export default function App() {
   const [currentStudent, setCurrentStudent] = useState(() => api.auth.getCurrentStudent());
   const [sessionAlert, setSessionAlert] = useState(null);
   const [adminMenuSlot, setAdminMenuSlot] = useState(null);
+  const [instructorHomeKey, setInstructorHomeKey] = useState(0);
   const [notification, setNotification] = useState({ message: "", type: "success", title: "" });
 
   const notify = useCallback((message, type = "success", title = "") => {
@@ -111,10 +112,10 @@ export default function App() {
 
     const handleSessionExpiredEvent = (e) => {
       setSessionAlert({
-        title: "Sesión Concurrente Detectada",
+        title: e.detail?.reason==="ACTIVATION_REQUIRED"?"Activa tu cuenta":"Sesión Concurrente Detectada",
         message: e.detail?.message || "Tu sesión ha sido cerrada porque se inició sesión desde otro dispositivo."
       });
-      handleLogout("Sesión cerrada por acceso simultáneo.");
+      handleLogout(e.detail?.reason==="ACTIVATION_REQUIRED"?"Activa tu cuenta por correo para continuar.":"Sesión cerrada por acceso simultáneo.");
     };
 
     window.addEventListener("histolab:session_expired", handleSessionExpiredEvent);
@@ -147,7 +148,7 @@ export default function App() {
 
     const handleStudentSessionExpired = (e) => {
       setSessionAlert({
-        title: "Sesión Concurrente Detectada",
+        title: e.detail?.reason==="ACTIVATION_REQUIRED"?"Activa tu cuenta":"Sesión Concurrente Detectada",
         message: e.detail?.message || "Tu sesión ha sido cerrada porque se inició sesión desde otro dispositivo o pestaña."
       });
       handleStudentLogout();
@@ -303,13 +304,23 @@ export default function App() {
       <Navbar
         currentInstructor={currentInstructor}
         adminMenuSlotRef={setAdminMenuSlot}
+        onHome={() => {
+          clearNavState();
+          setInstructorHomeKey(key => key + 1);
+          window.scrollTo({ top: 0, behavior: "instant" });
+        }}
+        onAccount={() => {
+          setNavState({ activeModule: "my-account", selectedCoordinatorSeccion: null, selectedInstructorSeccion: null });
+          setInstructorHomeKey(key => key + 1);
+          window.scrollTo({ top: 0, behavior: "instant" });
+        }}
         onLogout={() => handleLogout("Sesión cerrada por el usuario.")}
       />
 
       {/* Panel Principal Dashboard */}
       <main className="main-content">
         <Suspense fallback={<PortalSkeleton />}>
-          <DashboardInstructor instructor={currentInstructor} notify={notify} adminMenuSlot={adminMenuSlot} />
+          <DashboardInstructor key={instructorHomeKey} instructor={currentInstructor} notify={notify} adminMenuSlot={adminMenuSlot} />
         </Suspense>
       </main>
 

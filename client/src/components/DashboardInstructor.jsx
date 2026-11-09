@@ -15,6 +15,9 @@ import {
   Clock,
   Calendar,
   GraduationCap,
+  ShieldCheck,
+  CalendarCheck,
+  ChevronRight,
   AlertCircle
 } from "lucide-react";
 import { api } from "../services/api";
@@ -23,16 +26,24 @@ import SectionManagementView from "./SectionManagementView";
 import TemarioManagementView from "./TemarioManagementView";
 import WeekDefinitionView from "./WeekDefinitionView";
 import CoordinatorSectionView from "./CoordinatorSectionView";
+import InstructorAccountView from "./InstructorAccountView";
+import StudentMakeupsView from "./StudentMakeupsView";
 
 import { getNavState, setNavState } from "../utils/navigationState";
 import { safeStorage } from "../utils/safeStorage";
 import "./DashboardInstructor.css";
 
 const ADMIN_MODULES = [
-  { id: "user-management", label: "Administración de usuarios", Icon: Users, View: UserManagementView },
-  { id: "section-management", label: "Administración de secciones", Icon: Layers, View: SectionManagementView },
-  { id: "temario-management", label: "Gestión de temario", Icon: BookOpen, View: TemarioManagementView },
-  { id: "week-definition", label: "Definición de semanas", Icon: Calendar, View: WeekDefinitionView }
+  { id: "student-makeups", group: "management", label: "Reposiciones de estudiantes", description: "Revisa solicitudes y asigna secciones.", Icon: CalendarCheck, View: StudentMakeupsView },
+  { id: "user-management", group: "management", label: "Administración de usuarios", description: "Gestiona las cuentas de instructores.", Icon: Users, View: UserManagementView },
+  { id: "section-management", group: "management", label: "Administración de secciones", description: "Organiza los grupos y sus equipos.", Icon: Layers, View: SectionManagementView },
+  { id: "temario-management", group: "academic", label: "Gestión de temario", description: "Configura temas y ponderaciones.", Icon: BookOpen, View: TemarioManagementView },
+  { id: "week-definition", group: "academic", label: "Definición de semanas", description: "Programa prácticas y exámenes.", Icon: Calendar, View: WeekDefinitionView }
+];
+
+const ADMIN_GROUPS = [
+  { id: "management", label: "Gestión general" },
+  { id: "academic", label: "Configuración académica" }
 ];
 
 const SECTION_DAYS = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"];
@@ -49,6 +60,7 @@ const CAREER_ACCENTS = {
 
 export default function DashboardInstructor({ instructor, notify = () => {}, adminMenuSlot }) {
   const adminMenu = useRef(null);
+  const [adminMenuOpen, setAdminMenuOpen] = useState(false);
   const [currentGreeting, setCurrentGreeting] = useState("¡Buen día!");
   const [sectionsError, setSectionsError] = useState(false);
   
@@ -172,7 +184,12 @@ export default function DashboardInstructor({ instructor, notify = () => {}, adm
           title="Administración General"
           aria-haspopup="dialog"
           aria-controls="admin-menu"
-          onClick={() => adminMenu.current.showModal()}
+          aria-expanded={adminMenuOpen}
+          onClick={() => {
+            adminMenu.current.showModal();
+            setAdminMenuOpen(true);
+            adminMenu.current.querySelector('[aria-current="page"]')?.scrollIntoView({ block: "nearest" });
+          }}
         >
           <PanelLeftOpen size={21} aria-hidden="true" />
         </button>,
@@ -183,35 +200,46 @@ export default function DashboardInstructor({ instructor, notify = () => {}, adm
         id="admin-menu"
         className="admin-menu"
         aria-labelledby="admin-menu-title"
+        onClose={() => setAdminMenuOpen(false)}
         onClick={(event) => {
           if (event.target === event.currentTarget) adminMenu.current.close();
         }}
       >
         <div className="admin-menu__content">
           <header className="admin-menu__header">
-            <h2 id="admin-menu-title">Administración General</h2>
-            <button type="button" aria-label="Cerrar menú" onClick={() => adminMenu.current.close()}>
-              <X size={22} aria-hidden="true" />
-            </button>
-          </header>
-          <nav className="admin-menu__modules" aria-label="Navegación docente">
-            <button type="button" onClick={() => navigateFromMenu(null)}>
-              <GraduationCap size={20} aria-hidden="true" />
-              <span>Panel docente</span>
-              <ArrowRight size={17} aria-hidden="true" />
-            </button>
-            {ADMIN_MODULES.map(({ id, label, Icon }) => (
-              <button
-                key={id}
-                type="button"
-                onClick={() => navigateFromMenu(id)}
-              >
-                <Icon size={20} aria-hidden="true" />
-                <span>{label}</span>
-                <ArrowRight size={17} aria-hidden="true" />
+            <div className="admin-menu__heading-row">
+              <span className="admin-menu__brand-icon"><ShieldCheck size={24} aria-hidden="true" /></span>
+              <span className="admin-menu__eyebrow">HISTOLAB · ADMINISTRACIÓN</span>
+              <button type="button" className="admin-menu__close" aria-label="Cerrar menú" onClick={() => adminMenu.current.close()}>
+                <X size={21} aria-hidden="true" />
               </button>
+            </div>
+            <h2 id="admin-menu-title">Administración General</h2>
+            <p>Gestiona el registro académico desde un solo lugar.</p>
+          </header>
+          <nav className="admin-menu__modules" aria-label="Administración General">
+            <button type="button" className="admin-menu__link admin-menu__home" aria-current={!activeModule && !selectedCoordinatorSeccion && !selectedInstructorSeccion ? "page" : undefined} onClick={() => navigateFromMenu(null)}>
+              <span className="admin-menu__link-icon"><GraduationCap size={21} aria-hidden="true" /></span>
+              <span className="admin-menu__link-copy"><strong>Panel docente</strong><small>Vuelve al inicio y a tus secciones.</small></span>
+              <ChevronRight size={17} aria-hidden="true" />
+            </button>
+            {ADMIN_GROUPS.map(group => (
+              <section className="admin-menu__group" key={group.id} aria-labelledby={`admin-group-${group.id}`}>
+                <h3 id={`admin-group-${group.id}`}>{group.label}</h3>
+                {ADMIN_MODULES.filter(module => module.group === group.id).map(({ id, label, description, Icon }) => (
+                  <button key={id} type="button" className="admin-menu__link" aria-current={activeModule === id ? "page" : undefined} onClick={() => navigateFromMenu(id)}>
+                    <span className="admin-menu__link-icon"><Icon size={21} aria-hidden="true" /></span>
+                    <span className="admin-menu__link-copy"><strong>{label}</strong><small>{description}</small></span>
+                    <ChevronRight size={17} aria-hidden="true" />
+                  </button>
+                ))}
+              </section>
             ))}
           </nav>
+          <footer className="admin-menu__footer">
+            <span className="admin-menu__avatar" aria-hidden="true">{fullName.slice(0, 1).toLocaleUpperCase("es")}</span>
+            <div><strong>{fullName}</strong><span>{instructor.rol}</span></div>
+          </footer>
         </div>
       </dialog>
     </>
@@ -234,7 +262,8 @@ export default function DashboardInstructor({ instructor, notify = () => {}, adm
     );
   }
 
-  const ActiveView = canManageSite && ADMIN_MODULES.find(({ id }) => id === activeModule)?.View;
+  const ActiveView = activeModule === "my-account" ? InstructorAccountView
+    : canManageSite && ADMIN_MODULES.find(({ id }) => id === activeModule)?.View;
   if (ActiveView) {
     return (
       <>

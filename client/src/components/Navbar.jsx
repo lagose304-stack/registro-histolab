@@ -1,11 +1,13 @@
 import React from "react";
-import { LogOut, GraduationCap } from "lucide-react";
+import { LogOut, GraduationCap, KeyRound } from "lucide-react";
 import laboratorioLogo from "../assets/logos/laboratorio.png";
 
 export default function Navbar({
   currentInstructor,
   currentStudent,
   adminMenuSlotRef,
+  onHome,
+  onAccount,
   onLogout
 }) {
   const isStudent = Boolean(currentStudent);
@@ -27,6 +29,8 @@ export default function Navbar({
     : currentInstructor?.rol || currentInstructor?.seccion || "Docente";
 
   const hasUser = Boolean(currentInstructor || currentStudent);
+  const canGoHome = Boolean(currentInstructor && !isStudent && onHome);
+  const Brand = canGoHome ? "button" : "div";
 
   return (
     <header style={{
@@ -53,7 +57,11 @@ export default function Navbar({
         {/* Logo y Marca Oficial */}
         <div className="navbar-brand-group" style={{ display: "flex", alignItems: "center", gap: "0.65rem", flexShrink: 0 }}>
           {adminMenuSlotRef && <div ref={adminMenuSlotRef} className="navbar-admin-slot" />}
-          <div
+          <Brand className="navbar-brand-home" type={canGoHome ? "button" : undefined}
+            onClick={canGoHome ? onHome : undefined}
+            aria-label={canGoHome ? "Volver al inicio del panel docente" : undefined}
+            title={canGoHome ? "Ir al panel de inicio" : undefined}>
+          <span
             className="navbar-logo-box"
             style={{
               width: "40px",
@@ -74,13 +82,12 @@ export default function Navbar({
               alt="Logo Registro Histolab"
               style={{ width: "100%", height: "100%", objectFit: "contain" }}
             />
-          </div>
-          <div>
-            <h1 className="navbar-logo-title" style={{ fontSize: "1.25rem", fontWeight: 800, lineHeight: 1.1, color: "var(--text-main)", margin: 0 }}>
+          </span>
+            <span className="navbar-logo-title" style={{ fontSize: "1.25rem", fontWeight: 800, lineHeight: 1.1, color: "var(--text-main)", margin: 0 }}>
               <span className="text-gradient navbar-brand-full">REGISTRO HISTOLAB</span>
               <span className="text-gradient navbar-brand-short">HISTOLAB</span>
-            </h1>
-          </div>
+            </span>
+          </Brand>
         </div>
 
         {/* Acciones y Perfil */}
@@ -156,6 +163,10 @@ export default function Navbar({
               </div>
             </div>
           )}
+
+          {currentInstructor && !isStudent && onAccount && <button type="button" className="navbar-account-btn" onClick={onAccount} aria-label="Mi cuenta" title="Mi cuenta">
+            <KeyRound size={18} aria-hidden="true" /><span>Mi cuenta</span>
+          </button>}
 
           {/* Botón Cerrar Sesión */}
           {hasUser && (

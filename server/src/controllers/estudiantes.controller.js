@@ -14,6 +14,12 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { supabase, isSupabaseConfigured } from "../db/supabase.js";
+import { assertStudentAccountAvailable, assertLocalStudentAccountAvailable, DUPLICATE_ACCOUNT_MESSAGE } from "../services/studentEnrollment.js";
+import { normalizeAccountEmail, validAccountEmail } from "../../../shared/accountActivation.mjs";
+import { deleteStudentAccount } from "../services/studentAccountDeletion.js";
+
+const publicStudent = row => { if(!row)return row;const {contrasena,current_session_token,auth_user_id,...safe}=row;return safe; };
+const conflictMessage = error => /correo|email/i.test(error?.message||"") ? "Este correo ya está registrado en otra cuenta activa." : DUPLICATE_ACCOUNT_MESSAGE;
 
 const __dirname = (() => {
   try {
@@ -58,7 +64,8 @@ function loadPersistentEstudiantes() {
 function savePersistentEstudiantes(data, throwOnError = false) {
   try {
     ensureDataDir();
-    fs.writeFileSync(ESTUDIANTES_FILE, JSON.stringify(data, null, 2), "utf-8");
+    const safe=Object.fromEntries(Object.entries(data).map(([table,rows])=>[table,Array.isArray(rows)?rows.map(publicStudent):rows]));
+    fs.writeFileSync(ESTUDIANTES_FILE, JSON.stringify(safe, null, 2), "utf-8");
   } catch (err) {
     if (throwOnError) throw err;
     console.warn("Aviso al guardar estudiantes locales:", err.message);
@@ -177,7 +184,7 @@ export const getEstudiantesBySeccion = async (req, res) => {
           success: true,
           table: tableName,
           count: data.length,
-          data: data
+          data: data.map(publicStudent)
         });
       } else if (error) {
         console.warn(`Aviso al consultar ${tableName}:`, error.message);
@@ -190,7 +197,7 @@ export const getEstudiantesBySeccion = async (req, res) => {
       success: true,
       table: tableName,
       count: filtered.length,
-      data: filtered
+      data: filtered.map(publicStudent)
     });
   } catch (error) {
     console.error("Error al obtener estudiantes de la sección:", error);
@@ -205,7 +212,7 @@ export const getEstudiantesBySeccion = async (req, res) => {
 // 2. Registrar un nuevo estudiante en una sección
 export const createEstudiante = async (req, res) => {
   try {
-    const { seccion_id, numero_cuenta, nombre_completo, contrasena, carrera, notas, asistencias, total } = req.body;
+    const { seccion_id, numero_cuenta, nombre_completo, correo, carrera, notas, asistencias, total } = req.body;
 
     if (!seccion_id || !numero_cuenta || !nombre_completo) {
       return res.status(400).json({
@@ -216,30 +223,19 @@ export const createEstudiante = async (req, res) => {
 
     const cleanCuenta = String(numero_cuenta).trim();
     const cleanNombre = String(nombre_completo).trim();
-    const cleanPass = contrasena ? String(contrasena).trim() : "histolab123";
+    const cleanEmail=normalizeAccountEmail(correo);
+    if(!validAccountEmail(cleanEmail))return res.status(400).json({success:false,message:"Registra el correo personal del estudiante para que pueda activar su cuenta."});
     const tableName = await getTableForSeccion(seccion_id, carrera);
+    await assertStudentAccountAvailable(cleanCuenta, null, inMemoryEstudiantes);
 
-    // Verificar si ya existe en esta sección
+    // La validación global incluye esta sección y todas las carreras.
     if (isSupabaseConfigured && supabase) {
-      const { data: existing } = await supabase
-        .from(tableName)
-        .select("numero_cuenta")
-        .eq("seccion_id", seccion_id)
-        .eq("numero_cuenta", cleanCuenta)
-        .maybeSingle();
-
-      if (existing) {
-        return res.status(400).json({
-          success: false,
-          message: `El estudiante con número de cuenta ${cleanCuenta} ya está registrado en esta sección.`
-        });
-      }
-
       const newRecord = {
         seccion_id,
         numero_cuenta: cleanCuenta,
         nombre_completo: cleanNombre,
-        contrasena: cleanPass,
+        correo: cleanEmail,
+        activation_required: true,
         notas: typeof notas === "object" && notas !== null ? notas : {},
         asistencias: typeof asistencias === "object" && asistencias !== null ? asistencias : {},
         total: Number(total) || 0.00,
@@ -266,11 +262,12 @@ export const createEstudiante = async (req, res) => {
           success: true,
           message: "Estudiante matriculado exitosamente en la sección.",
           table: tableName,
-          data
+          data: publicStudent(data)
         });
       } else if (error) {
-        console.warn(`Aviso al insertar en ${tableName}:`, error.message);
+        return res.status(error.code === "23505" ? 409 : 503).json({ success: false, message: error.code === "23505" ? conflictMessage(error) : "No pudimos guardar la matrícula. Intenta nuevamente." });
       }
+      return res.status(503).json({ success: false, message: "No pudimos confirmar la matrícula. Intenta nuevamente." });
     }
 
     // Memoria de respaldo
@@ -293,7 +290,8 @@ export const createEstudiante = async (req, res) => {
       seccion_id,
       numero_cuenta: cleanCuenta,
       nombre_completo: cleanNombre,
-      contrasena: cleanPass,
+      correo: cleanEmail,
+      activation_required: true,
       notas: typeof notas === "object" && notas !== null ? notas : {},
       asistencias: typeof asistencias === "object" && asistencias !== null ? asistencias : {},
       total: Number(total) || 0.00,
@@ -302,6 +300,7 @@ export const createEstudiante = async (req, res) => {
       updated_at: new Date().toISOString()
     };
 
+    assertLocalStudentAccountAvailable(cleanCuenta, null, inMemoryEstudiantes);
     inMemoryEstudiantes[tableName].push(newInMemory);
     savePersistentEstudiantes(inMemoryEstudiantes);
 
@@ -309,14 +308,13 @@ export const createEstudiante = async (req, res) => {
       success: true,
       message: "Estudiante matriculado exitosamente (memoria).",
       table: tableName,
-      data: newInMemory
+      data: publicStudent(newInMemory)
     });
   } catch (error) {
     console.error("Error al matricular estudiante:", error);
-    res.status(500).json({
+    res.status(error.status || 500).json({
       success: false,
-      message: "Error al registrar el estudiante",
-      error: error.message
+      message: error.status ? error.message : "Error al registrar el estudiante"
     });
   }
 };
@@ -328,7 +326,7 @@ export const updateEstudiante = async (req, res) => {
     const {
       nombre_completo,
       nuevo_numero_cuenta,
-      contrasena,
+      correo,
       carrera,
       notas,
       asistencias,
@@ -337,6 +335,8 @@ export const updateEstudiante = async (req, res) => {
       segundo_examen,
       tercer_examen
     } = req.body;
+
+    if (req.body.contrasena !== undefined && req.body.contrasena !== "") return res.status(400).json({success:false,message:"La contraseña debe establecerla el estudiante desde la activación o Mi cuenta."});
 
     const tableName = await getTableForSeccion(seccion_id, carrera);
 
@@ -371,7 +371,13 @@ export const updateEstudiante = async (req, res) => {
 
     if (nombre_completo !== undefined) updates.nombre_completo = String(nombre_completo).trim();
     if (nuevo_numero_cuenta !== undefined) updates.numero_cuenta = String(nuevo_numero_cuenta).trim();
-    if (contrasena !== undefined) updates.contrasena = String(contrasena).trim();
+    if (nuevo_numero_cuenta !== undefined) {
+      await assertStudentAccountAvailable(updates.numero_cuenta, { table: tableName, sectionId: seccion_id, account: numero_cuenta }, inMemoryEstudiantes);
+    }
+    if (correo !== undefined) {
+      updates.correo=normalizeAccountEmail(correo);
+      if(!validAccountEmail(updates.correo))return res.status(400).json({success:false,message:"Ingresa un correo válido del estudiante."});
+    }
     if (sanitizedNotas !== undefined) updates.notas = sanitizedNotas;
     if (asistencias !== undefined) updates.asistencias = asistencias;
     if (total !== undefined) updates.total = Math.round((Number(total) || 0) * 1000) / 1000;
@@ -428,11 +434,12 @@ export const updateEstudiante = async (req, res) => {
           success: true,
           message: "Datos del estudiante actualizados correctamente.",
           table: tableName,
-          data
+          data: publicStudent(data)
         });
       } else if (error) {
-        console.warn(`Aviso al actualizar en ${tableName}:`, error.message);
+        return res.status(error.code === "23505" ? 409 : 503).json({ success: false, message: error.code === "23505" ? conflictMessage(error) : "No pudimos actualizar la matrícula. Intenta nuevamente." });
       }
+      return res.status(503).json({ success: false, message: "No pudimos confirmar la actualización. Intenta nuevamente." });
     }
 
     if (!inMemoryEstudiantes[tableName]) {
@@ -444,13 +451,14 @@ export const updateEstudiante = async (req, res) => {
     );
 
     if (idx !== -1) {
+      if (updates.numero_cuenta !== undefined) assertLocalStudentAccountAvailable(updates.numero_cuenta, { table: tableName, sectionId: seccion_id, account: numero_cuenta }, inMemoryEstudiantes);
       inMemoryEstudiantes[tableName][idx] = { ...inMemoryEstudiantes[tableName][idx], ...updates };
       savePersistentEstudiantes(inMemoryEstudiantes);
       return res.json({
         success: true,
         message: "Estudiante actualizado exitosamente (memoria).",
         table: tableName,
-        data: inMemoryEstudiantes[tableName][idx]
+        data: publicStudent(inMemoryEstudiantes[tableName][idx])
       });
     }
 
@@ -460,10 +468,9 @@ export const updateEstudiante = async (req, res) => {
     });
   } catch (error) {
     console.error("Error al actualizar estudiante:", error);
-    res.status(500).json({
+    res.status(error.status || 500).json({
       success: false,
-      message: "Error al actualizar los datos del estudiante",
-      error: error.message
+      message: error.status ? error.message : "Error al actualizar los datos del estudiante"
     });
   }
 };
@@ -627,59 +634,15 @@ export const updateBatchGrades = async (req, res) => {
 export const deleteEstudiante = async (req, res) => {
   try {
     const { seccion_id, numero_cuenta } = req.params;
-    const { carrera } = req.query;
-
-    const tableName = await getTableForSeccion(seccion_id, carrera);
-
-    if (isSupabaseConfigured && supabase) {
-      const { error } = await supabase
-        .from(tableName)
-        .delete()
-        .eq("seccion_id", seccion_id)
-        .eq("numero_cuenta", numero_cuenta);
-
-      if (!error) {
-        if (inMemoryEstudiantes[tableName]) {
-          inMemoryEstudiantes[tableName] = inMemoryEstudiantes[tableName].filter(
-            (e) => !(e.seccion_id === seccion_id && e.numero_cuenta === numero_cuenta)
-          );
-          savePersistentEstudiantes(inMemoryEstudiantes);
-        }
-        return res.json({
-          success: true,
-          table: tableName,
-          message: "Estudiante eliminado de la sección con éxito."
-        });
-      }
-    }
-
+    const tableName = await getTableForSeccion(seccion_id, req.query?.carrera);
+    await deleteStudentAccount(tableName, seccion_id, numero_cuenta);
     if (inMemoryEstudiantes[tableName]) {
-      const initialLen = inMemoryEstudiantes[tableName].length;
-      inMemoryEstudiantes[tableName] = inMemoryEstudiantes[tableName].filter(
-        (e) => !(e.seccion_id === seccion_id && e.numero_cuenta === numero_cuenta)
-      );
+      inMemoryEstudiantes[tableName] = inMemoryEstudiantes[tableName].filter(e => !(e.seccion_id === seccion_id && e.numero_cuenta === numero_cuenta));
       savePersistentEstudiantes(inMemoryEstudiantes);
-
-      if (inMemoryEstudiantes[tableName].length < initialLen) {
-        return res.json({
-          success: true,
-          table: tableName,
-          message: "Estudiante eliminado exitosamente."
-        });
-      }
     }
-
-    return res.status(404).json({
-      success: false,
-      message: "Estudiante no encontrado para eliminar."
-    });
+    return res.json({success:true,table:tableName,message:"Estudiante, cuenta de acceso y datos asociados eliminados correctamente."});
   } catch (error) {
-    console.error("Error al eliminar estudiante:", error);
-    res.status(500).json({
-      success: false,
-      message: "Error al eliminar el estudiante",
-      error: error.message
-    });
+    return res.status(error.status || 503).json({success:false,message:error.status ? error.message : "No pudimos confirmar la eliminación completa del estudiante. Intenta nuevamente."});
   }
 };
 
@@ -689,14 +652,19 @@ export const getEstudianteByCuenta = async (req, res) => {
     const { carrera, numero_cuenta } = req.params;
     const tableName = normalizeCarreraToTable(carrera);
     const cleanCuenta = String(numero_cuenta).trim();
+    const sectionId = req.student?.seccion_id || req.query?.seccion_id;
+    if(req.student&&(String(req.student.numero_cuenta)!==cleanCuenta||normalizeCarreraToTable(req.student.carrera)!==tableName||(req.query?.seccion_id&&String(req.query.seccion_id)!==String(req.student.seccion_id))))return res.status(403).json({success:false,message:"Solo puedes consultar tu matrícula actual."});
 
     if (isSupabaseConfigured && supabase) {
-      const { data, error } = await supabase
+      let query = supabase
         .from(tableName)
         .select("*")
         .eq("numero_cuenta", cleanCuenta)
-        .eq("activo", true)
-        .maybeSingle();
+        .eq("activo", true);
+      if (sectionId) query = query.eq("seccion_id", sectionId);
+      if(req.student?.id)query=query.eq("id",req.student.id);
+      const { data, error } = await query.maybeSingle();
+      if (error) return res.status(503).json({ success: false, message: "No pudimos consultar tu matrícula. Intenta nuevamente." });
 
       if (!error && data) {
         let seccionData = null;
@@ -712,7 +680,7 @@ export const getEstudianteByCuenta = async (req, res) => {
         return res.json({
           success: true,
           data: {
-            ...data,
+            ...publicStudent(data),
             carrera: carrera,
             seccion: seccionData,
             notas: data.notas || {},
@@ -723,9 +691,9 @@ export const getEstudianteByCuenta = async (req, res) => {
     }
 
     const memoryList = inMemoryEstudiantes[tableName] || [];
-    const found = memoryList.find((e) => String(e.numero_cuenta).trim() === cleanCuenta);
+    const found = memoryList.find((e) => String(e.numero_cuenta).trim() === cleanCuenta && (!sectionId || String(e.seccion_id) === String(sectionId)));
     if (found) {
-      return res.json({ success: true, data: found });
+      return res.json({ success: true, data: publicStudent(found) });
     }
 
     return res.status(404).json({

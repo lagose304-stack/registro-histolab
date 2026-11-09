@@ -11,6 +11,14 @@
 
 Al cambiar el portal, comprueba cómo se determina la cuenta, carrera y sección, y qué validación aplica el servidor a la operación. La creación, revisión y administración de evaluaciones se documentan en los mapas docentes.
 
+## Acceso y matrículas múltiples
+
+`LoginInstructor.jsx` envía carrera, cuenta y contraseña a `loginStudent`. Una cuenta puede estar matriculada en varias secciones: la unicidad de la tabla es por sección y cuenta. El servidor consulta las matrículas activas y verifica la contraseña antes de ofrecer opciones. Si hay varias coincidencias, devuelve `SECTION_SELECTION_REQUIRED` y el formulario solicita la sección y el periodo; no elige una matrícula arbitrariamente ni elimina registros. El segundo envío incluye `seccion_id`, que se contrasta nuevamente con las matrículas y la contraseña.
+
+El JWT identifica el ID de la matrícula elegida. `authenticateStudent` consulta ese ID además de cuenta y carrera, y la actualización académica del portal incluye la sección en `getByCuenta`. Los datos guardados en el navegador solo se reutilizan si pertenecen al mismo ID y sección. El acceso y cambio de contraseña utilizan exclusivamente la identidad vinculada de Supabase Auth; no hay contraseña inicial compartida ni columna de contraseña en las fichas estudiantiles. Sin correo, identidad Auth o activación completa se exige el primer ingreso por correo.
+
+El ingreso se confirma después de guardar y releer `current_session_token`. Un error de consulta o escritura devuelve indisponibilidad temporal; no se presenta como cuenta inexistente ni genera una sesión falsa. Un cierre atrasado no borra una sesión posterior. La API del cliente descarta credenciales residuales del otro perfil al ingresar y usa el token estudiantil en su portal. Verificación aislada: `node server/scripts/test_student_auth_flow.mjs` y `node server/scripts/test_quiz_auth.mjs`; el formulario se comprueba hasta entrar al portal, incluyendo elección de matrícula, en móvil y tablet.
+
 Los grupos del libro de calificaciones corresponden a los parciales configurados en las semanas de la carrera. Cada grupo muestra todos sus exámenes, identificados por semana y leídos mediante `getCanonicalExamGrade`; sus notas se suman una sola vez en el subtotal. No se limita la presentación a tres parciales ni a un examen por parcial. Las notas históricas de los tres primeros exámenes siguen siendo compatibles.
 
 Los apartados de pruebas se responden con `QuizItemResponse.jsx`: texto corto, numeración, completación, una opción de selección múltiple, verdadero/falso y selección de definición para cada término pareado. El portal mantiene el autoguardado, el bloqueo al finalizar el tiempo y la misma estructura de respuestas por pregunta y apartado. El resultado conserva la revisión docente de respuestas únicas o casillas, según corresponda.
@@ -41,17 +49,21 @@ La variante estudiantil de `Navbar.jsx` usa el ancho y los márgenes del portal 
 
 Los acordeones aparecen cerrados al entrar, mantienen uno abierto a la vez y desplazan la vista al inicio del parcial al abrir. El derecho a cada examen proviene del cálculo existente `derechoExamenesStatus`; se conservan varios exámenes por parcial y no se presenta una habilitación como confirmada cuando el parcial no tiene registros de asistencia. La carga y los errores siguen controlados por el portal compartido.
 
+Una falta justificada con reposición muestra además **Repuso** o **No repuso**, según la lista receptora. Esta anotación no reemplaza la falta ni cambia sus conteos o el derecho a examen. Antes de registrarse la lista no se añade un resultado negativo.
+
 ## Mi cuenta
 
-`StudentAccountView.jsx` y `StudentAccountView.css` reúnen los datos de acceso en consulta y el formulario de cambio de contraseña. Conservan la contraseña actual, el mínimo de seis caracteres, la exigencia de una clave diferente y la confirmación coincidente. Los campos admiten gestores de contraseñas mediante autocompletado y tienen botones accesibles para mostrar u ocultar cada clave.
+`StudentAccountView.jsx` y `StudentAccountView.css` reúnen los datos de acceso en consulta y el formulario de cambio de contraseña. Verifican la contraseña actual en Auth, exigen al menos doce caracteres, una clave diferente y confirmación coincidente. Los campos admiten gestores de contraseñas mediante autocompletado y tienen botones accesibles para mostrar u ocultar cada clave. La contraseña nueva nunca se guarda en la matrícula.
 
 El formulario usa la misma llamada `api.auth.changeStudentPassword` con la cuenta y carrera del estudiante autenticado; no cambia el servidor, la sesión ni el formato persistido. Bloquea la edición mientras guarda, conserva los campos ante un error y limpia y oculta las claves tras confirmar el éxito. La ayuda del primer cambio se presenta desplegada a petición del estudiante y las consultas se dirigen al instructor titular de la sección.
 
 ## Pruebas semanales
 
+Cuando Administración General asigna una reposición individual, el portal muestra la sección receptora y su fecha. Para esa semana utiliza su prueba y sesión en vivo mediante la autorización del servidor; las otras semanas y la matrícula permanecen en la sección original. El comprobante corresponde a la prueba receptora y las calificaciones se consultan en el registro original. Véase [Reposiciones individuales](reposiciones-estudiantes.md).
+
 `StudentQuizzesView.jsx` y `StudentQuizzesView.css` presentan el catálogo ordenado por semana, con estados en vivo, en espera, entregada en revisión y calificada. Cada tarjeta muestra el número de preguntas y las duraciones configuradas, permite desplegar las instrucciones completas y conserva el acceso a respuestas y comprobante. Una sesión finalizada o inactiva no habilita el botón de entrada; un cero explícito se muestra como nota y el bonus se identifica por separado.
 
-Las pruebas por realizar permanecen visibles. El historial de entregas se agrupa en acordeones según los parciales configurados en las semanas de la carrera, incluyendo tanto entregas pendientes de revisión como calificadas. Los acordeones comienzan cerrados, permiten uno abierto a la vez y muestran el inicio del grupo al abrir. Las entregas sin una semana configurada se conservan en «Sin parcial asignado». Cada tarjeta mantiene el acceso a sus respuestas y comprobante.
+Las pruebas por realizar permanecen visibles. Cada tarjeta indica la práctica de rendición: normalmente la siguiente, o la misma si la siguiente semana es de examen. Esta explicación usa `shared/quizSchedule.mjs` y no cambia la semana de las calificaciones. El historial de entregas se agrupa en acordeones según los parciales configurados en las semanas de la carrera, incluyendo tanto entregas pendientes de revisión como calificadas. Los acordeones comienzan cerrados, permiten uno abierto a la vez y muestran el inicio del grupo al abrir. Las entregas sin una semana configurada se conservan en «Sin parcial asignado». Cada tarjeta mantiene el acceso a sus respuestas y comprobante.
 
 `loadStudentQuizzes` en `StudentPortalView.jsx` carga catálogo, sesiones y entregas como un conjunto y descarta cargas atrasadas. Un fallo muestra reintento y bloquea la entrada desde el catálogo y sus avisos hasta verificar los datos. Conserva los endpoints, los latidos y la restauración de pruebas activas. Los comprobantes mantienen las respuestas y la retroalimentación existentes con una cabecera adaptable a móvil; las notas ausentes no se representan como cero. La lógica de preguntas, sellado y entrega permanece en el portal.
 

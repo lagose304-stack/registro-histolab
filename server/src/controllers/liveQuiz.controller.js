@@ -2,6 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { supabase, isSupabaseConfigured } from "../db/supabase.js";
+import { loadQuizSchedule } from "../services/quizSchedule.js";
+import { getQuizWindow } from "../../../shared/quizSchedule.mjs";
 
 const __dirname = (() => {
   try {
@@ -290,35 +292,6 @@ export const getLiveQuizState = async (req, res) => {
   }
 };
 
-const DIAS_NORMALIZADOS_BACKEND = {
-  0: "domingo",
-  1: "lunes",
-  2: "martes",
-  3: "miercoles",
-  4: "jueves",
-  5: "viernes",
-  6: "sabado"
-};
-
-const DIAS_NOMBRE_LEGIBLE_BACKEND = {
-  0: "Domingo",
-  1: "Lunes",
-  2: "Martes",
-  3: "Miércoles",
-  4: "Jueves",
-  5: "Viernes",
-  6: "Sábado"
-};
-
-function getHondurasDateBackend() {
-  try {
-    const str = new Date().toLocaleString("en-US", { timeZone: "America/Tegucigalpa" });
-    return new Date(str);
-  } catch {
-    return new Date();
-  }
-}
-
 async function getSectionByIdBackend(seccion_id) {
   if (!seccion_id) return null;
   const sIdStr = String(seccion_id).trim();
@@ -350,57 +323,6 @@ async function getSectionByIdBackend(seccion_id) {
   return null;
 }
 
-function checkSectionScheduleBackend(sec) {
-  if (!sec || !sec.dia || !sec.hora_inicio) return { isWithin: true };
-
-  const now = getHondurasDateBackend();
-  const currentDayIndex = now.getDay();
-  const todayNormalized = DIAS_NORMALIZADOS_BACKEND[currentDayIndex];
-  const todayLegible = DIAS_NOMBRE_LEGIBLE_BACKEND[currentDayIndex];
-
-  const cleanSecDay = String(sec.dia)
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .trim();
-
-  if (!cleanSecDay.includes(todayNormalized)) {
-    return {
-      isWithin: false,
-      reason: `Hoy es ${todayLegible} y la sección está programada exclusivamente para los días ${sec.dia}.`
-    };
-  }
-
-  const currentMinutes = now.getHours() * 60 + now.getMinutes();
-  const [startH, startM] = String(sec.hora_inicio).split(":").map((v) => parseInt(v, 10) || 0);
-  const startMinutes = startH * 60 + (startM || 0);
-
-  let endMinutes = startMinutes + 120;
-  if (sec.hora_fin) {
-    const [endH, endM] = String(sec.hora_fin).split(":").map((v) => parseInt(v, 10) || 0);
-    endMinutes = endH * 60 + (endM || 0);
-    if (endMinutes <= startMinutes) {
-      endMinutes = startMinutes + 120;
-    }
-  }
-
-  if (currentMinutes < startMinutes) {
-    return {
-      isWithin: false,
-      reason: `Aún no inicia el horario oficial de la sección (inicia a las ${sec.hora_inicio}).`
-    };
-  }
-
-  if (currentMinutes > endMinutes) {
-    return {
-      isWithin: false,
-      reason: `El horario oficial de la sección ya concluyó (finalizó a las ${sec.hora_fin || "Fin"}).`
-    };
-  }
-
-  return { isWithin: true };
-}
-
 export const getLiveQuizEvidence = (sectionId, week) => getOrCreateSession(sectionId, week);
 
 // 2. Control maestro de la sesión en vivo (Acciones del Docente / Coordinador)
@@ -408,6 +330,18 @@ export const controlLiveQuiz = async (req, res) => {
   try {
     const { seccion_id, semana } = req.params;
     const { accion, duracion_segundos, pregunta_idx, carrera } = req.body;
+    if (["habilitar","iniciar_pregunta_1","iniciar_pregunta","siguiente_pregunta"].includes(accion)) {
+      const section = req.quizSection || await getSectionByIdBackend(seccion_id);
+      if (!section) return res.status(404).json({success:false,message:"Sección no encontrada."});
+      let context;
+      try { context = await loadQuizSchedule(section, DATA_DIR); }
+      catch { return res.status(503).json({success:false,message:"No pudimos verificar la programación de la prueba. Reintenta."}); }
+      const window = getQuizWindow(section, context.weeks, semana, new Date(), context.events);
+      // Las facultades del titular conservan la excepción horaria, no cambian la fecha académica.
+      const full = req.quizFullAccess === true;
+      const advancing = accion === "siguiente_pregunta";
+      if (!window.isPracticeDay || (!full && !advancing && !window.isOpen)) return res.status(403).json({success:false,message:window.reason});
+    }
     const session = await getOrCreateSession(seccion_id, semana);
     const now = Date.now();
 
@@ -415,20 +349,6 @@ export const controlLiveQuiz = async (req, res) => {
 
     switch (accion) {
       case "habilitar": {
-        // Validación de regla de horario para instructor asignado (no titular):
-        if (req.body.es_titular === false) {
-          const sec = await getSectionByIdBackend(seccion_id);
-          if (sec && sec.dia && sec.hora_inicio) {
-            const schedCheck = checkSectionScheduleBackend(sec);
-            if (!schedCheck.isWithin) {
-              return res.status(403).json({
-                success: false,
-                message: `El instructor asignado únicamente puede habilitar la prueba en vivo el día ${sec.dia} dentro del horario exclusivo de la sección (${sec.hora_inicio} - ${sec.hora_fin || "Fin"}). ${schedCheck.reason}`
-              });
-            }
-          }
-        }
-
         // Pasa a lobby (los alumnos ven la alerta roja y pueden ingresar a la prueba)
         session.habilitada = true;
         session.estado = "lobby";
@@ -548,6 +468,7 @@ export const heartbeatLiveQuiz = async (req, res) => {
 
     // Actualizar registro del estudiante conectado
     session.alumnos_conectados[cleanAccount] = {
+      ...(req.makeup ? { reposicion: { id: req.makeup.id, origen: req.makeup.origen_codigo } } : {}),
       nombre_completo: nombre_completo || session.alumnos_conectados[cleanAccount]?.nombre_completo || "Estudiante",
       ultimo_ping: now,
       pregunta_vista: typeof pregunta_vista === "number" ? pregunta_vista : -1,
@@ -633,6 +554,12 @@ export const heartbeatLiveQuiz = async (req, res) => {
  * Permite que los estudiantes detecten la sala de espera al instante sin saturar con llamadas múltiples.
  */
 export const getActiveLiveQuiz = async (req, res) => {
+  if (req.makeupLiveWeek) {
+    req.params.semana = req.makeupLiveWeek;
+    const json = res.json.bind(res);
+    res.json = payload => json({ ...payload, activa: Boolean(payload.data?.habilitada && ["lobby","en_pregunta","esperando_siguiente"].includes(payload.data?.estado)) });
+    return getLiveQuizState(req, res);
+  }
   try {
     const { seccion_id } = req.params;
     if (!seccion_id) {

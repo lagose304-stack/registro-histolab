@@ -1,4 +1,5 @@
 import { getLiveQuizEvidence } from "./liveQuiz.controller.js";
+import { syncMakeupSubmission } from "../services/studentMakeups.js";
 import { sanitizeClientAudit } from "../middlewares/quizPrivacy.mjs";
 import fs from "node:fs";
 import path from "node:path";
@@ -423,6 +424,7 @@ async function loadQuizForAssessment(sectionId, week) {
 
 async function syncAutomaticStudentGrade(submission) {
   if (submission.estado !== "calificado") return;
+  if (await syncMakeupSubmission(submission)) return;
   await updateEstudianteGradeDirect(submission.seccion_id,submission.numero_cuenta,submission.carrera,`prueba_${submission.numero_semana}`,submission.nota_obtenida,true);
   await updateEstudianteGradeDirect(submission.seccion_id,submission.numero_cuenta,submission.carrera,`prueba_${submission.numero_semana}_real`,submission.nota_real ?? submission.nota_obtenida,true);
 }
@@ -472,6 +474,7 @@ export const submitPruebaEstudiante = async (req,res) => {
       return res.json({success:true,message:"La entrega ya está registrada. Sus respuestas originales se conservan.",data:existing});
     }
     const quiz=await loadQuizForAssessment(seccion_id,numSemana);
+    if (req.student && req.body.quiz_id && String(req.body.quiz_id) !== String(quiz.id)) return res.status(409).json({success:false,message:"La prueba asignada cambió. Actualiza el catálogo antes de continuar."});
     let integrityEvidence;
     if (req.student) {
       if (!(quiz.publicada === true || String(quiz.publicada) === "true" || quiz.estado === "publicada")) return res.status(403).json({success:false,message:"Esta prueba no está publicada."});
@@ -786,6 +789,7 @@ export const calificarEntrega = async (req, res) => {
       await syncAutomaticStudentGrade(sub);
       return res.json({success:true,message:sub.estado==="calificado"?"Calificación guardada y sincronizada.":"Apartados guardados; quedan respuestas pendientes de revisión.",data:sub});
     }
+    if (await syncMakeupSubmission(sub)) return res.json({success:true,message:"Calificación guardada en la sección original del estudiante.",data:sub});
     // Sincronizar nota directamente en la ficha del estudiante (prueba_X = cleanNota)
     try {
       await updateEstudianteGradeDirect(

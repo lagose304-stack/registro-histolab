@@ -1,0 +1,13 @@
+import { Router } from "express";
+import { authenticateInstructor } from "../middlewares/auth.middleware.js";
+import { listStudentMakeups, getMakeupOptions, createStudentMakeup, getMakeupDestinations, resolveStudentMakeup, getReceivingMakeup, saveReceivingMakeup } from "../controllers/studentMakeups.controller.js";
+const router = Router();
+router.use(authenticateInstructor);
+router.get("/", listStudentMakeups);
+router.get("/seccion/:seccion_id/opciones", getMakeupOptions);
+router.post("/", createStudentMakeup);
+router.get("/:id/destinos", getMakeupDestinations);
+router.put("/:id/resolver", resolveStudentMakeup);
+router.get("/:id/recepcion", getReceivingMakeup);
+router.put("/:id/recepcion", saveReceivingMakeup);
+export default router;

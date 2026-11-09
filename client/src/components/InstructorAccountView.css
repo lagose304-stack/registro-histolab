@@ -1,0 +1,42 @@
+.instructor-account { display: grid; gap: 1rem; min-width: 0; color: #173b52; overflow-wrap: anywhere; }
+.instructor-account svg { flex: none; }
+.instructor-account__back { justify-self: start; }
+.instructor-account__hero { display: flex; align-items: center; gap: .85rem; padding: 1rem; border: 1px solid #adc6d8; border-top: 3px solid #0284c7; border-radius: .85rem; background: #fff; }
+.instructor-account__hero > span { display: grid; place-items: center; flex: none; width: 48px; height: 48px; border: 1px solid #bcd9e9; border-radius: .75rem; background: #eff7fc; color: #0284c7; }
+.instructor-account__hero h1 { margin: .2rem 0; font-size: 1.6rem; line-height: 1.3; }
+.instructor-account__hero p { font-size: .85rem; color: #57758a; }
+.instructor-account__hero p:first-child { font-size: .75rem; font-weight: 750; }
+.instructor-account__layout, .instructor-account__sidebar { display: grid; gap: 1rem; min-width: 0; align-items: start; }
+.instructor-account__panel { display: grid; gap: 1rem; min-width: 0; padding: 1rem; border: 1px solid #adc6d8; border-radius: .85rem; background: #fff; }
+.instructor-account h2 { font-size: 1.05rem; line-height: 1.4; }
+.instructor-account__heading { display: flex; align-items: center; gap: .7rem; }
+.instructor-account__heading > svg { color: #0284c7; }
+.instructor-account__heading p { margin-top: .25rem; color: #57758a; font-size: .85rem; }
+.instructor-account fieldset { display: grid; gap: 1rem; padding: 0; border: 0; min-width: 0; }
+.instructor-account__field { display: grid; gap: .4rem; min-width: 0; }
+.instructor-account__field label { font-size: .875rem; font-weight: 700; }
+.instructor-account__input { display: flex; align-items: center; gap: .5rem; min-width: 0; padding-left: .75rem; border: 1px solid #a8c3d5; border-radius: .6rem; background: #fafcfd; color: #5d7c91; }
+.instructor-account__input:focus-within { border-color: #0284c7; box-shadow: 0 0 0 2px #e2f2fa; }
+.instructor-account__input input { width: 100%; min-width: 0; min-height: 48px; padding: .5rem 0; border: 0; background: transparent; font: inherit; font-size: 1rem; color: #173b52; outline: 0; }
+.instructor-account__input input::placeholder { color: #6c8596; font-size: .85rem; }
+.instructor-account__input button { display: grid; place-items: center; flex: none; width: 44px; height: 46px; border: 0; border-radius: .5rem; background: transparent; color: #57758a; cursor: pointer; }
+.instructor-account__input button:hover { background: #edf5fa; }
+.instructor-account__requirements { display: grid; gap: .5rem; padding: .8rem; border: 1px solid #cfdee8; border-radius: .6rem; background: #f6f9fb; list-style: none; }
+.instructor-account__requirements li { display: flex; align-items: center; gap: .5rem; font-size: .8rem; color: #607c8f; }
+.instructor-account__requirements li[data-complete="true"] { color: #31714f; }
+.instructor-account__mismatch { font-size: .85rem; color: #9b3042; }
+.instructor-account__save { min-height: 48px; width: 100%; }
+.instructor-account button:disabled { opacity: .55; cursor: default; }
+.instructor-account__feedback { display: flex; align-items: flex-start; gap: .6rem; padding: .85rem; border: 1px solid #e2b7bf; border-radius: .65rem; background: #fff2f4; color: #8d2e3f; font-size: .875rem; }
+.instructor-account__feedback[data-type="success"] { border-color: #b6d7c6; background: #f0f8f3; color: #2f6b4d; }
+.instructor-account__note { color: #607c8f; font-size: .8rem; }
+.instructor-account dl { display: grid; gap: .85rem; }
+.instructor-account dl > div { display: grid; gap: .3rem; padding-bottom: .85rem; border-bottom: 1px solid #d6e2ea; }
+.instructor-account dl > div:last-child { padding-bottom: 0; border: 0; }
+.instructor-account dt { display: flex; align-items: center; gap: .45rem; color: #607c8f; font-size: .8rem; }
+.instructor-account dd { font-size: .9rem; font-weight: 650; }
+.instructor-account__advice { display: flex; align-items: flex-start; gap: .65rem; padding: 1rem; border: 1px solid #bfd3df; border-radius: .85rem; background: #f3f8fb; }
+.instructor-account__advice p { margin-top: .65rem; font-size: .85rem; color: #57758a; }
+.instructor-account__username { position: absolute; width: 1px; height: 1px; padding: 0; border: 0; clip-path: inset(50%); overflow: hidden; }
+.instructor-account button:focus-visible { outline: 3px solid #0284c7; outline-offset: 3px; }
+@media (min-width: 56rem) { .instructor-account__layout { grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); } .instructor-account__panel, .instructor-account__hero { padding: 1.25rem; } }

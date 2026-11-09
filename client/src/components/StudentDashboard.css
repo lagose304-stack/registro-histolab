@@ -100,3 +100,7 @@
   .student-portal__live > button { width: 100%; justify-content: center; }
   .student-portal__live > div > div:first-child { width: 38px !important; height: 38px !important; }
 }
+.student-makeup-notice { display: flex; align-items: flex-start; flex-wrap: wrap; gap: .75rem; padding: 1rem; margin-bottom: 1rem; border: 1px solid #b4cfdf; border-left: 3px solid #0284c7; border-radius: .75rem; background: #eff7fc; color: #285874; }
+.student-makeup-notice > svg { flex: none; }
+.student-makeup-notice > div { flex: 1 1 15rem; min-width: 0; overflow-wrap: anywhere; }
+.student-makeup-notice p { margin-top: .3rem; font-size: .85rem; line-height: 1.6; }

@@ -40,7 +40,7 @@ export default function SectionStudentsView({
   const [formData, setFormData] = useState({
     numero_cuenta: "",
     nombre_completo: "",
-    contrasena: "histolab123"
+    correo: ""
   });
   const [showPassword, setShowPassword] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -79,13 +79,13 @@ export default function SectionStudentsView({
       setFormData({
         numero_cuenta: "",
         nombre_completo: "",
-        contrasena: "histolab123"
+        correo: ""
       });
     } else if (mode === "edit" && student) {
       setFormData({
         numero_cuenta: student.numero_cuenta || "",
         nombre_completo: student.nombre_completo || "",
-        contrasena: student.contrasena || "histolab123"
+        correo: student.correo || ""
       });
     }
   };
@@ -109,8 +109,8 @@ export default function SectionStudentsView({
       setFormError("El nombre completo del estudiante es obligatorio.");
       return;
     }
-    if (!formData.contrasena.trim()) {
-      setFormError("La contraseña no puede estar vacía.");
+    if (!formData.correo.trim()) {
+      setFormError("Registra el correo del estudiante para que pueda activar su cuenta.");
       return;
     }
 
@@ -121,14 +121,14 @@ export default function SectionStudentsView({
           seccion_id: seccion.id,
           numero_cuenta: formData.numero_cuenta.trim(),
           nombre_completo: formData.nombre_completo.trim(),
-          contrasena: formData.contrasena.trim()
+          correo: formData.correo.trim()
         });
         notify("Estudiante matriculado con éxito", "success");
       } else if (modalMode === "edit" && selectedStudent) {
         await api.estudiantes.update(seccion.id, selectedStudent.numero_cuenta, {
           nombre_completo: formData.nombre_completo.trim(),
           nuevo_numero_cuenta: formData.numero_cuenta.trim(),
-          contrasena: formData.contrasena.trim()
+          correo: formData.correo.trim()
         });
         notify("Estudiante actualizado con éxito", "success");
       }
@@ -315,7 +315,7 @@ export default function SectionStudentsView({
               </div>
               <div className="user-dialog__warning">
                 <AlertTriangle size={22} aria-hidden="true" />
-                <p>Se eliminará la matrícula y se borrarán los registros y notas de este estudiante en la sección.</p>
+                <p>Se eliminarán permanentemente la matrícula, las notas, asistencias, entregas y reposiciones de este estudiante, además de su cuenta de acceso. Esta acción no se puede deshacer.</p>
               </div>
             </div>
           ) : (
@@ -327,18 +327,12 @@ export default function SectionStudentsView({
               <label className="user-field">
                 Número de cuenta
                 <input required name="numero_cuenta" autoComplete="off" value={formData.numero_cuenta} onChange={updateField} />
+                <small>La cuenta solo puede tener una matrícula activa entre todas las carreras.</small>
               </label>
-              <div className="user-field">
-                <label htmlFor="roster-password">Contraseña del estudiante</label>
-                <div className="user-field__password">
-                  <input required id="roster-password" name="contrasena" type={showPassword ? "text" : "password"}
-                    autoComplete="new-password" value={formData.contrasena} onChange={updateField} />
-                  <button type="button" className="user-button user-button--icon" onClick={() => setShowPassword(!showPassword)}
-                    aria-label={showPassword ? "Ocultar contraseña" : "Mostrar contraseña"}>
-                    {showPassword ? <EyeOff size={19} aria-hidden="true" /> : <Eye size={19} aria-hidden="true" />}
-                  </button>
-                </div>
-              </div>
+              <label className="user-field">Correo electrónico
+                <input required name="correo" type="email" autoComplete="off" value={formData.correo} onChange={updateField} />
+                <small>Confirma que pertenece al estudiante. Recibirá allí el código para crear su contraseña.</small>
+              </label>
             </form>
           )}
 

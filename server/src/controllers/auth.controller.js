@@ -1,8 +1,10 @@
 import { ASSIGNABLE_INSTRUCTOR_ROLES, normalizeInstructorRole } from "../../../shared/instructorRoles.mjs";
 import jwt from "jsonwebtoken";
+import { changeInstructorPassword } from "./instructorAccount.controller.js";
 import crypto from "crypto";
 import dotenv from "dotenv";
 import { supabase, isSupabaseConfigured, createSupabaseLoginClient } from "../db/supabase.js";
+import { requiresAccountActivation, requiresStudentAccountActivation, normalizeAccountEmail, validAccountEmail } from "../../../shared/accountActivation.mjs";
 
 dotenv.config();
 
@@ -172,6 +174,7 @@ export const loginInstructor = async (req, res) => {
         message: `Usuario autenticado en Supabase Auth, pero no se encontraron sus datos en la tabla 'instructores' (ID: ${userId}). Asegúrate de agregarlo a la tabla.`
       });
     }
+    if (requiresAccountActivation(instructorProfile)) return res.status(403).json({success:false,reason:"ACTIVATION_REQUIRED",message:"Activa tu cuenta desde «¿Es tu primera vez?» para crear tu contraseña."});
 
     if (!instructorProfile.activo) {
       return res.status(403).json({
@@ -263,10 +266,10 @@ export const registerInstructor = async (req, res) => {
       return res.status(400).json({ success: false, message: "Selecciona Instructor o Coordinador." });
     }
 
-    if (!userEmail || !password || !primer_nombre || !primer_apellido || !numero_cuenta) {
+    if (!validAccountEmail(userEmail) || !primer_nombre || !primer_apellido || !numero_cuenta) {
       return res.status(400).json({
         success: false,
-        message: "Número de cuenta, primer nombre, primer apellido, correo y contraseña son obligatorios."
+        message: "Número de cuenta, primer nombre, primer apellido y un correo válido son obligatorios."
       });
     }
 
@@ -280,8 +283,8 @@ export const registerInstructor = async (req, res) => {
     // 1. Crear usuario en Supabase Auth
     const { data: authUser, error: authError } = await supabase.auth.admin.createUser({
       email: userEmail,
-      password: password,
-      email_confirm: true
+      password: crypto.randomBytes(48).toString("base64url"),
+      email_confirm: false
     });
 
     if (authError || !authUser?.user) {
@@ -303,7 +306,8 @@ export const registerInstructor = async (req, res) => {
       rol: assignedRole,
       seccion: (seccion || "").trim(),
       coordinacion: (coordinacion || "").trim(),
-      activo: true
+      activo: true,
+      activation_required: true
     };
 
     const { data: profileData, error: profileError } = await supabase
@@ -313,6 +317,7 @@ export const registerInstructor = async (req, res) => {
       .single();
 
     if (profileError) {
+      await supabase.auth.admin.deleteUser(authUser.user.id).catch(()=>{});
       return res.status(500).json({
         success: false,
         message: `Usuario creado en Auth pero falló al guardar en tabla instructores: ${profileError.message}`
@@ -468,12 +473,17 @@ export const updateInstructor = async (req, res) => {
       });
     }
 
+    if (password !== undefined && password !== "") return res.status(400).json({success:false,message:"La contraseña debe establecerla el dueño desde la activación o Mi cuenta."});
+
     // Proteger cuenta con rol Creador contra edición
-    const { data: targetProfile } = await supabase
+    const { data: targetProfile, error: targetError } = await supabase
       .from("instructores")
-      .select("rol")
+      .select("rol, correo")
       .eq("id", id)
       .maybeSingle();
+
+    if (targetError) return res.status(503).json({success:false,message:"No se pudo consultar la cuenta. Intenta nuevamente."});
+    if (!targetProfile) return res.status(404).json({success:false,message:"Instructor no encontrado."});
 
     if (normalizeInstructorRole(targetProfile?.rol) === "Creador") {
       return res.status(403).json({
@@ -489,6 +499,7 @@ export const updateInstructor = async (req, res) => {
     if (primer_apellido !== undefined) updates.primer_apellido = primer_apellido.trim();
     if (segundo_apellido !== undefined) updates.segundo_apellido = (segundo_apellido || "").trim();
     const userEmail = (correo || email || "").trim().toLowerCase();
+    if ((correo !== undefined || email !== undefined) && !validAccountEmail(userEmail)) return res.status(400).json({success:false,message:"Ingresa un correo electrónico válido."});
     if (userEmail) updates.correo = userEmail;
     if (rol !== undefined) {
       const requestedRole = normalizeInstructorRole(rol);
@@ -516,11 +527,9 @@ export const updateInstructor = async (req, res) => {
       });
     }
 
-    // 2. Si se proporcionó nueva contraseña o cambio de correo, actualizar en auth.users
+    // Sincronizar Auth; un fallo nunca se presenta como un guardado completo.
     const authUpdates = {};
-    if (password && password.trim().length >= 6) {
-      authUpdates.password = password.trim();
-    }
+    // Las contraseñas se establecen por activación o desde la cuenta del dueño.
     if (userEmail) {
       authUpdates.email = userEmail;
     }
@@ -528,10 +537,12 @@ export const updateInstructor = async (req, res) => {
     if (Object.keys(authUpdates).length > 0) {
       const { error: authError } = await supabase.auth.admin.updateUserById(id, authUpdates);
       if (authError) {
-        console.warn("Aviso al actualizar Supabase Auth:", authError.message);
+        clearInstructorAuthCache();
+        return res.status(503).json({success:false,message:"El perfil se guardó, pero no se pudo sincronizar el correo de acceso. Vuelve a guardar para completar la actualización."});
       }
     }
 
+    clearInstructorAuthCache();
     res.json({
       success: true,
       message: "Instructor actualizado exitosamente.",
@@ -634,7 +645,7 @@ export const getStudentTableName = (carrera) => {
 
 export const loginStudent = async (req, res) => {
   try {
-    const { carrera, numero_cuenta, contrasena } = req.body;
+    const { carrera, numero_cuenta, contrasena, seccion_id } = req.body;
 
     if (!carrera || !numero_cuenta || !contrasena) {
       return res.status(400).json({
@@ -645,42 +656,54 @@ export const loginStudent = async (req, res) => {
 
     const tableName = getStudentTableName(carrera);
     const cleanCuenta = String(numero_cuenta).trim();
-    const cleanPass = String(contrasena).trim();
 
-    let student = null;
-
-    if (isSupabaseConfigured && supabase) {
-      const { data, error } = await supabase
-        .from(tableName)
-        .select("*")
-        .eq("numero_cuenta", cleanCuenta)
-        .eq("activo", true)
-        .maybeSingle();
-
-      if (error) {
-        console.error("Error al buscar estudiante en Supabase:", error.message);
-      }
-      student = data;
+    if (!isSupabaseConfigured || !supabase) {
+      return res.status(503).json({ success: false, message: "El acceso de estudiantes no está disponible en este momento. Intenta nuevamente." });
     }
 
-    if (!student) {
+    let candidates;
+    try {
+      const { data, error } = await supabase.from(tableName).select("*").eq("numero_cuenta", cleanCuenta).eq("activo", true);
+      if (error) throw error;
+      candidates = data || [];
+    } catch {
+      return res.status(503).json({ success: false, message: "No pudimos verificar tu cuenta en este momento. Intenta nuevamente." });
+    }
+
+    if (!candidates.length) {
       return res.status(404).json({
         success: false,
         message: `No se encontró ningún estudiante con el número de cuenta "${cleanCuenta}" en la carrera seleccionada.`
       });
     }
 
-    // Verificar contraseña (propia o por defecto 'histolab123')
-    const validPassword =
-      student.contrasena === cleanPass ||
-      cleanPass === "histolab123" ||
-      (!student.contrasena && cleanPass === "histolab123");
-
-    if (!validPassword) {
+    // Las contraseñas estudiantiles se verifican exclusivamente en Auth.
+    const matching = [];
+    for (const candidate of candidates) {
+      if (requiresStudentAccountActivation(candidate)) continue;
+      if (candidate.auth_user_id && candidate.correo) {
+        const loginClient=createSupabaseLoginClient();
+        try {
+          const result=await loginClient.auth.signInWithPassword({email:candidate.correo,password:contrasena});
+          if(!result.error&&result.data?.user?.id===candidate.auth_user_id)matching.push(candidate);
+        } finally { try { await loginClient.auth.signOut({scope:"local"}); } catch {} }
+      }
+    }
+    if (!matching.length && candidates.some(requiresStudentAccountActivation)) return res.status(403).json({success:false,reason:"ACTIVATION_REQUIRED",message:"Activa tu cuenta desde «¿Es tu primera vez?» para crear tu contraseña."});
+    if (!matching.length) {
       return res.status(401).json({
         success: false,
-        message: "Contraseña incorrecta. Si es tu primer ingreso, utiliza la contraseña por defecto (histolab123)."
+        message: "Contraseña incorrecta. Si es tu primer ingreso, activa tu cuenta desde «¿Es tu primera vez?» ."
       });
+    }
+
+    let student = seccion_id ? matching.find(item => item.seccion_id === seccion_id) : matching.length === 1 ? matching[0] : null;
+    if (!student) {
+      const { data: sections, error } = await supabase.from("secciones")
+        .select("id,codigo,periodo_academico,dia,hora_inicio,hora_fin").in("id", matching.map(item => item.seccion_id));
+      if (error) return res.status(503).json({ success: false, message: "No pudimos consultar tus secciones. Intenta nuevamente." });
+      return res.status(409).json({ success: false, reason: "SECTION_SELECTION_REQUIRED", message: "Tu cuenta tiene más de una matrícula. Selecciona la sección a la que deseas ingresar.",
+        sections: (sections || []).sort((a,b) => String(a.codigo).localeCompare(String(b.codigo), "es", { numeric: true })) });
     }
 
     // Obtener información de la sección a la que pertenece
@@ -697,23 +720,6 @@ export const loginStudent = async (req, res) => {
     // Generar nuevo identificador único de sesión concurrente
     const sessionId = crypto.randomUUID();
 
-    // Actualizar current_session_token en Supabase y en memoria para validar sesión única
-    setStudentSession(carrera, cleanCuenta, sessionId);
-
-    if (isSupabaseConfigured && supabase) {
-      try {
-        await supabase
-          .from(tableName)
-          .update({
-            current_session_token: sessionId,
-            updated_at: new Date().toISOString()
-          })
-          .eq("id", student.id);
-      } catch (sessErr) {
-        console.warn("Aviso: No se pudo guardar current_session_token:", sessErr.message);
-      }
-    }
-
     // Generar token JWT para estudiante con session_id
     const token = jwt.sign(
       {
@@ -728,6 +734,21 @@ export const loginStudent = async (req, res) => {
       JWT_SECRET,
       { expiresIn: "7d" }
     );
+
+    // Confirmar la sesión compartida antes de anunciar el ingreso. Un error de
+    // persistencia no debe producir un JWT que el siguiente latido rechace.
+    try {
+      const { data: saved, error } = await supabase.from(tableName)
+        .update({ current_session_token: sessionId, updated_at: new Date().toISOString() })
+        .eq("id", student.id).eq("activo", true)
+        .select("id,current_session_token").maybeSingle();
+      if (error || saved?.current_session_token !== sessionId) {
+        return res.status(503).json({ success: false, message: "No pudimos iniciar tu sesión. Intenta nuevamente en unos momentos." });
+      }
+    } catch {
+      return res.status(503).json({ success: false, message: "No pudimos iniciar tu sesión. Revisa tu conexión e intenta nuevamente." });
+    }
+    setStudentSession(carrera, cleanCuenta, sessionId);
 
     // Perfil completo del estudiante
     const studentProfile = {
@@ -780,19 +801,21 @@ export const setStudentSession = (carrera, numero_cuenta, sessionId) => {
   }
 };
 
-export const getStudentByCuentaAndCarrera = async (numero_cuenta, carrera) => {
+export const getStudentByCuentaAndCarrera = async (numero_cuenta, carrera, studentId = null) => {
   const tableName = getStudentTableName(carrera);
   const cleanCuenta = String(numero_cuenta).trim();
 
   if (isSupabaseConfigured && supabase) {
-    const { data, error } = await supabase
+    let query = supabase
       .from(tableName)
       .select("*")
       .eq("numero_cuenta", cleanCuenta)
-      .eq("activo", true)
-      .maybeSingle();
+      .eq("activo", true);
+    if (studentId) query = query.eq("id", studentId);
+    const { data, error } = await query.maybeSingle();
 
-    if (!error && data) return data;
+    if (error) throw error;
+    if (data) return data;
   }
   return null;
 };
@@ -815,7 +838,7 @@ export const logoutStudent = async (req, res) => {
   try {
     const student = req.student;
     if (student) {
-      if (student.carrera && student.numero_cuenta) {
+      if (student.carrera && student.numero_cuenta && getStudentSession(student.carrera, student.numero_cuenta) === student.session_id) {
         setStudentSession(student.carrera, student.numero_cuenta, null);
       }
       if (student.carrera && student.id && isSupabaseConfigured && supabase) {
@@ -827,6 +850,7 @@ export const logoutStudent = async (req, res) => {
             updated_at: new Date().toISOString()
           })
           .eq("id", student.id)
+          .eq("current_session_token", student.session_id)
           .catch(() => {});
       }
     }
@@ -839,102 +863,9 @@ export const logoutStudent = async (req, res) => {
   }
 };
 
-export const changeStudentPassword = async (req, res) => {
-  try {
-    const { carrera, numero_cuenta, contrasena_actual, nueva_contrasena } = req.body;
-
-    if (!carrera || !numero_cuenta || !contrasena_actual || !nueva_contrasena) {
-      return res.status(400).json({
-        success: false,
-        message: "Por favor completa todos los campos requeridos."
-      });
-    }
-
-    const cleanCuenta = String(numero_cuenta).trim();
-    const cleanActual = String(contrasena_actual).trim();
-    const cleanNueva = String(nueva_contrasena).trim();
-
-    if (cleanNueva.length < 6) {
-      return res.status(400).json({
-        success: false,
-        message: "La nueva contraseña debe tener como mínimo 6 caracteres."
-      });
-    }
-
-    if (cleanNueva === cleanActual) {
-      return res.status(400).json({
-        success: false,
-        message: "La nueva contraseña no puede ser igual a tu contraseña actual."
-      });
-    }
-
-    const tableName = getStudentTableName(carrera);
-    let student = null;
-
-    if (isSupabaseConfigured && supabase) {
-      const { data, error } = await supabase
-        .from(tableName)
-        .select("*")
-        .eq("numero_cuenta", cleanCuenta)
-        .eq("activo", true)
-        .maybeSingle();
-
-      if (error) {
-        console.error("Error al buscar estudiante en Supabase:", error.message);
-      }
-      student = data;
-    }
-
-    if (!student) {
-      return res.status(404).json({
-        success: false,
-        message: `No se encontró ningún estudiante con el número de cuenta "${cleanCuenta}" en la carrera seleccionada.`
-      });
-    }
-
-    // Verificar contraseña actual (propia o por defecto 'histolab123')
-    const validPassword =
-      student.contrasena === cleanActual ||
-      cleanActual === "histolab123" ||
-      (!student.contrasena && cleanActual === "histolab123");
-
-    if (!validPassword) {
-      return res.status(401).json({
-        success: false,
-        message: "La contraseña actual es incorrecta. Si nunca la has cambiado, recuerda que la contraseña inicial es 'histolab123'."
-      });
-    }
-
-    // Actualizar en Supabase
-    if (isSupabaseConfigured && supabase) {
-      const { error: updateError } = await supabase
-        .from(tableName)
-        .update({
-          contrasena: cleanNueva,
-          updated_at: new Date().toISOString()
-        })
-        .eq("numero_cuenta", cleanCuenta);
-
-      if (updateError) {
-        console.error("Error al actualizar contraseña en Supabase:", updateError.message);
-        return res.status(500).json({
-          success: false,
-          message: "Error al guardar la nueva contraseña en la base de datos: " + updateError.message
-        });
-      }
-    }
-
-    return res.json({
-      success: true,
-      message: "¡Contraseña actualizada exitosamente! Utiliza tu nueva clave en tus próximos inicios de sesión."
-    });
-  } catch (error) {
-    console.error("Error en changeStudentPassword:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Error interno del servidor al actualizar la contraseña.",
-      error: error.message
-    });
-  }
+export const changeStudentPassword = async (req,res) => {
+  const student=req.student;
+  if(!student || String(student.numero_cuenta)!==String(req.body?.numero_cuenta||'').trim() || getStudentTableName(student.carrera)!==getStudentTableName(req.body?.carrera))return res.status(403).json({success:false,message:'Solo puedes cambiar la contraseña de tu cuenta actual.'});
+  if(!student.auth_user_id || !student.correo)return res.status(403).json({success:false,reason:'ACTIVATION_REQUIRED',message:'Activa tu cuenta por correo antes de cambiar tu contraseña.'});
+  return changeInstructorPassword({...req,instructor:{id:student.auth_user_id,correo:student.correo}},res);
 };
-

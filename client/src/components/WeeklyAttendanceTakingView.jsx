@@ -6,6 +6,8 @@ import { getAttendanceKeys, getAttendanceWindow } from "../../../shared/attendan
 import { displaySectionCode } from "../../../shared/sectionCode.mjs";
 import { hasFullSectionAccess, isWeekAssignedToUser, matchesInstructor, SECTION_ROLES } from "../utils/sectionRoleUtils";
 import "./WeeklyAttendanceTakingView.css";
+import { getMakeupOutcome } from "../../../shared/studentMakeups.mjs";
+import MakeupAttendanceBadge from "./MakeupAttendanceBadge";
 
 const attendanceDateFormatter = new Intl.DateTimeFormat("es-HN", {
   timeZone: "America/Tegucigalpa", weekday: "short", day: "numeric", month: "short",
@@ -521,6 +523,7 @@ export default function WeeklyAttendanceTakingView({
                         <h4>{student.nombre_completo || "Sin nombre registrado"}</h4>
                         <p>Cuenta {student.numero_cuenta}</p>
                         <span className="weekly-attendance__current">{currentStatus || "Sin marcar"}</span>
+                        {currentStatus === "Falta justificada" && <MakeupAttendanceBadge value={getMakeupOutcome(student.asistencias, selectedSemana)} />}
                       </div>
                       <div className="weekly-attendance__statuses" role="group" aria-label={`Asistencia de ${student.nombre_completo || student.numero_cuenta}`}>
                         {statuses.map(status => (
