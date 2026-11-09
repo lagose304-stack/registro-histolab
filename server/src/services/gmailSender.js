@@ -18,7 +18,7 @@ async function accessToken() {
   try { return await refreshing; } finally { refreshing = null; }
 }
 export async function sendActivationEmail(email, pin) {
-  if (!gmailReady() || !/^\d{6}$/.test(pin) || /[\r\n]/.test(email) || /[\r\n]/.test(process.env.GMAIL_SENDER)) throw new Error("EMAIL_UNAVAILABLE");
+  if (!gmailReady() || !/^(?:\d{6}|\d{8})$/.test(pin) || /[\r\n]/.test(email) || /[\r\n]/.test(process.env.GMAIL_SENDER)) throw new Error("EMAIL_UNAVAILABLE");
   const body = `Tu código para crear o restablecer tu contraseña de Registro HistoLab es:\n\n${pin}\n\nVence en 10 minutos y solo puedes utilizarlo una vez.\nNo compartas este código. Si no lo solicitaste, ignora este correo.\n\nRegistro HistoLab`;
   const mime = [`From: Registro HistoLab <${process.env.GMAIL_SENDER}>`,`To: ${email}`,"Subject: Codigo de verificacion de Registro HistoLab","MIME-Version: 1.0","Content-Type: text/plain; charset=UTF-8","Content-Transfer-Encoding: base64","",Buffer.from(body).toString("base64")].join("\r\n");
   const response = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", { method: "POST", signal: AbortSignal.timeout(15_000),

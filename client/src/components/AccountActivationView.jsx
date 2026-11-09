@@ -62,10 +62,10 @@ export default function AccountActivationView({perfil,onClose,purpose="activatio
       {status.turnstileSiteKey&&<Turnstile siteKey={status.turnstileSiteKey} onToken={setCaptcha} reset={captchaReset}/>}
       <button className="histolab-login__submit" disabled={busy||Boolean(status.turnstileSiteKey&&!captcha)}>{busy?"Enviando código…":"Enviar código"}</button></form>}
       <small>Usa el correo registrado en tu cuenta. Si necesitas corregirlo, consulta al titular de tu sección o a Administración General.</small></>}
-    {phase==="pin"&&<><p>Si el correo <strong>{email}</strong> corresponde a una cuenta disponible para este proceso, recibirás un código de seis cifras. Revisa también la carpeta de spam.</p>
-      <form onSubmit={e=>{e.preventDefault();verify();}} aria-busy={busy}><label className="histolab-login__field">Código de verificación<input className="account-activation__pin" type="text" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} required value={pin} disabled={busy||!seconds} onChange={e=>setPin(e.target.value.replace(/\D/g,""))}/></label>
+    {phase==="pin"&&<><p>Si el correo <strong>{email}</strong> corresponde a una cuenta disponible para este proceso, recibirás un código de verificación. Revisa también la carpeta de spam.</p>
+      <form onSubmit={e=>{e.preventDefault();verify();}} aria-busy={busy}><label className="histolab-login__field">Código de verificación<input className="account-activation__pin" type="text" inputMode="numeric" autoComplete="one-time-code" pattern="([0-9]{6}|[0-9]{8})" maxLength={8} required value={pin} disabled={busy||!seconds} onChange={e=>setPin(e.target.value.replace(/\D/g,""))}/></label>
       <small>{seconds?`El código vence en ${Math.floor(seconds/60)}:${String(seconds%60).padStart(2,"0")}.`:"El código ha vencido. Solicita uno nuevo."}</small>
-      <button className="histolab-login__submit" disabled={busy||pin.length!==6||!seconds}>{busy?"Verificando…":"Verificar código"}</button></form>
+      <button className="histolab-login__submit" disabled={busy||![6,8].includes(pin.length)||!seconds}>{busy?"Verificando…":"Verificar código"}</button></form>
       {!wait&&status?.turnstileSiteKey&&<Turnstile siteKey={status.turnstileSiteKey} onToken={setCaptcha} reset={captchaReset}/>}
       <button type="button" className="account-activation__back" disabled={busy||wait>0||Boolean(status?.turnstileSiteKey&&!captcha)} onClick={send}>{wait?`Podrás reenviar en ${wait} s`:"Reenviar código"}</button></>}
     {phase==="password"&&<><p>Correo verificado. Elige una contraseña personal de al menos 12 caracteres y guárdala en un lugar seguro.</p><form onSubmit={e=>{e.preventDefault();save();}} aria-busy={busy}>

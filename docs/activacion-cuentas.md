@@ -1,5 +1,10 @@
 # Activación de cuentas por correo
 
+## Corrección de códigos y diagnóstico · 9 de noviembre de 2026
+
+Supabase genera actualmente códigos de ocho cifras. La API, Gmail y el formulario aceptan códigos de seis u ocho cifras para conservar compatibilidad; Auth sigue validando el código completo. Las pruebas aisladas se ejecutan con ambas longitudes (`TEST_ACTIVATION_OTP_LENGTH=8` para ocho).
+
+Por autorización del usuario, `ACCOUNT_ACTIVATION_RATE_LIMITS_ENABLED=false` pausa temporalmente los límites de solicitudes por correo e IP durante la incidencia. El valor ausente o `true` los activa. Se conservan Turnstile, el presupuesto global de correo, el vencimiento, los intentos de PIN y los desafíos de un uso. Volver a `true` al cerrar la incidencia. No se borran contadores ni se reinician contraseñas.
 ## Acceso estudiantil exclusivo con Auth · 9 de noviembre de 2026
 
 Se retiró la columna `contrasena` de las cinco tablas estudiantiles y el acceso con contraseñas históricas. Las cuentas sin identidad Auth, correo o activación completa requieren primer ingreso por correo, aunque una bandera histórica indique lo contrario. El cambio de contraseña continúa usando únicamente Auth. Los correos faltantes se completan manualmente en Editar estudiante; nunca se sustituye un correo real por un valor inventado.

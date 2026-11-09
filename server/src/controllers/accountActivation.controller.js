@@ -6,11 +6,11 @@ import { clearInstructorAuthCache } from "./auth.controller.js";
 
 const TABLES = ["instructores","estudiantes_medicina","estudiantes_enfermeria","estudiantes_odontologia","estudiantes_microbiologia","estudiantes_nutricion"];
 const CHALLENGES = "account_activation_challenges";
-const GENERIC = "Si el correo corresponde a una cuenta disponible para este proceso, recibirás un código de seis cifras. Si no llega, consulta al titular de tu sección.";
+const GENERIC = "Si el correo corresponde a una cuenta disponible para este proceso, recibirás un código de verificación. Si no llega, consulta al titular de tu sección.";
 const hash = value => crypto.createHmac("sha256",process.env.JWT_SECRET).update(value).digest("hex");
 const reply = (res,status,message,extra={}) => res.status(status).json({success:status<400,message,...extra});
 const ready = () => isSupabaseConfigured && gmailReady() && process.env.ACCOUNT_ACTIVATION_ENABLED === "true" && (process.env.NODE_ENV !== "production" || Boolean(process.env.TURNSTILE_SECRET_KEY && process.env.TURNSTILE_SITE_KEY));
-async function rpc(name,args) { const {data,error}=await supabase.rpc(name,args); if(error)throw new Error("ACTIVATION_STORAGE_UNAVAILABLE"); return data; }
+async function rpc(name,args) { const {data,error}=await supabase.rpc(name,args); if(error){ console.error("[activation] storage",name,error.code||"UNKNOWN"); throw new Error("ACTIVATION_STORAGE_UNAVAILABLE"); } return data; }
 async function action(name,id,nonce=null,grant=null) { return rpc("account_activation_action",{p_action:name,p_id:id,p_nonce:nonce,p_grant:grant}); }
 async function profile(table,id) { if(!TABLES.includes(table))throw Error("INVALID_TABLE");const {data,error}=await supabase.from(table).select("*").eq("id",id).eq("activo",true).maybeSingle();if(error)throw error;return data; }
 const pending = row => row && !row.activation_completed_at;
@@ -35,8 +35,10 @@ export async function requestActivation(req,res) {
       const expectedHostname=process.env.TURNSTILE_EXPECTED_HOSTNAME||(process.env.NODE_ENV==="production"?"registrohistolab.pages.dev":null);
       if(!captcha.ok||result.success!==true||(expectedHostname&&result.hostname!==expectedHostname))return reply(res,400,"Completa la verificación de seguridad e inténtalo nuevamente.");
     }
-    const gate=await rpc("account_activation_rate",{p_email:hash(email),p_ip:hash(ip)});
-    if(!gate?.allowed){res.set("Retry-After",String(gate?.retry_after||60));return reply(res,429,"Espera antes de solicitar otro código.");}
+    if(process.env.ACCOUNT_ACTIVATION_RATE_LIMITS_ENABLED !== "false"){
+      const gate=await rpc("account_activation_rate",{p_email:hash(email),p_ip:hash(ip)});
+      if(!gate?.allowed){res.set("Retry-After",String(gate?.retry_after||60));return reply(res,429,"Espera antes de solicitar otro código.");}
+    }
     const tables=kind==="INSTRUCTOR"?["instructores"]:TABLES.slice(1);
     const matches=(await Promise.all(tables.map(async table=>{const {data,error}=await supabase.from(table).select("*").eq("correo",email).eq("activo",true);if(error)throw error;return (data||[]).map(row=>({row,table}));}))).flat();
     // Siempre devuelve un identificador aleatorio: no revela qué correos existen.
@@ -52,7 +54,7 @@ export async function requestActivation(req,res) {
       if(created.error)throw Error("AUTH_PROVISION_UNAVAILABLE");
       generated=await supabase.auth.admin.generateLink({type:"recovery",email});
     }
-    if(generated.error||!generated.data?.user?.id||!/^\d{6}$/.test(generated.data.properties?.email_otp||""))throw Error("OTP_UNAVAILABLE");
+    if(generated.error||!generated.data?.user?.id||!/^(?:\d{6}|\d{8})$/.test(generated.data.properties?.email_otp||""))throw Error("OTP_UNAVAILABLE");
     const actualId=generated.data.user.id;
     if(authId&&authId!==actualId)throw Error("AUTH_IDENTITY_MISMATCH");
     authId=actualId;
@@ -66,13 +68,13 @@ export async function requestActivation(req,res) {
     catch { await action("cancel",id);return reply(res,503,"No pudimos enviar el correo. Intenta nuevamente más tarde."); }
     const sent=await action("sent",id);if(!sent?.allowed)throw Error("CHALLENGE_NOT_READY");
     return reply(res,200,GENERIC,{challengeId:id,expiresIn:600,resendAfter:60});
-  }catch{return reply(res,503,"No pudimos solicitar el código en este momento. Intenta nuevamente.");}
+  }catch(error){ const known=["ACTIVATION_STORAGE_UNAVAILABLE","AUTH_PROVISION_UNAVAILABLE","OTP_UNAVAILABLE","AUTH_IDENTITY_MISMATCH","AUTH_LINK_UNAVAILABLE","CHALLENGE_NOT_READY"]; console.error("[activation] request failed",known.includes(error?.message)?error.message:"PROVIDER_OR_PROFILE_UNAVAILABLE", /^[A-Z0-9_]{3,40}$/i.test(error?.code||"")?error.code:""); return reply(res,503,"No pudimos solicitar el código en este momento. Intenta nuevamente.");}
 }
 
 export async function verifyActivation(req,res) {
   res.set("Cache-Control","no-store");
   const {challengeId,pin}=req.body||{};
-  if(typeof pin!=="string"||!/^\d{6}$/.test(pin))return reply(res,400,"Ingresa las seis cifras del código.");
+  if(typeof pin!=="string"||!/^(?:\d{6}|\d{8})$/.test(pin))return reply(res,400,"Ingresa el código de 6 u 8 cifras que recibiste.");
   let client;
   const lease=crypto.randomUUID();
   try{
