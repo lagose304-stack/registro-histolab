@@ -21,23 +21,17 @@
 .section-awards__button:hover:not(:disabled) { border-color: #427d98; background: #f0f7fa; }
 .section-awards__button--gold:hover:not(:disabled) { background: #704c0c; border-color: #704c0c; }
 .section-awards button:disabled { opacity: .55; cursor: not-allowed; }
-.section-awards__stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .6rem; }
+.section-awards__stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .6rem; }
 .section-awards__stats > div { padding: .85rem; border: 1px solid #b4c7d3; border-radius: .8rem; background: #fff; min-width: 0; }
 .section-awards__stats svg { color: #80601f; margin-bottom: .4rem; }
 .section-awards__stats dt { color: #526b7d; font-size: .76rem; }
 .section-awards__stats dd { font-size: clamp(1.1rem, 3vw, 1.6rem); font-weight: 800; margin-top: .35rem; font-variant-numeric: tabular-nums; }
 .section-awards__stats small { display: block; color: #5c7280; font-size: .72rem; font-weight: 500; }
 .section-awards__stats small, .section-awards__student-score small { margin-left: .2rem; }
-.section-awards__method { border: 1px solid #d4c6a3; border-radius: .75rem; background: #fffcf3; }
 .section-awards summary { display: flex; align-items: center; justify-content: space-between; gap: .6rem; list-style: none; cursor: pointer; min-height: 46px; font-size: .84rem; font-weight: 700; }
 .section-awards summary::-webkit-details-marker { display: none; }
 .section-awards summary > svg { flex: none; transition: transform .15s ease; }
 .section-awards details[open] > summary > svg { transform: rotate(180deg); }
-.section-awards__method summary { padding: .75rem 1rem; color: #755617; }
-.section-awards__method summary span { display: flex; align-items: center; gap: .5rem; }
-.section-awards__method summary span svg { flex: none; }
-.section-awards__method > div { padding: 0 1rem 1rem; font-size: .84rem; line-height: 1.7; color: #5d6670; max-width: 75rem; }
-.section-awards__method ul { padding-left: 1.25rem; margin: .6rem 0; }
 .section-awards__section-heading { margin-bottom: .9rem; }
 .section-awards__section-heading h3 { display: flex; align-items: center; gap: .5rem; font-size: 1.15rem; color: #173d54; }
 .section-awards__section-heading h3 svg { color: #966b19; }
@@ -59,7 +53,6 @@
 .section-awards__podium-totals { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .35rem; border-top: 1px solid #c5c5b4; margin-top: .85rem !important; padding-top: .75rem; }
 .section-awards__podium-totals dt { color: #536876; font-size: .7rem; }
 .section-awards__podium-totals dd { font-size: .85rem; font-weight: 750; margin-top: .25rem; }
-.section-awards__bonus { display: flex; align-items: center; gap: .3rem; font-size: .7rem; color: #78580d; margin-top: .8rem; }
 .section-awards__directory { min-width: 0; }
 .section-awards__view { display: inline-flex; gap: .2rem; background: #e6eef3; border: 1px solid #a7bfce; padding: .25rem; border-radius: .65rem; }
 .section-awards__view button, .section-awards__filter-options button { display: flex; align-items: center; justify-content: center; gap: .4rem; min-height: 42px; padding: .5rem .75rem; font-size: .8rem; font-weight: 750; color: #4d687b; border: 1px solid transparent; border-radius: .45rem; background: transparent; cursor: pointer; }
@@ -93,7 +86,6 @@
 .section-awards__totals dt { display: flex; gap: .3rem; align-items: center; color: #516c7d; font-size: .7rem; }
 .section-awards__totals dt svg { display: none; flex: none; }
 .section-awards__totals dd { font-size: .95rem; font-weight: 800; margin-top: .35rem; font-variant-numeric: tabular-nums; }
-.section-awards .section-awards__bonus-note { display: flex; gap: .3rem; align-items: center; color: #786022; font-size: .73rem; margin: .7rem 0; }
 .section-awards__detail { border-top: 1px solid #d6e1e8; }
 .section-awards__detail summary { color: #216385; font-size: .78rem; padding: .3rem 0; }
 .section-awards__breakdown { display: grid; gap: .8rem; padding-top: .5rem; }
@@ -142,7 +134,6 @@
   .section-awards__ranking--cards { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .section-awards__ranking--list .section-awards__student { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); align-items: center; gap: .6rem 1.5rem; }
   .section-awards__ranking--list .section-awards__totals { margin-top: 0 !important; }
-  .section-awards__ranking--list .section-awards__bonus-note { margin: 0; }
   .section-awards__ranking--list .section-awards__detail { grid-column: 1 / -1; }
 }
 @media (prefers-reduced-motion: reduce) {

@@ -2741,24 +2741,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                               Reactivo {qIdx + 1} de {reviewingSubmission.quiz.preguntas.length}
                             </span>
 
-                            {isBonus && (
-                              <span
-                                style={{
-                                  display: "inline-flex",
-                                  alignItems: "center",
-                                  gap: "0.25rem",
-                                  background: "#ffffff",
-                                  color: "#b45309",
-                                  border: "1px solid #fde68a",
-                                  padding: "0.2rem 0.55rem",
-                                  borderRadius: "9999px",
-                                  fontSize: "0.72rem",
-                                  fontWeight: 900
-                                }}
-                              >
-                                +1.0 pt para Premios
-                              </span>
-                            )}
+
                           </div>
                         </div>
 

@@ -192,7 +192,7 @@ export default function ReviewQuizSubmissionsView({
     const weeks = [];
     // Priorizar semanas que tienen prueba creada
     const quizWeeks = new Set(sectionQuizzes.map((q) => Number(q.numero_semana)));
-    
+
     // Agregar semanas configuradas
     semanasConfig.forEach((s) => {
       const num = Number(s.numero_semana);
@@ -1135,7 +1135,7 @@ export default function ReviewQuizSubmissionsView({
                       }}
                     >
                       <span style={{ fontSize: "0.72rem", fontWeight: 800, color: "#b45309" }}>
-                        ⭐ Puntaje con Bonus (Premios):
+                        Puntaje bruto de la prueba:
                       </span>
                       <strong style={{ fontSize: "0.88rem", fontWeight: 900, color: "#b45309" }}>
                         {Number(entrega.nota_real || entrega.nota_con_bonus || entrega.auditoria?.nota_real).toFixed(3)} pts
@@ -1617,24 +1617,7 @@ export default function ReviewQuizSubmissionsView({
                                 Puntos reactivo: +{qEarned.toFixed(3)} / {qMaxPts.toFixed(3)} pts
                               </span>
 
-                              {isBonus && (
-                                <span
-                                  style={{
-                                    display: "inline-flex",
-                                    alignItems: "center",
-                                    gap: "0.25rem",
-                                    background: "#ffffff",
-                                    color: "#b45309",
-                                    border: "1px solid #fde68a",
-                                    padding: "0.2rem 0.55rem",
-                                    borderRadius: "9999px",
-                                    fontSize: "0.72rem",
-                                    fontWeight: 900
-                                  }}
-                                >
-                                  +1.0 pt para Premios
-                                </span>
-                              )}
+
                             </div>
                           </div>
 
@@ -2345,7 +2328,7 @@ export default function ReviewQuizSubmissionsView({
                   </div>
                 </div>
 
-                {/* Tarjeta 2: Puntaje para Cuadro de Premios (con Bonus) */}
+                {/* Tarjeta 2: Puntaje bruto de la prueba */}
                 <div
                   style={{
                     padding: "0.45rem 0.85rem",
@@ -2368,7 +2351,7 @@ export default function ReviewQuizSubmissionsView({
                           lineHeight: 1.15
                         }}
                       >
-                        Puntaje Premios {Number(notaRealInput) > 5.0 ? "(Bonus)" : ""}
+                        Puntaje bruto de la prueba
                       </strong>
                       <span
                         style={{
@@ -2376,7 +2359,7 @@ export default function ReviewQuizSubmissionsView({
                           color: Number(notaRealInput) > 5.0 ? "#b45309" : "#64748b"
                         }}
                       >
-                        Cuadro de Honor de Sección
+                        La clasificación usa las notas oro oficiales
                       </span>
                     </div>
                   </div>
@@ -2587,7 +2570,7 @@ export default function ReviewQuizSubmissionsView({
                     ¡Revisión Rápida Completada!
                   </h2>
                   <p style={{ margin: "0.5rem 0 0", fontSize: "0.92rem", color: "#475569", lineHeight: 1.55 }}>
-                    Has evaluado con éxito todas las 6 preguntas (incluyendo la pregunta Bonus) para los <strong>{entregasSemana.length} estudiantes</strong>. Todas las notas oficiales (tope 5.000 pts) y los puntajes de premios han sido guardados individualmente para cada alumno.
+                    Has evaluado con éxito todas las 6 preguntas (incluyendo la pregunta Bonus) para los <strong>{entregasSemana.length} estudiantes</strong>. Todas las notas oficiales (tope 5.000 pts) y los puntajes de la prueba han sido guardados individualmente para cada alumno.
                   </p>
                 </div>
 
@@ -2675,7 +2658,7 @@ export default function ReviewQuizSubmissionsView({
                   </span>
                   <div style={{ fontSize: "0.95rem", fontWeight: 800, color: "#0f172a", marginTop: "0.15rem" }}>
                     Pregunta {quickQuestionIdx + 2} de {(quizSemanal?.preguntas || []).length}
-                    {quickQuestionIdx + 1 === 5 && " • ⭐ Reactivo BONUS para Premios"}
+                    {quickQuestionIdx + 1 === 5 && " • ⭐ Reactivo adicional"}
                   </div>
                 </div>
 
@@ -2849,7 +2832,7 @@ export default function ReviewQuizSubmissionsView({
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "0.6rem" }}>
                       <div style={{ display: "flex", alignItems: "center", gap: "0.6rem" }}>
                         <h2 style={{ margin: 0, fontSize: "1.3rem", fontWeight: 900, color: "#0f172a" }}>
-                          {isBonus ? "⭐ PREGUNTA 6 (BONUS PREMIOS)" : `PREGUNTA ${quickQuestionIdx + 1}`}
+                          {isBonus ? "⭐ PREGUNTA 6 (ADICIONAL)" : `PREGUNTA ${quickQuestionIdx + 1}`}
                         </h2>
                         <span
                           style={{

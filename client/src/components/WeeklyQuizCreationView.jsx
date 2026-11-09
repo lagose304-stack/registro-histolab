@@ -765,7 +765,6 @@ export default function WeeklyQuizCreationView({
           <fieldset data-grade-grid className="section-quizzes__fieldset quiz-builder__workspace" disabled={busy}>
             {quizData.preguntas.filter((_,index)=>index===activeQuestion).map(question => <div key={question.id} className="quiz-builder__question">
               <header><div><p className="user-directory__eyebrow">Paso {activeQuestion + 1} de 6</p><h3>{activeQuestion === 5 ? "Pregunta 6 · Bonus" : `Pregunta ${activeQuestion + 1}`}</h3></div><span className="section-quizzes__badge">{Number(question.puntos).toFixed(3)} / 1.000 punto</span></header>
-              {activeQuestion === 5 && <p className="section-quizzes__bonus-note">Esta pregunta aporta hasta 1 punto extra a Premios de la sección.</p>}
               <div className="quiz-builder__items-heading"><div><h4>Configura tus apartados</h4><p>Cada apartado tiene su instrucción, formato y puntos.</p></div>{question.items?.length > 0 && <button type="button" className="user-button" onClick={()=>handleDistributeSubItemPoints(question.id)}><SlidersHorizontal size={16} aria-hidden="true" /> Repartir 1 punto</button>}</div>
               {Number(question.puntos)>1.001 && <p className="user-dialog__error" role="alert">La suma supera 1 punto. Ajusta los valores o usa Repartir 1 punto.</p>}
               {(question.items || []).map((item,index) => <QuizItemEditor key={item.id} item={item} index={index} onChange={replacement=>handleReplaceSubItem(question.id,item.id,replacement)} onRemove={()=>handleRemoveSubItem(question.id,item.id)} />)}
