@@ -2,6 +2,8 @@
 
 ## Corrección de códigos y diagnóstico · 9 de noviembre de 2026
 
+Incidencia resuelta y recorrido real confirmado por el usuario. Los límites de solicitudes están reactivados: una solicitud por correo cada 600 segundos, compartida entre activación y recuperación. `activationRequestLimit.js` reserva el plazo mediante la clave única de `account_activation_limits` y actualización condicionada para resistir concurrencia entre servidores. Sustituye para este flujo los antiguos límites de minuto/hora/día. El formulario recibe `resendAfter=600`; una respuesta 429 incluye el tiempo restante en `Retry-After` y `retryAfter`. Se reinician una sola vez los contadores de solicitudes existentes al publicar; se conservan los desafíos, cuentas, contraseñas y el presupuesto global de Gmail. La pausa de diagnóstico descrita debajo queda como historial.
+
 Supabase genera actualmente códigos de ocho cifras. La API, Gmail y el formulario aceptan códigos de seis u ocho cifras para conservar compatibilidad; Auth sigue validando el código completo. Las pruebas aisladas se ejecutan con ambas longitudes (`TEST_ACTIVATION_OTP_LENGTH=8` para ocho).
 
 Por autorización del usuario, `ACCOUNT_ACTIVATION_RATE_LIMITS_ENABLED=false` pausa temporalmente los límites de solicitudes por correo e IP durante la incidencia. El valor ausente o `true` los activa. Se conservan Turnstile, el presupuesto global de correo, el vencimiento, los intentos de PIN y los desafíos de un uso. Volver a `true` al cerrar la incidencia. No se borran contadores ni se reinician contraseñas.

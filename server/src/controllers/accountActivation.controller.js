@@ -3,6 +3,7 @@ import { supabase, isSupabaseConfigured, createSupabaseLoginClient } from "../db
 import { gmailReady, sendActivationEmail } from "../services/gmailSender.js";
 import { normalizeAccountEmail, validAccountEmail, validActivationPassword } from "../../../shared/accountActivation.mjs";
 import { clearInstructorAuthCache } from "./auth.controller.js";
+import { reserveActivationRequest, ACTIVATION_REQUEST_WAIT_SECONDS } from "../services/activationRequestLimit.js";
 
 const TABLES = ["instructores","estudiantes_medicina","estudiantes_enfermeria","estudiantes_odontologia","estudiantes_microbiologia","estudiantes_nutricion"];
 const CHALLENGES = "account_activation_challenges";
@@ -36,14 +37,14 @@ export async function requestActivation(req,res) {
       if(!captcha.ok||result.success!==true||(expectedHostname&&result.hostname!==expectedHostname))return reply(res,400,"Completa la verificación de seguridad e inténtalo nuevamente.");
     }
     if(process.env.ACCOUNT_ACTIVATION_RATE_LIMITS_ENABLED !== "false"){
-      const gate=await rpc("account_activation_rate",{p_email:hash(email),p_ip:hash(ip)});
-      if(!gate?.allowed){res.set("Retry-After",String(gate?.retry_after||60));return reply(res,429,"Espera antes de solicitar otro código.");}
+      const gate=await reserveActivationRequest(supabase,hash(email));
+      if(!gate?.allowed){res.set("Retry-After",String(gate.retry_after));return reply(res,429,"Espera 10 minutos entre solicitudes de código.",{retryAfter:gate.retry_after});}
     }
     const tables=kind==="INSTRUCTOR"?["instructores"]:TABLES.slice(1);
     const matches=(await Promise.all(tables.map(async table=>{const {data,error}=await supabase.from(table).select("*").eq("correo",email).eq("activo",true);if(error)throw error;return (data||[]).map(row=>({row,table}));}))).flat();
     // Siempre devuelve un identificador aleatorio: no revela qué correos existen.
     const id=crypto.randomUUID();
-    if(matches.length!==1||(purpose==="activation"&&!pending(matches[0].row)))return reply(res,200,GENERIC,{challengeId:id,expiresIn:600,resendAfter:60});
+    if(matches.length!==1||(purpose==="activation"&&!pending(matches[0].row)))return reply(res,200,GENERIC,{challengeId:id,expiresIn:600,resendAfter:process.env.ACCOUNT_ACTIVATION_RATE_LIMITS_ENABLED === "false" ? 60 : ACTIVATION_REQUEST_WAIT_SECONDS});
     const {row,table}=matches[0];
     const budget=await rpc("account_activation_mail_budget",{});
     if(!budget?.allowed)return reply(res,503,"El servicio de correo alcanzó su límite de envíos. Intenta más tarde.");
@@ -63,11 +64,11 @@ export async function requestActivation(req,res) {
       if(linked.error||!linked.data?.length)throw Error("AUTH_LINK_UNAVAILABLE");
     }
     const issued=await rpc("account_activation_issue",{p_id:id,p_table:table,p_profile:row.id,p_auth:authId,p_email:email});
-    if(!issued?.allowed)return reply(res,200,GENERIC,{challengeId:crypto.randomUUID(),expiresIn:600,resendAfter:60});
+    if(!issued?.allowed)return reply(res,200,GENERIC,{challengeId:crypto.randomUUID(),expiresIn:600,resendAfter:process.env.ACCOUNT_ACTIVATION_RATE_LIMITS_ENABLED === "false" ? 60 : ACTIVATION_REQUEST_WAIT_SECONDS});
     try { await sendActivationEmail(email,generated.data.properties.email_otp); }
     catch { await action("cancel",id);return reply(res,503,"No pudimos enviar el correo. Intenta nuevamente más tarde."); }
     const sent=await action("sent",id);if(!sent?.allowed)throw Error("CHALLENGE_NOT_READY");
-    return reply(res,200,GENERIC,{challengeId:id,expiresIn:600,resendAfter:60});
+    return reply(res,200,GENERIC,{challengeId:id,expiresIn:600,resendAfter:process.env.ACCOUNT_ACTIVATION_RATE_LIMITS_ENABLED === "false" ? 60 : ACTIVATION_REQUEST_WAIT_SECONDS});
   }catch(error){ const known=["ACTIVATION_STORAGE_UNAVAILABLE","AUTH_PROVISION_UNAVAILABLE","OTP_UNAVAILABLE","AUTH_IDENTITY_MISMATCH","AUTH_LINK_UNAVAILABLE","CHALLENGE_NOT_READY"]; console.error("[activation] request failed",known.includes(error?.message)?error.message:"PROVIDER_OR_PROFILE_UNAVAILABLE", /^[A-Z0-9_]{3,40}$/i.test(error?.code||"")?error.code:""); return reply(res,503,"No pudimos solicitar el código en este momento. Intenta nuevamente.");}
 }
 

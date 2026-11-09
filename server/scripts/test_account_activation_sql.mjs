@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import {readFile} from "node:fs/promises";
 import {createRequire} from "node:module";
 import path from "node:path";
+import {reserveActivationRequest} from "../src/services/activationRequestLimit.js";
+import {activationLimitFixture} from "./activation_limit_fixture.mjs";
 const require=createRequire(path.resolve(process.env.HISTOLAB_PGLITE_DIR||".","package.json"));
 const {PGlite}=require("@electric-sql/pglite");const db=new PGlite();
 const id=n=>`00000000-0000-4000-8000-${String(n).padStart(12,"0")}`;
@@ -26,6 +28,13 @@ try{
  await assert.rejects(db.query("INSERT INTO estudiantes_nutricion(id,correo) VALUES($1,'ALUMNO@example.invalid')",[id(4)]),{code:"23505"});
  const rate=async()=>(await db.query("SELECT account_activation_rate('email-hash','ip-hash') result")).rows[0].result;
  assert((await rate()).allowed);assert.equal((await rate()).allowed,false);
+ const clock=Date.now(),limitDb=activationLimitFixture(db);
+ const simultaneous=await Promise.all(Array.from({length:8},()=>reserveActivationRequest(limitDb,'cooldown-test',clock)));
+ assert.equal(simultaneous.filter(x=>x.allowed).length,1,'Solo una solicitud concurrente reserva el correo');
+ assert.equal((await reserveActivationRequest(limitDb,'cooldown-test',clock)).retry_after,600);
+ assert.equal((await reserveActivationRequest(limitDb,'cooldown-test',clock+599000)).retry_after,1);
+ assert.equal((await reserveActivationRequest(limitDb,'cooldown-test',clock+600000)).allowed,true,'Se permite reintentar exactamente a los diez minutos');
+ assert.equal((await reserveActivationRequest(limitDb,'other-email',clock)).allowed,true);
  const issue=async n=>(await db.query("SELECT account_activation_issue($1,'estudiantes_medicina',$2,$3,'alumno@example.invalid') result",[id(n),id(3),id(2)])).rows[0].result;
  assert((await issue(10)).allowed);assert((await action("sent",10)).allowed);
  for(let attempt=0;attempt<5;attempt++){assert((await action("verify",10,"lease"+attempt)).allowed);assert.equal((await action("verify",10,"overlap")).allowed,false);assert((await action("invalid",10,"lease"+attempt)).allowed);}

@@ -17,8 +17,7 @@ run_worker_first = ["/api/*"]
 NODE_ENV = "production"
 PORT = "8080"
 ACCOUNT_ACTIVATION_ENABLED = "true"
-# Temporal durante el diagnóstico; volver a "true" al cerrar la incidencia.
-ACCOUNT_ACTIVATION_RATE_LIMITS_ENABLED = "false"
+ACCOUNT_ACTIVATION_RATE_LIMITS_ENABLED = "true"
 SUPABASE_URL = "https://dghmrqyxrjgxceolqplt.supabase.co"
 
 # SUPABASE_KEY y JWT_SECRET se configuran como secretos de Cloudflare.

@@ -20,6 +20,7 @@ Los mapas describen el acceso que presenta la interfaz. Para confirmar la autori
 ## Flujos que cruzan módulos
 
 - **Primer ingreso y contraseñas.** [Activación y recuperación de cuentas](activacion-cuentas.md) describe el correo registrado, PIN, Supabase Auth, envío con Gmail, «Olvidé mi contraseña» y la transición de los perfiles históricos. Ambos procesos usan `/api/auth/activation/*`; `purpose` distingue la solicitud de primer ingreso de la recuperación.
+  `server/src/services/activationRequestLimit.js` comparte entre ambos procesos una espera de diez minutos por correo, persistida en `account_activation_limits`; el controlador entrega el plazo al formulario y conserva la verificación de seguridad y el presupuesto de correo.
 
 - **Eliminación de estudiantes.** El panel llama al controlador de estudiantes y a `server/src/services/studentAccountDeletion.js`. La eliminación de Auth activa las cascadas y la limpieza transaccional de `20261109021000_student_account_deletion.sql`; una autorización privada protege la identidad de otros perfiles. `20261109020000_student_auth_only.sql` retira la columna de contraseñas históricas. Las comprobaciones aisladas están en `test_student_deletion_api.mjs` y `test_student_deletion_sql.mjs`.
 
