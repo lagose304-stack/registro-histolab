@@ -303,3 +303,13 @@
   .histolab-login__specimen { bottom: -7rem; }
   .histolab-login__footer { grid-column: 1 / -1; }
 }
+
+.histolab-login__activation-link { display:flex; align-items:center; justify-content:center; min-height:44px; width:100%; padding:.65rem 1rem; border:1px solid transparent; border-radius:.75rem; background:transparent; color:#126586; font:inherit; font-size:.875rem; font-weight:600; line-height:1.5; text-align:center; cursor:pointer; transition:background-color .15s ease,border-color .15s ease; }
+.histolab-login__activation-link:hover:not(:disabled) { background:#edf6fb; color:#094e70; }
+.histolab-login__activation-link + .histolab-login__activation-link { border-color:#c6dfe9; background:#f2f8fb; }
+.histolab-login__activation-link + .histolab-login__activation-link:hover:not(:disabled) { border-color:#88b9ce; background:#e5f2f8; }
+.histolab-login__activation-link:focus-visible { outline:3px solid #0284c7; outline-offset:3px; }
+.histolab-login__activation-link:disabled { opacity:.55; cursor:default; }
+@media (prefers-reduced-motion:reduce) { .histolab-login__activation-link { transition:none; } }
+
+

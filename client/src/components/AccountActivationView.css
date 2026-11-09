@@ -19,4 +19,4 @@
 .account-activation__notice { display:grid; gap:.75rem; padding:.85rem; border:1px solid #bfd5e2; border-radius:.75rem; background:#f3f8fb; }
 .account-activation__notice button { min-height:44px; display:flex; align-items:center; justify-content:center; gap:.5rem; border:1px solid #adcbdc; border-radius:.6rem; background:#fff; color:#175a7c; cursor:pointer; font:inherit; font-size:.85rem; }
 .account-activation__captcha { min-width:0; width:100%; }
-.histolab-login__activation-link { min-height:44px; padding:.5rem; background:transparent; border:0; color:#126586; text-decoration:underline; text-underline-offset:3px; font:inherit; font-size:.85rem; cursor:pointer; }
+
