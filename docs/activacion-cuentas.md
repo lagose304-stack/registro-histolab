@@ -2,6 +2,8 @@
 
 ## Corrección de códigos y diagnóstico · 9 de noviembre de 2026
 
+El correo de códigos usa `services/activationEmailTemplate.js`: formato MIME `multipart/alternative`, con versión de texto y HTML UTF-8. La plantilla adapta tablas y estilos integrados a pantallas pequeñas, destaca el código completo y su vigencia, y no necesita imágenes ni recursos externos. `gmailSender.js` conserva el transporte Gmail y la validación de códigos de seis u ocho cifras. `node server/scripts/test_activation_email.mjs` comprueba el MIME, los ceros iniciales y el rechazo de inyección de encabezados; los recorridos de activación prueban ambas versiones del mensaje sin enviar correos reales.
+
 Incidencia resuelta y recorrido real confirmado por el usuario. Los límites de solicitudes están reactivados: una solicitud por correo cada 600 segundos, compartida entre activación y recuperación. `activationRequestLimit.js` reserva el plazo mediante la clave única de `account_activation_limits` y actualización condicionada para resistir concurrencia entre servidores. Sustituye para este flujo los antiguos límites de minuto/hora/día. El formulario recibe `resendAfter=600`; una respuesta 429 incluye el tiempo restante en `Retry-After` y `retryAfter`. Se reinician una sola vez los contadores de solicitudes existentes al publicar; se conservan los desafíos, cuentas, contraseñas y el presupuesto global de Gmail. La pausa de diagnóstico descrita debajo queda como historial.
 
 Supabase genera actualmente códigos de ocho cifras. La API, Gmail y el formulario aceptan códigos de seis u ocho cifras para conservar compatibilidad; Auth sigue validando el código completo. Las pruebas aisladas se ejecutan con ambas longitudes (`TEST_ACTIVATION_OTP_LENGTH=8` para ocho).

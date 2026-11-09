@@ -684,7 +684,7 @@ export const calificarEntrega = async (req, res) => {
     // Calificación oficial: se topa reglamentariamente en 5.000 pts para el cuadro de notas
     let cleanNota = Math.min(5.0, Math.round(numNota * 1000) / 1000);
 
-    // Calificación real: con puntos bonus para el ranking de Premios de la Sección (puede llegar a 6.000 pts o más)
+    // Puntaje bruto histórico; los premios se calculan con las notas oro oficiales.
     const rawBonusVal = nota_real !== undefined ? Number(nota_real) : (nota_con_bonus !== undefined ? Number(nota_con_bonus) : numNota);
     let cleanRealNota = isNaN(rawBonusVal) ? cleanNota : Math.round(rawBonusVal * 1000) / 1000;
 
@@ -760,24 +760,27 @@ export const calificarEntrega = async (req, res) => {
         if (sub.auditoria) {
           updatePayload.auditoria = sub.auditoria;
         }
-        const { error: updErr } = await supabase
+        const { error: updErr, data: saved } = await supabase
           .from("entregas_pruebas")
           .update(updatePayload)
-          .eq("id", entrega_id);
+          .eq("id", entrega_id).select("id");
 
         if (updErr) {
-          if (hasAutomatic) throw updErr;
+          if (hasAutomatic || !["42703","PGRST204"].includes(updErr.code) || !/nota_real|nota_con_bonus/.test(updErr.message || "")) throw updErr;
           // Fallback por si las columnas nota_real / nota_con_bonus aún no existen en la base de datos
           delete updatePayload.nota_real;
           delete updatePayload.nota_con_bonus;
-          await supabase
+          const fallback = await supabase
             .from("entregas_pruebas")
             .update(updatePayload)
-            .eq("id", entrega_id);
+            .eq("id", entrega_id).select("id");
+          if (fallback.error) throw fallback.error;
+          if (fallback.data?.length !== 1) throw new Error("No se confirmó el guardado de la entrega.");
+        } else if (saved?.length !== 1) {
+          throw new Error("No se confirmó el guardado de la entrega.");
         }
       } catch (sbErr) {
-        if (hasAutomatic) throw sbErr;
-        console.warn("Aviso al actualizar entrega en Supabase:", sbErr.message);
+        throw sbErr;
       }
     }
 
@@ -791,27 +794,23 @@ export const calificarEntrega = async (req, res) => {
     }
     if (await syncMakeupSubmission(sub)) return res.json({success:true,message:"Calificación guardada en la sección original del estudiante.",data:sub});
     // Sincronizar nota directamente en la ficha del estudiante (prueba_X = cleanNota)
-    try {
+    await updateEstudianteGradeDirect(
+      sub.seccion_id,
+      sub.numero_cuenta,
+      sub.carrera || carrera || "Medicina",
+      `prueba_${sub.numero_semana}`,
+      cleanNota, true
+    );
+
+    // Si obtuvo nota real con bonus superior a 5.0, sincronizar prueba_X_real
+    if (cleanRealNota > 5.0) {
       await updateEstudianteGradeDirect(
         sub.seccion_id,
         sub.numero_cuenta,
-        carrera || sub.carrera || "Medicina",
-        `prueba_${sub.numero_semana}`,
-        cleanNota
+        sub.carrera || carrera || "Medicina",
+        `prueba_${sub.numero_semana}_real`,
+        cleanRealNota, true
       );
-
-      // Si obtuvo nota real con bonus superior a 5.0, sincronizar prueba_X_real
-      if (cleanRealNota > 5.0) {
-        await updateEstudianteGradeDirect(
-          sub.seccion_id,
-          sub.numero_cuenta,
-          carrera || sub.carrera || "Medicina",
-          `prueba_${sub.numero_semana}_real`,
-          cleanRealNota
-        ).catch(() => {});
-      }
-    } catch (syncErr) {
-      console.warn("Aviso al sincronizar nota en ficha de estudiante:", syncErr.message);
     }
 
     return res.json({

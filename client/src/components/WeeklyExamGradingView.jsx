@@ -404,6 +404,8 @@ export default function WeeklyExamGradingView({
     setSaveError("");
     try {
       const updates = estudiantes.map((est) => ({
+        id: est.id,
+        expected_updated_at: est.updated_at,
         numero_cuenta: est.numero_cuenta,
         notas: est.notas || {},
         asistencias: est.asistencias || {},
@@ -413,8 +415,13 @@ export default function WeeklyExamGradingView({
         total: est.total ?? 0
       }));
 
-      await api.estudiantes.saveBatch(seccion.id, updates, carrera);
-      savedStudents.current = estudiantes;
+      const response = await api.estudiantes.saveBatch(seccion.id, updates, carrera);
+      const confirmed = estudiantes.map(student => {
+        const saved = response.data?.find(row => row.id === student.id && row.numero_cuenta === student.numero_cuenta);
+        return saved ? { ...student, updated_at: saved.updated_at } : student;
+      });
+      setEstudiantes(confirmed);
+      savedStudents.current = confirmed;
       setHasUnsavedChanges(false);
       notifyRef.current(`¡Notas del ${examMeta.label} guardadas con éxito!`, "success");
     } catch (err) {

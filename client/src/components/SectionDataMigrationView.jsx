@@ -619,7 +619,7 @@ export default function SectionDataMigrationView({
             return;
           }
 
-          if ((k.startsWith("prueba_") || k.startsWith("examencito_")) && (numV > 5 || numV < 0)) {
+          if (((k.startsWith("prueba_") && !k.endsWith("_real")) || k.startsWith("examencito_")) && (numV > 5 || numV < 0)) {
             notifyRef.current(
               `Error al guardar: La nota de prueba en ${est.nombre_completo || est.numero_cuenta} (${numV}) supera el máximo de 5.000 puntos.`,
               "error"
@@ -662,6 +662,8 @@ export default function SectionDataMigrationView({
 
     try {
       const updates = estudiantes.map((est) => ({
+        id: est.id,
+        expected_updated_at: est.updated_at,
         numero_cuenta: est.numero_cuenta,
         notas: est.notas || {},
         asistencias: est.asistencias || {},
@@ -673,7 +675,12 @@ export default function SectionDataMigrationView({
 
       const response = await api.estudiantes.saveMigration(seccion.id, updates, carrera);
       if (response?.success === false) throw new Error(response.message || "No se pudieron guardar los datos.");
-      savedStudentsRef.current = estudiantes;
+      const confirmed = estudiantes.map(student => {
+        const saved = response.data?.find(row => row.id === student.id && row.numero_cuenta === student.numero_cuenta);
+        return saved ? { ...student, updated_at: saved.updated_at } : student;
+      });
+      setEstudiantes(confirmed);
+      savedStudentsRef.current = confirmed;
       setEditedAccounts(new Set());
       setSaveMessage("Datos migrados y guardados correctamente.");
       setHasUnsavedChanges(false);

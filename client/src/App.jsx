@@ -210,7 +210,7 @@ export default function App() {
 
         <main className="main-content" style={{ paddingTop: "1rem" }}>
           <Suspense fallback={<PortalSkeleton student />}>
-            <StudentPortalView student={currentStudent} notify={notify} />
+            <StudentPortalView key={`${currentStudent.id}:${currentStudent.carrera}:${currentStudent.seccion_id}:${currentStudent.numero_cuenta}`} student={currentStudent} notify={notify} />
           </Suspense>
         </main>
 

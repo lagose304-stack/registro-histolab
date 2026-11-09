@@ -9,6 +9,7 @@ import StudentDashboard from "./StudentDashboard";
 import "./StudentDashboard.css";
 import { isQuizItemMultiSlot, quizItemSlotCount, quizSlotLabel } from "../../../shared/quizItems.mjs";
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { sameStudentEnrollment } from "../../../shared/studentIdentity.mjs";
 import {
   House,
   GraduationCap,
@@ -126,7 +127,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
         const cached = safeStorage.getItem(`histolab_student_user_${cKey}`);
         if (cached) {
           const parsed = JSON.parse(cached);
-          if (parsed && parsed.numero_cuenta === cKey && parsed.id === student?.id && parsed.seccion_id === student?.seccion_id) {
+          if (sameStudentEnrollment(parsed, student)) {
             return parsed;
           }
         }
@@ -268,8 +269,8 @@ export default function StudentPortalView({ student, notify = () => {} }) {
   useEffect(() => {
     if (student) {
       setCurrentStudentData((prev) => {
-        // Si el estudiante cambió (número de cuenta distinto), descartar completamente el estado anterior
-        if (!prev || prev.numero_cuenta !== student.numero_cuenta) {
+        // Descartar el estado anterior si cambia cualquier parte de la matrícula.
+        if (!sameStudentEnrollment(prev, student)) {
           return student;
         }
         return {
@@ -282,8 +283,8 @@ export default function StudentPortalView({ student, notify = () => {} }) {
     }
   }, [student]);
 
-  const effectiveStudent = currentStudentData || student;
-  const carreraKey = effectiveStudent?.carrera || "Medicina";
+  const effectiveStudent = sameStudentEnrollment(currentStudentData, student) ? currentStudentData : student;
+  const carreraKey = student?.carrera || "Medicina";
   const theme = CARRERA_THEMES[carreraKey] || CARRERA_THEMES.Medicina;
 
   const notas = effectiveStudent?.notas || {};
@@ -306,14 +307,14 @@ export default function StudentPortalView({ student, notify = () => {} }) {
             : Promise.resolve({ data: null })
         ]);
         if (!Array.isArray(resSemanas?.data) || !Array.isArray(resTemario?.data) ||
-          (cuentaKey && (!resStudent?.data || String(resStudent.data.numero_cuenta) !== String(cuentaKey)))) {
+          (cuentaKey && !sameStudentEnrollment(resStudent?.data, student))) {
           throw new Error("La información académica está incompleta.");
         }
         if (isMounted) {
           setSemanasConfig(resSemanas.data);
           setTemario(resTemario.data);
           setConfigPuntajes(resPuntajes?.data || null);
-          if (resStudent?.data && (!cuentaKey || String(resStudent.data.numero_cuenta) === String(cuentaKey))) {
+          if (sameStudentEnrollment(resStudent?.data, student)) {
             setCurrentStudentData(resStudent.data);
             try {
               if (cuentaKey) {
@@ -337,7 +338,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
     return () => {
       isMounted = false;
     };
-  }, [carreraKey, cuentaKey, student?.seccion_id, academicReload]);
+  }, [carreraKey, cuentaKey, student?.id, student?.seccion_id, academicReload]);
 
   // Resolver el ID real de la sección del estudiante con múltiples niveles de contingencia
   const resolveStudentSectionId = useCallback(async () => {

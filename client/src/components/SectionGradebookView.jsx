@@ -485,7 +485,7 @@ export default function SectionGradebookView({
         }
         if (
           (k.startsWith("examencito_") ||
-            k.startsWith("prueba_") ||
+            (k.startsWith("prueba_") && !k.endsWith("_real")) ||
             k.startsWith("Examencito de ") ||
             k.startsWith("Prueba de ")) &&
           numVal > 5
@@ -502,6 +502,8 @@ export default function SectionGradebookView({
     setSavingChanges(true);
     try {
       const updates = estudiantes.map((est) => ({
+        id: est.id,
+        expected_updated_at: est.updated_at,
         numero_cuenta: est.numero_cuenta,
         notas: est.notas || {},
         asistencias: est.asistencias || {},
@@ -511,7 +513,11 @@ export default function SectionGradebookView({
         tercer_examen: est.tercer_examen || 0
       }));
 
-      await api.estudiantes.saveBatch(seccion.id, updates, carrera);
+      const response = await api.estudiantes.saveBatch(seccion.id, updates, carrera);
+      setEstudiantes(previous => previous.map(student => {
+        const saved = response.data?.find(row => row.id === student.id && row.numero_cuenta === student.numero_cuenta);
+        return saved ? { ...student, updated_at: saved.updated_at } : student;
+      }));
       setHasUnsavedChanges(false);
       notify("¡Calificaciones y asistencias guardadas con éxito!", "success");
     } catch (err) {

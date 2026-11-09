@@ -94,6 +94,7 @@ export const sanitizeNotasPayload = (notas = {}) => {
     if (key.startsWith("examencito_")) {
       const semNum = key.replace("examencito_", "");
       key = `prueba_${semNum}`;
+      if (notas[key] !== undefined && notas[key] !== null && notas[key] !== "") continue;
     }
 
     const numVal = Number(val);
@@ -187,7 +188,7 @@ export const getEstudiantesBySeccion = async (req, res) => {
           data: data.map(publicStudent)
         });
       } else if (error) {
-        console.warn(`Aviso al consultar ${tableName}:`, error.message);
+        return res.status(503).json({ success: false, message: "No pudimos consultar las notas de la sección. Intenta nuevamente." });
       }
     }
 
@@ -349,13 +350,13 @@ export const updateEstudiante = async (req, res) => {
       for (const [k, v] of Object.entries(sanitizedNotas)) {
         const numVal = Number(v);
         if (!isNaN(numVal)) {
-          if ((k.startsWith("manual_") || k.startsWith("Manual de ")) && numVal > 1) {
+          if ((k.startsWith("manual_") || k.startsWith("Manual de ")) && (numVal > 1 || numVal < 0)) {
             return res.status(400).json({
               success: false,
               message: `Error académico: La nota de manual no puede ser mayor a 1 punto (máximo 1.000). Se recibió ${numVal} para ${k}.`
             });
           }
-          if ((k.startsWith("prueba_") || k.startsWith("Prueba de ")) && numVal > 5) {
+          if (((k.startsWith("prueba_") && !k.endsWith("_real")) || k.startsWith("Prueba de ")) && (numVal > 5 || numVal < 0)) {
             return res.status(400).json({
               success: false,
               message: `Error académico: La nota de prueba no puede ser mayor a 5 puntos (máximo 5.000). Se recibió ${numVal} para ${k}.`
@@ -495,14 +496,17 @@ export const updateBatchGrades = async (req, res) => {
         item.notas = sanitizeNotasPayload(item.notas);
         for (const [k, v] of Object.entries(item.notas)) {
           const numVal = Number(v);
+          if (/^(manual_|Manual de |prueba_|Prueba de |examen_|primer_examen$|segundo_examen$|tercer_examen$)/.test(k) && !Number.isFinite(numVal)) {
+            return res.status(400).json({success:false,message:"Las calificaciones deben ser números válidos."});
+          }
           if (!isNaN(numVal)) {
-            if ((k.startsWith("manual_") || k.startsWith("Manual de ")) && numVal > 1) {
+            if ((k.startsWith("manual_") || k.startsWith("Manual de ")) && (numVal > 1 || numVal < 0)) {
               return res.status(400).json({
                 success: false,
                 message: `Error académico: La nota de manual no puede ser mayor a 1 punto (máximo 1.000). Se recibió ${numVal} para ${k} en la cuenta ${item.numero_cuenta || 'estudiante'}.`
               });
             }
-            if ((k.startsWith("prueba_") || k.startsWith("Prueba de ")) && numVal > 5) {
+            if (((k.startsWith("prueba_") && !k.endsWith("_real")) || k.startsWith("Prueba de ")) && (numVal > 5 || numVal < 0)) {
               return res.status(400).json({
                 success: false,
                 message: `Error académico: La nota de prueba no puede ser mayor a 5 puntos (máximo 5.000). Se recibió ${numVal} para ${k} en la cuenta ${item.numero_cuenta || 'estudiante'}.`
@@ -513,11 +517,12 @@ export const updateBatchGrades = async (req, res) => {
       }
 
       if (item.total !== undefined) {
+        if (!Number.isFinite(Number(item.total))) return res.status(400).json({success:false,message:"El total debe ser un número válido."});
         item.total = Math.round((Number(item.total) || 0) * 1000) / 1000;
       }
       if (item.primer_examen !== undefined) {
         const ex1 = Number(item.primer_examen);
-        if (!isNaN(ex1) && (ex1 > 20 || ex1 < 0)) {
+        if (!Number.isFinite(ex1) || ex1 > 20 || ex1 < 0) {
           return res.status(400).json({
             success: false,
             message: `Error académico: La nota del primer examen (${ex1}) en la cuenta ${item.numero_cuenta || 'estudiante'} excede el límite permitido (máx. 20 puntos).`
@@ -527,7 +532,7 @@ export const updateBatchGrades = async (req, res) => {
       }
       if (item.segundo_examen !== undefined) {
         const ex2 = Number(item.segundo_examen);
-        if (!isNaN(ex2) && (ex2 > 20 || ex2 < 0)) {
+        if (!Number.isFinite(ex2) || ex2 > 20 || ex2 < 0) {
           return res.status(400).json({
             success: false,
             message: `Error académico: La nota del segundo examen (${ex2}) en la cuenta ${item.numero_cuenta || 'estudiante'} excede el límite permitido (máx. 20 puntos).`
@@ -537,7 +542,7 @@ export const updateBatchGrades = async (req, res) => {
       }
       if (item.tercer_examen !== undefined) {
         const ex3 = Number(item.tercer_examen);
-        if (!isNaN(ex3) && (ex3 > 20 || ex3 < 0)) {
+        if (!Number.isFinite(ex3) || ex3 > 20 || ex3 < 0) {
           return res.status(400).json({
             success: false,
             message: `Error académico: La nota del tercer examen (${ex3}) en la cuenta ${item.numero_cuenta || 'estudiante'} excede el límite permitido (máx. 20 puntos).`
@@ -549,77 +554,63 @@ export const updateBatchGrades = async (req, res) => {
 
     const tableName = await getTableForSeccion(seccion_id, carrera);
 
-    if (isSupabaseConfigured && supabase) {
-      const promises = updates.map(async (item) => {
-        const payload = {
-          updated_at: new Date().toISOString()
-        };
-        if (item.notas !== undefined) payload.notas = item.notas;
-        if (item.asistencias !== undefined) payload.asistencias = item.asistencias;
-        if (item.total !== undefined) payload.total = item.total;
-        if (item.primer_examen !== undefined) payload.primer_examen = item.primer_examen;
-        if (item.segundo_examen !== undefined) payload.segundo_examen = item.segundo_examen;
-        if (item.tercer_examen !== undefined) payload.tercer_examen = item.tercer_examen;
-
-        return supabase
-          .from(tableName)
-          .update(payload)
-          .eq("seccion_id", seccion_id)
-          .eq("numero_cuenta", item.numero_cuenta);
-      });
-
-      const results = await Promise.all(promises);
-      const errors = results.filter((r) => r.error);
-      if (errors.length > 0) {
-        console.error(`Aviso: ${errors.length}/${updates.length} actualizaciones fallaron en Supabase (${tableName}):`, errors.map(e => e.error?.message));
-      }
-
-      // Sincronizar memoria y archivo persistente
-      if (!inMemoryEstudiantes[tableName]) inMemoryEstudiantes[tableName] = [];
-      updates.forEach((item) => {
-        const idx = inMemoryEstudiantes[tableName].findIndex(
-          (e) => e.seccion_id === seccion_id && e.numero_cuenta === item.numero_cuenta
-        );
-        if (idx !== -1) {
-          inMemoryEstudiantes[tableName][idx] = {
-            ...inMemoryEstudiantes[tableName][idx],
-            ...item,
-            updated_at: new Date().toISOString()
-          };
-        }
-      });
-      savePersistentEstudiantes(inMemoryEstudiantes);
-
-      return res.json({
-        success: true,
-        message: `Calificaciones y asistencias sincronizadas con éxito en ${tableName}.`,
-        table: tableName,
-        updatedCount: updates.length
-      });
+    const accounts = updates.map(item => String(item.numero_cuenta ?? "").trim());
+    if (accounts.some(account => !account) || new Set(accounts).size !== accounts.length) {
+      return res.status(400).json({success:false,message:"Cada actualización debe identificar una cuenta distinta."});
     }
-
-    // Memoria de respaldo
-    if (!inMemoryEstudiantes[tableName]) inMemoryEstudiantes[tableName] = [];
-    updates.forEach((item) => {
-      const idx = inMemoryEstudiantes[tableName].findIndex(
-        (e) => e.seccion_id === seccion_id && e.numero_cuenta === item.numero_cuenta
-      );
-      if (idx !== -1) {
-        inMemoryEstudiantes[tableName][idx] = {
-          ...inMemoryEstudiantes[tableName][idx],
-          ...item,
-          updated_at: new Date().toISOString()
-        };
+    const gradePayload = item => {
+      const payload = { updated_at: new Date().toISOString() };
+      for (const key of ["notas","asistencias","total","primer_examen","segundo_examen","tercer_examen"]) {
+        if (item[key] !== undefined) payload[key] = item[key];
       }
+      return payload;
+    };
+    let rows;
+    if (isSupabaseConfigured && supabase) {
+      const loaded = await supabase.from(tableName).select("id,numero_cuenta,updated_at")
+        .eq("seccion_id", seccion_id).in("numero_cuenta", accounts);
+      if (loaded.error) return res.status(503).json({success:false,message:"No pudimos verificar las matrículas antes de guardar."});
+      rows = loaded.data || [];
+    } else {
+      rows = (inMemoryEstudiantes[tableName] || []).filter(row => String(row.seccion_id) === String(seccion_id) && accounts.includes(String(row.numero_cuenta)));
+    }
+    if (rows.length !== accounts.length || accounts.some(account => rows.filter(row => String(row.numero_cuenta) === account).length !== 1)) {
+      return res.status(409).json({success:false,message:"La matrícula cambió. Actualiza la lista de estudiantes antes de guardar."});
+    }
+    for (let index = 0; index < updates.length; index++) {
+      const item = updates[index], row = rows.find(row => String(row.numero_cuenta) === accounts[index]);
+      if ((item.id && String(item.id) !== String(row.id)) ||
+          (item.expected_updated_at !== undefined && item.expected_updated_at !== row.updated_at)) {
+        return res.status(409).json({success:false,message:"Las notas o la matrícula cambiaron en otra sesión. Actualiza la lista antes de guardar."});
+      }
+    }
+    if (isSupabaseConfigured && supabase) {
+      const results = await Promise.all(updates.map((item,index) => {
+        const row = rows.find(row => String(row.numero_cuenta) === accounts[index]);
+        let query = supabase.from(tableName).update(gradePayload(item))
+          .eq("seccion_id",seccion_id).eq("numero_cuenta",accounts[index]).eq("id",row.id);
+        if (item.expected_updated_at !== undefined) query = item.expected_updated_at === null ? query.is("updated_at",null) : query.eq("updated_at",item.expected_updated_at);
+        return query.select("id,numero_cuenta,updated_at");
+      }));
+      const updatedCount = results.filter(result => !result.error && result.data?.length === 1).length;
+      if (updatedCount !== updates.length) {
+        return res.status(results.some(result => result.error) ? 503 : 409).json({success:false,updatedCount,
+          message:"No se confirmó el guardado completo. Actualiza la lista para comprobar las notas antes de reintentar."});
+      }
+      return res.json({success:true,table:tableName,updatedCount,
+        data:results.map(result => {const row=result.data[0];return {id:row.id,numero_cuenta:row.numero_cuenta,updated_at:row.updated_at};}),
+        message:"Calificaciones y asistencias guardadas correctamente."});
+    }
+    const nextRows = (inMemoryEstudiantes[tableName] || []).map(row => {
+      if (String(row.seccion_id) !== String(seccion_id)) return row;
+      const index=accounts.indexOf(String(row.numero_cuenta));
+      return index < 0 ? row : {...row,...gradePayload(updates[index])};
     });
-    savePersistentEstudiantes(inMemoryEstudiantes);
-
-    return res.json({
-      success: true,
-      message: `Calificaciones guardadas en memoria para ${tableName}.`,
-      table: tableName,
-      updatedCount: updates.length
-    });
+    savePersistentEstudiantes({...inMemoryEstudiantes,[tableName]:nextRows},true);
+    inMemoryEstudiantes[tableName]=nextRows;
+    return res.json({success:true,table:tableName,updatedCount:updates.length,
+      data:nextRows.filter(row => String(row.seccion_id) === String(seccion_id) && accounts.includes(String(row.numero_cuenta))).map(row => ({id:row.id,numero_cuenta:row.numero_cuenta,updated_at:row.updated_at})),
+      message:"Calificaciones guardadas correctamente."});
   } catch (error) {
     console.error("Error al actualizar notas por lote:", error);
     res.status(500).json({
@@ -688,12 +679,13 @@ export const getEstudianteByCuenta = async (req, res) => {
           }
         });
       }
+      return res.status(404).json({success:false,message:"No se encontró tu matrícula actual."});
     }
 
     const memoryList = inMemoryEstudiantes[tableName] || [];
-    const found = memoryList.find((e) => String(e.numero_cuenta).trim() === cleanCuenta && (!sectionId || String(e.seccion_id) === String(sectionId)));
+    const found = memoryList.find((e) => String(e.numero_cuenta).trim() === cleanCuenta && (!sectionId || String(e.seccion_id) === String(sectionId)) && (!req.student?.id || String(e.id) === String(req.student.id)));
     if (found) {
-      return res.json({ success: true, data: publicStudent(found) });
+      return res.json({ success: true, data: { ...publicStudent(found), carrera } });
     }
 
     return res.status(404).json({
@@ -732,12 +724,11 @@ export const updateEstudianteGradeDirect = async (seccion_id, numero_cuenta, car
         .eq("seccion_id", seccion_id)
         .eq("numero_cuenta", numero_cuenta)
         .maybeSingle();
-      if (strict && error) throw error;
+      if (error) throw error;
       if (data) currentEst = data;
-      else if (strict) currentEst = null;
+      else currentEst = null;
     } catch (err) {
-      if (strict) throw err;
-      // fallback
+      throw err;
     }
   }
 
@@ -754,17 +745,18 @@ export const updateEstudianteGradeDirect = async (seccion_id, numero_cuenta, car
 
   if (isSupabaseConfigured && supabase) {
     try {
-      const result = await supabase
+      let query = supabase
         .from(tableName)
         .update(payload)
         .eq("seccion_id", seccion_id)
-        .eq("numero_cuenta", numero_cuenta)
-        .select("numero_cuenta");
-      if (strict && result.error) throw result.error;
-      if (strict && !result.data?.length) throw new Error("No se pudo confirmar el guardado de la nota.");
+        .eq("numero_cuenta", numero_cuenta);
+      if (currentEst.id) query = query.eq("id",currentEst.id);
+      query = currentEst.notas == null ? query.is("notas",null) : query.eq("notas",JSON.stringify(currentEst.notas));
+      const result = await query.select("numero_cuenta");
+      if (result.error) throw result.error;
+      if (result.data?.length !== 1) throw new Error("Las notas cambiaron durante la sincronización. Vuelve a guardar la calificación.");
     } catch (err) {
-      if (strict) throw err;
-      console.warn("Aviso en Supabase updateEstudianteGradeDirect:", err.message);
+      throw err;
     }
   }
 
