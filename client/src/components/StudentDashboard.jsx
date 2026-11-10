@@ -19,24 +19,29 @@ function StudentSectionRank() {
     return () => controller.abort();
   }, []);
 
-  const message = position === 1 ? "¡Felicidades por el primer lugar! Sigue con esa constancia." :
-    position <= 3 ? "¡Excelente trabajo! Estás entre los tres primeros de tu sección." :
-      "Cada práctica cuenta. Sigue avanzando a tu ritmo y aprovecha las próximas evaluaciones.";
+  const hasPosition = status === "ready" && position !== null;
+  const isPodium = hasPosition && position <= 3;
+  const message = status === "loading" ? "Consultando tu posición…" :
+    status === "error" ? "Tu posición no está disponible en este momento." :
+    !hasPosition ? "Tu posición aparecerá cuando tengas una calificación registrada." :
+    position === 1 ? "¡Felicidades por el primer lugar! Sigue con esa constancia." :
+    isPodium ? "¡Excelente trabajo! Estás entre los tres primeros de tu sección." :
+    "Cada práctica cuenta. Sigue avanzando a tu ritmo y aprovecha las próximas evaluaciones.";
 
   return (
-    <section className="student-dashboard__rank" aria-labelledby="student-rank-title">
-      <span className="student-dashboard__icon"><Trophy size={22} aria-hidden="true" /></span>
-      <div>
-        <h4 id="student-rank-title">Tu posición en la sección</h4>
-        <div role="status">
-          {status === "loading" ? <p>Consultando tu posición…</p> :
-            status === "error" ? <p>Tu posición no está disponible en este momento.</p> :
-            position === null ? <p>Tu posición aparecerá cuando tengas una calificación registrada.</p> : (
-              <>
-                <p>Actualmente ocupas el <strong>puesto {position}</strong> en la clasificación de tu sección.</p>
-                <p>{message}</p>
-              </>
-            )}
+    <section className="student-dashboard__rank" data-podium={isPodium} aria-labelledby="student-rank-title">
+      <div className="student-dashboard__rank-content" role="status">
+        <div className="student-dashboard__rank-medallion">
+          {hasPosition ? (
+            <>
+              <span>Puesto</span>
+              <strong><span aria-hidden="true">#</span>{position}</strong>
+            </>
+          ) : <Trophy size={25} aria-hidden="true" />}
+        </div>
+        <div className="student-dashboard__rank-copy">
+          <h4 id="student-rank-title">Tu posición en la sección</h4>
+          <p>{message}</p>
         </div>
       </div>
     </section>
