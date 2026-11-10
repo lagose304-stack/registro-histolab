@@ -1,3 +1,4 @@
+import { gradeInstructorName, withGradeActor } from "../services/gradeHistory.js";
 import { getLiveQuizEvidence } from "./liveQuiz.controller.js";
 import { syncMakeupSubmission } from "../services/studentMakeups.js";
 import { sanitizeClientAudit } from "../middlewares/quizPrivacy.mjs";
@@ -56,7 +57,14 @@ function loadPersistentPruebas() {
 function savePersistentPruebas(state, strict = false) {
   try {
     ensureDataDir();
-    fs.writeFileSync(DATA_FILE, JSON.stringify(state, null, 2), "utf-8");
+    const output = JSON.stringify(state, null, 2);
+    if (strict) {
+      const pending = DATA_FILE + ".tmp";
+      fs.writeFileSync(pending, output, "utf-8");
+      fs.renameSync(pending, DATA_FILE);
+    } else {
+      fs.writeFileSync(DATA_FILE, output, "utf-8");
+    }
   } catch (err) {
     if (strict) throw err;
     console.warn("Aviso al guardar pruebas locales:", err.message);
@@ -422,11 +430,19 @@ async function loadQuizForAssessment(sectionId, week) {
   return {...quiz,preguntas:typeof quiz.preguntas === "string" ? JSON.parse(quiz.preguntas) : quiz.preguntas || []};
 }
 
-async function syncAutomaticStudentGrade(submission) {
+function publicSubmission(submission) {
+  if (!submission || !Object.hasOwn(submission, "instructor_calificador_id")) return submission;
+  const { instructor_calificador_id, ...visible } = submission;
+  return visible;
+}
+
+async function syncAutomaticStudentGrade(submission, instructor) {
   if (submission.estado !== "calificado") return;
-  if (await syncMakeupSubmission(submission)) return;
-  await updateEstudianteGradeDirect(submission.seccion_id,submission.numero_cuenta,submission.carrera,`prueba_${submission.numero_semana}`,submission.nota_obtenida,true);
-  await updateEstudianteGradeDirect(submission.seccion_id,submission.numero_cuenta,submission.carrera,`prueba_${submission.numero_semana}_real`,submission.nota_real ?? submission.nota_obtenida,true);
+  const savedInstructor = submission.instructor_calificador_id;
+  instructor ??= savedInstructor ? { id: savedInstructor, nombre_completo: submission.calificado_por } : null;
+  if (await syncMakeupSubmission(submission, instructor)) return;
+  await updateEstudianteGradeDirect(submission.seccion_id,submission.numero_cuenta,submission.carrera,`prueba_${submission.numero_semana}`,submission.nota_obtenida,true,instructor,submission);
+  await updateEstudianteGradeDirect(submission.seccion_id,submission.numero_cuenta,submission.carrera,`prueba_${submission.numero_semana}_real`,submission.nota_real ?? submission.nota_obtenida,true,instructor,submission);
 }
 
 export async function getQuizSubmissionForAccess(id) {
@@ -471,7 +487,7 @@ export const submitPruebaEstudiante = async (req,res) => {
       // Retries never replace answers and must not trap the student in offline mode.
       if (!(isSupabaseConfigured && supabase)) savePersistentPruebas(cachePruebas,true);
       if (existing.auditoria?.calificacion_automatica?.version===1) await syncAutomaticStudentGrade(existing);
-      return res.json({success:true,message:"La entrega ya está registrada. Sus respuestas originales se conservan.",data:existing});
+      return res.json({success:true,message:"La entrega ya está registrada. Sus respuestas originales se conservan.",data:publicSubmission(existing)});
     }
     const quiz=await loadQuizForAssessment(seccion_id,numSemana);
     if (req.student && req.body.quiz_id && String(req.body.quiz_id) !== String(quiz.id)) return res.status(409).json({success:false,message:"La prueba asignada cambió. Actualiza el catálogo antes de continuar."});
@@ -499,7 +515,7 @@ export const submitPruebaEstudiante = async (req,res) => {
         const {data:sealed,error:readError}=await supabase.from("entregas_pruebas").select("*").eq("seccion_id",seccion_id).eq("numero_semana",numSemana).eq("numero_cuenta",String(numero_cuenta)).maybeSingle();
         if (readError || !sealed) throw readError || error;
         if (sealed.auditoria?.calificacion_automatica?.version===1) await syncAutomaticStudentGrade(sealed);
-        return res.json({success:true,message:"La entrega ya está registrada. Sus respuestas originales se conservan.",data:sealed});
+        return res.json({success:true,message:"La entrega ya está registrada. Sus respuestas originales se conservan.",data:publicSubmission(sealed)});
       }
       if (error) throw error;
     }
@@ -609,7 +625,7 @@ export const getMiEntregaSemanal = async (req, res) => {
             };
             return res.json({
               success: true,
-              data: normalized
+              data: publicSubmission(normalized)
             });
           } else {
             // En Supabase no existe entrega (o fue borrada directamente de la BD).
@@ -655,7 +671,7 @@ export const getMiEntregaSemanal = async (req, res) => {
 
     return res.json({
       success: true,
-      data: normalizedFound
+      data: publicSubmission(normalizedFound)
     });
   } catch (error) {
     console.error("Error en getMiEntregaSemanal:", error);
@@ -669,9 +685,10 @@ export const getMiEntregaSemanal = async (req, res) => {
 
 // 7. Calificar una entrega y sincronizar automáticamente con la nota oficial del estudiante
 export const calificarEntrega = async (req, res) => {
+  let releaseLocalLock;
   try {
     const { entrega_id } = req.params;
-    const { nota_obtenida, nota_real, nota_con_bonus, comentarios, calificado_por, carrera, evaluaciones_incisos, auditoria } = req.body;
+    const { nota_obtenida, nota_real, nota_con_bonus, comentarios, carrera, evaluaciones_incisos, auditoria } = req.body;
 
     const numNota = Number(nota_obtenida);
     if (isNaN(numNota) || numNota < 0) {
@@ -688,11 +705,17 @@ export const calificarEntrega = async (req, res) => {
     const rawBonusVal = nota_real !== undefined ? Number(nota_real) : (nota_con_bonus !== undefined ? Number(nota_con_bonus) : numNota);
     let cleanRealNota = isNaN(rawBonusVal) ? cleanNota : Math.round(rawBonusVal * 1000) / 1000;
 
-    let sub = null;
+    if (!(isSupabaseConfigured && supabase)) {
+      const target = cachePruebas.entregas.find(row => String(row.id) === String(entrega_id));
+      if (target) releaseLocalLock = await lockLocalSubmission(JSON.stringify([
+        target.seccion_id, Number(target.numero_semana), String(target.numero_cuenta)
+      ]));
+    }
+    let sub = req.quizSubmission && isSupabaseConfigured && supabase ? req.quizSubmission : null;
     let subIdx = cachePruebas.entregas.findIndex((e) => String(e.id) === String(entrega_id));
-    if (subIdx !== -1) {
+    if (!sub && subIdx !== -1) {
       sub = cachePruebas.entregas[subIdx];
-    } else if (isSupabaseConfigured && supabase) {
+    } else if (!sub && isSupabaseConfigured && supabase) {
       try {
         const { data: sbSub } = await supabase
           .from("entregas_pruebas")
@@ -729,7 +752,8 @@ export const calificarEntrega = async (req, res) => {
     sub.nota_con_bonus = cleanRealNota;
     sub.comentarios = comentarios || "";
     sub.estado = hasAutomatic && !automaticResult.complete ? "enviado" : "calificado";
-    sub.calificado_por = calificado_por || "Docente";
+    sub.calificado_por = gradeInstructorName(req.instructor);
+    sub.instructor_calificador_id = req.instructor?.id ?? null;
     if (finalEvaluations) sub.evaluaciones_incisos = finalEvaluations;
     sub.auditoria = {
       ...(sub.auditoria || {}),
@@ -755,6 +779,7 @@ export const calificarEntrega = async (req, res) => {
           comentarios: sub.comentarios,
           estado: sub.estado,
           calificado_por: sub.calificado_por,
+          instructor_calificador_id: sub.instructor_calificador_id,
           updated_at: sub.updated_at
         };
         if (sub.auditoria) {
@@ -763,7 +788,7 @@ export const calificarEntrega = async (req, res) => {
         const { error: updErr, data: saved } = await supabase
           .from("entregas_pruebas")
           .update(updatePayload)
-          .eq("id", entrega_id).select("id");
+          .eq("id", entrega_id).select("id,updated_at");
 
         if (updErr) {
           if (hasAutomatic || !["42703","PGRST204"].includes(updErr.code) || !/nota_real|nota_con_bonus/.test(updErr.message || "")) throw updErr;
@@ -773,33 +798,39 @@ export const calificarEntrega = async (req, res) => {
           const fallback = await supabase
             .from("entregas_pruebas")
             .update(updatePayload)
-            .eq("id", entrega_id).select("id");
+            .eq("id", entrega_id).select("id,updated_at");
           if (fallback.error) throw fallback.error;
           if (fallback.data?.length !== 1) throw new Error("No se confirmó el guardado de la entrega.");
+          sub.updated_at = fallback.data[0].updated_at;
         } else if (saved?.length !== 1) {
           throw new Error("No se confirmó el guardado de la entrega.");
+        } else {
+          sub.updated_at = saved[0].updated_at;
         }
       } catch (sbErr) {
         throw sbErr;
       }
     }
 
-    if (subIdx !== -1) cachePruebas.entregas[subIdx]=sub;
-    savePersistentPruebas(cachePruebas, hasAutomatic && !(isSupabaseConfigured && supabase));
+    const next = { ...cachePruebas, entregas: cachePruebas.entregas.slice() };
+    if (subIdx === -1) next.entregas.push(sub);
+    else next.entregas[subIdx] = sub;
+    savePersistentPruebas(next, !(isSupabaseConfigured && supabase));
+    cachePruebas = next;
 
     // Una prueba mixta no publica una nota definitiva hasta completar su revisión.
     if (hasAutomatic) {
-      await syncAutomaticStudentGrade(sub);
+      await syncAutomaticStudentGrade(sub, req.instructor);
       return res.json({success:true,message:sub.estado==="calificado"?"Calificación guardada y sincronizada.":"Apartados guardados; quedan respuestas pendientes de revisión.",data:sub});
     }
-    if (await syncMakeupSubmission(sub)) return res.json({success:true,message:"Calificación guardada en la sección original del estudiante.",data:sub});
+    if (await syncMakeupSubmission(sub, req.instructor)) return res.json({success:true,message:"Calificación guardada en la sección original del estudiante.",data:sub});
     // Sincronizar nota directamente en la ficha del estudiante (prueba_X = cleanNota)
     await updateEstudianteGradeDirect(
       sub.seccion_id,
       sub.numero_cuenta,
       sub.carrera || carrera || "Medicina",
       `prueba_${sub.numero_semana}`,
-      cleanNota, true
+      cleanNota, true, req.instructor, sub
     );
 
     // Si obtuvo nota real con bonus superior a 5.0, sincronizar prueba_X_real
@@ -809,7 +840,7 @@ export const calificarEntrega = async (req, res) => {
         sub.numero_cuenta,
         sub.carrera || carrera || "Medicina",
         `prueba_${sub.numero_semana}_real`,
-        cleanRealNota, true
+        cleanRealNota, true, req.instructor, sub
       );
     }
 
@@ -888,6 +919,8 @@ export const getAllEntregasPorSeccion = async (req, res) => {
       message: "Error al consultar todas las entregas de la sección",
       error: error.message
     });
+  } finally {
+    releaseLocalLock?.();
   }
 };
 
@@ -953,103 +986,52 @@ export const deletePruebasSeccionHandler = async (req, res) => {
 
 // 10. Eliminar entrega individual de un estudiante (permite habilitar reintento)
 export const deleteEntregaEstudiante = async (req, res) => {
+  const { entrega_id, seccion_id, semana, numero_cuenta } = req.params;
+  const authorized = req.quizSubmission;
+  const section = authorized?.seccion_id || seccion_id;
+  const week = Number(authorized?.numero_semana ?? semana);
+  const account = authorized?.numero_cuenta || numero_cuenta;
+  let releaseLocalLock;
   try {
-    const { entrega_id, seccion_id, semana, numero_cuenta } = req.params;
-
-    let targetId = entrega_id;
-    let targetSecId = req.quizSubmission?.seccion_id || seccion_id;
-    let targetSemana = req.quizSubmission?.numero_semana ?? (semana !== undefined && semana !== null ? Number(semana) : null);
-    let targetCuenta = req.quizSubmission?.numero_cuenta || (numero_cuenta ? String(numero_cuenta) : null);
-
-    // Buscar en caché si falta algún identificador
-    const localMatch = cachePruebas.entregas.find((e) =>
-      targetId
-        ? String(e.id) === String(targetId)
-        : String(e.seccion_id) === String(targetSecId) &&
-          Number(e.numero_semana) === targetSemana &&
-          String(e.numero_cuenta) === targetCuenta
-    );
-
-    if (localMatch) {
-      targetId = targetId || localMatch.id;
-      targetSecId = targetSecId || localMatch.seccion_id;
-      targetSemana = targetSemana ?? localMatch.numero_semana;
-      targetCuenta = targetCuenta || localMatch.numero_cuenta;
-    }
-
+    let id = authorized?.id || entrega_id;
     if (isSupabaseConfigured && supabase) {
-      try {
-        if (targetId) {
-          await supabase.from("entregas_pruebas").delete().eq("id", targetId);
-        }
-        if (targetSecId && targetSemana && targetCuenta) {
-          await supabase
-            .from("entregas_pruebas")
-            .delete()
-            .eq("seccion_id", targetSecId)
-            .eq("numero_semana", targetSemana)
-            .eq("numero_cuenta", targetCuenta);
-        }
-      } catch (sbErr) {
-        console.warn("Aviso al eliminar entrega de prueba en Supabase:", sbErr.message);
+      const { data, error } = await withGradeActor(supabase.rpc("delete_quiz_submission_with_grade", {
+        p_section: section, p_week: week, p_account: account, p_id: id || null
+      }), req.instructor);
+      if (error) throw error;
+      id = data;
+    } else {
+      releaseLocalLock = await lockLocalSubmission(JSON.stringify([section, week, String(account)]));
+      const delivery = cachePruebas.entregas.find(row => id ? String(row.id) === String(id) :
+        String(row.seccion_id) === String(section) && Number(row.numero_semana) === week &&
+        String(row.numero_cuenta) === String(account));
+      id = delivery?.id;
+      if (delivery) {
+        await updateEstudianteGradeDirect(section, account, delivery.carrera,
+          `prueba_${week}`, null, false, req.instructor);
+        const next = { ...cachePruebas, entregas: cachePruebas.entregas.filter(row => row.id !== id) };
+        savePersistentPruebas(next, true);
+        cachePruebas = next;
       }
     }
 
-    // Limpiar de caché local y archivo JSON
-    const prevLen = cachePruebas.entregas.length;
-    cachePruebas.entregas = cachePruebas.entregas.filter((e) => {
-      if (targetId && String(e.id) === String(targetId)) return false;
-      if (
-        targetSecId &&
-        targetSemana !== null &&
-        targetCuenta &&
-        String(e.seccion_id) === String(targetSecId) &&
-        Number(e.numero_semana) === Number(targetSemana) &&
-        String(e.numero_cuenta) === String(targetCuenta)
-      ) {
-        return false;
-      }
-      return true;
-    });
-
-    if (cachePruebas.entregas.length !== prevLen) {
+    if (!id) return res.status(404).json({ success: false, message: "Entrega no encontrada." });
+    if (isSupabaseConfigured && supabase) {
+      cachePruebas.entregas = cachePruebas.entregas.filter(row => String(row.id) !== String(id));
       savePersistentPruebas(cachePruebas);
-    }
-
-    // Resetear la nota asociada a esta prueba en la ficha del estudiante si existía
-    if (targetSecId && targetCuenta && targetSemana !== null) {
-      try {
-        const studentRes = await supabase
-          .from("estudiantes")
-          .select("carrera")
-          .eq("numero_cuenta", targetCuenta)
-          .maybeSingle();
-        const carrera = studentRes?.data?.carrera || "Medicina";
-
-        await updateEstudianteGradeDirect(
-          targetSecId,
-          targetCuenta,
-          carrera,
-          `prueba_${targetSemana}`,
-          null
-        );
-      } catch (gErr) {
-        console.warn("Aviso al limpiar nota de estudiante tras eliminar entrega:", gErr.message);
-      }
     }
 
     return res.json({
       success: true,
-      message: "Entrega eliminada exitosamente. El estudiante ahora puede volver a realizar la prueba."
+      message: "Entrega eliminada. El estudiante puede volver a realizar la prueba."
     });
   } catch (error) {
-    console.error("Error en deleteEntregaEstudiante:", error);
-    return res.status(500).json({
+    console.error("Error en deleteEntregaEstudiante:", error.code || error.message);
+    return res.status(503).json({
       success: false,
-      message: "Error al eliminar la entrega de la prueba",
-      error: error.message
+      message: "No pudimos completar la eliminación de la entrega y su nota. Reintenta en un momento."
     });
+  } finally {
+    releaseLocalLock?.();
   }
 };
-
-

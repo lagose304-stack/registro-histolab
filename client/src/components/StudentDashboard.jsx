@@ -1,6 +1,47 @@
-import React from "react";
-import { Award, BookOpen, FileEdit, CalendarCheck, Building2, Clock, User, ChevronRight, ShieldCheck, AlertCircle, RefreshCw, GraduationCap } from "lucide-react";
+import React, { useEffect, useState } from "react";
+import { Award, BookOpen, FileEdit, CalendarCheck, Building2, Clock, User, ChevronRight, ShieldCheck, AlertCircle, RefreshCw, GraduationCap, Trophy } from "lucide-react";
+import { api } from "../services/api";
 import { formatGrade } from "../utils/academicEngine";
+
+function StudentSectionRank() {
+  const [position, setPosition] = useState(null);
+  const [status, setStatus] = useState("loading");
+
+  useEffect(() => {
+    const controller = new AbortController();
+    api.estudiantes.getMySectionRank(controller.signal).then(({ data }) => {
+      if (controller.signal.aborted) return;
+      setPosition(Number.isInteger(data?.posicion) && data.posicion > 0 ? data.posicion : null);
+      setStatus("ready");
+    }).catch(() => {
+      if (!controller.signal.aborted) setStatus("error");
+    });
+    return () => controller.abort();
+  }, []);
+
+  const message = position === 1 ? "¡Felicidades por el primer lugar! Sigue con esa constancia." :
+    position <= 3 ? "¡Excelente trabajo! Estás entre los tres primeros de tu sección." :
+      "Cada práctica cuenta. Sigue avanzando a tu ritmo y aprovecha las próximas evaluaciones.";
+
+  return (
+    <section className="student-dashboard__rank" aria-labelledby="student-rank-title">
+      <span className="student-dashboard__icon"><Trophy size={22} aria-hidden="true" /></span>
+      <div>
+        <h4 id="student-rank-title">Tu posición en la sección</h4>
+        <div role="status">
+          {status === "loading" ? <p>Consultando tu posición…</p> :
+            status === "error" ? <p>Tu posición no está disponible en este momento.</p> :
+            position === null ? <p>Tu posición aparecerá cuando tengas una calificación registrada.</p> : (
+              <>
+                <p>Actualmente ocupas el <strong>puesto {position}</strong> en la clasificación de tu sección.</p>
+                <p>{message}</p>
+              </>
+            )}
+        </div>
+      </div>
+    </section>
+  );
+}
 
 export default function StudentDashboard({ summary, attendance, examStatus, section, loading, error, onNavigate }) {
   const sectionInfo = section && typeof section === "object" ? section : {};
@@ -39,6 +80,7 @@ export default function StudentDashboard({ summary, attendance, examStatus, sect
           <button type="button" className="student-dashboard__text-button" onClick={() => onNavigate("asistencia")}>Ver mi asistencia<ChevronRight size={16} /></button>
         </section>
       </div>
+      <StudentSectionRank />
     </>}
 
     <div className="student-dashboard__lower">

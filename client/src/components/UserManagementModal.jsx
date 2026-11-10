@@ -1,3 +1,4 @@
+import { navigateEnrollmentFields } from "../utils/enrollmentNavigation.mjs";
 import React, { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import {
@@ -195,7 +196,8 @@ export default function UserManagementModal({
         </button>
       </header>
 
-      <form id="user-mgmt-form" className="user-dialog__body" onSubmit={handleSubmit}>
+      <form id="user-mgmt-form" className="user-dialog__body"
+              onKeyDown={isCreate && !loading ? navigateEnrollmentFields : undefined} onSubmit={handleSubmit}>
         {!isCreate && (
           <label className="user-field">
             Instructor

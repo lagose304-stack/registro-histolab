@@ -10,8 +10,8 @@ const bundle = await build({ entryPoints: ["server/src/controllers/estudiantes.c
     b.onResolve({filter:/db\/supabase\.js$/},()=>({path:"db",namespace:"fixture"}));
     b.onResolve({filter:/^(node:)?fs$/},()=>({path:"fs",namespace:"fixture"}));
     b.onResolve({filter:/\.\/(secciones|semanas|asignaciones|academicAgenda|manualsSchedule|temario)\.controller\.js$/},args=>({path:args.path,namespace:"helpers"}));
-    b.onLoad({filter:/.*/,namespace:"helpers"},()=>({contents:"export const getLocalSchedulingSections=()=>[],getLocalSchedulingWeeks=()=>[],getLocalSectionAssignments=()=>[],getSectionAttendanceEvents=async()=>[],getManualSchedule=async()=>({}),getLocalAcademicSettings=()=>({});"}));
-    b.onLoad({filter:/.*/,namespace:"fixture"},({path})=>({contents:path==="db"?"export const supabase=globalThis.fixture.db,isSupabaseConfigured=globalThis.fixture.configured;":"export default {existsSync:()=>true,mkdirSync(){},readFileSync:()=>JSON.stringify(globalThis.fixture.local),writeFileSync(){globalThis.fixture.writes++}};"}));
+    b.onLoad({filter:/.*/,namespace:"helpers"},()=>({contents:"export const getLocalSchedulingSections=()=>[],buildAcademicWeeks=weeks=>weeks,getLocalSchedulingWeeks=()=>[],getLocalSectionAssignments=()=>[],getSectionAttendanceEvents=async()=>[],getManualSchedule=async()=>({}),getLocalAcademicSettings=()=>({});"}));
+    b.onLoad({filter:/.*/,namespace:"fixture"},({path})=>({contents:path==="db"?"export const supabase=globalThis.fixture.db,isSupabaseConfigured=globalThis.fixture.configured;":"export default {existsSync:()=>true,mkdirSync(){},readFileSync:()=>JSON.stringify(globalThis.fixture.local),renameSync(){},writeFileSync(){globalThis.fixture.writes++}};"}));
   } }]
 });
 function setup(configured=true) {

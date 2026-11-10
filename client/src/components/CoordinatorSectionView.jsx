@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo } from "react";
 import {
   ArrowLeft, Star, Clock, Calendar, Layers, GraduationCap, Award, CalendarCheck, Users,
   Search, CheckCircle2, RefreshCw, FileSpreadsheet, ChevronRight, BookOpen, Database, Trophy, Radio,
-  Hash, Mail, Phone
+  Hash, Mail, Phone, History
 } from "lucide-react";
 import { displaySectionCode } from "../../../shared/sectionCode.mjs";
 import "./CoordinatorSectionView.css";
@@ -17,6 +17,7 @@ import SectionDataMigrationView from "./SectionDataMigrationView";
 import WeeklyQuizCreationView from "./WeeklyQuizCreationView";
 import ReviewQuizSubmissionsView from "./ReviewQuizSubmissionsView";
 import SectionAwardsView from "./SectionAwardsView";
+import SectionGradeHistory from "./SectionGradeHistory";
 import LiveQuizControlView from "./LiveQuizControlView";
 import StudentMakeupsView from "./StudentMakeupsView";
 import { getNavState, setNavState } from "../utils/navigationState";
@@ -47,9 +48,10 @@ const SECTION_MODULE_GROUPS = [
     ]
   },
   {
-    id: "awards", title: "Premios de la sección", hint: "Reconoce el desempeño académico del grupo.",
+    id: "tools", title: "Herramientas de la sección", hint: "Consulta el cuadro de honor y los cambios de calificaciones.",
     modules: [
-      { id: "premios", label: "Premios de la sección", description: "Consulta el cuadro de honor.", Icon: Trophy }
+      { id: "premios", label: "Premios de la sección", description: "Consulta el cuadro de honor.", Icon: Trophy },
+      { id: "historial_notas", label: "Historial de calificaciones", description: "Consulta quién cambió una nota, a quién y cuándo.", Icon: History, fullAccess: true }
     ]
   },
   {
@@ -343,6 +345,10 @@ export default function CoordinatorSectionView({
           onClose={() => setActiveModule(null)}
           notify={notify}
         />
+      )}
+
+      {activeModule === "historial_notas" && (
+        <SectionGradeHistory key={seccion.id} sectionId={seccion.id} />
       )}
 
       {activeModule === "instructores" && (

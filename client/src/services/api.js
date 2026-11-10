@@ -453,6 +453,21 @@ export const api = {
 
   // Gestión de Estudiantes por Sección
   estudiantes: {
+    async getMySectionRank(signal) {
+      return handleResponse(await fetch(`${API_BASE}/estudiantes/mi-ranking`, {
+        headers: getAuthHeaders(),
+        signal
+      }));
+    },
+
+    async getGradeHistory(seccionId, filters = {}, signal) {
+      const query = new URLSearchParams(filters);
+      return handleResponse(await fetch(`${API_BASE}/estudiantes/seccion/${encodeURIComponent(seccionId)}/historial-notas?${query}`, {
+        headers: getAuthHeaders(),
+        signal
+      }));
+    },
+
     async getByCuenta(carrera, numeroCuenta, sectionId = null) {
       const query = sectionId ? `?seccion_id=${encodeURIComponent(sectionId)}` : "";
       const res = await fetch(`${API_BASE}/estudiantes/${encodeURIComponent(carrera)}/${encodeURIComponent(numeroCuenta)}${query}`, {

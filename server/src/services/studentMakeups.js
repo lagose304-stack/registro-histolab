@@ -1,3 +1,4 @@
+import { withGradeActor } from "./gradeHistory.js";
 import { supabase, isSupabaseConfigured } from "../db/supabase.js";
 import { ACTIVE_MAKEUP_STATES } from "../../../shared/studentMakeups.mjs";
 
@@ -20,12 +21,15 @@ export async function destinationMakeup(section, account, week) {
   if (error) throw error;
   return data;
 }
-export async function syncMakeupSubmission(submission) {
+export async function syncMakeupSubmission(submission, instructor) {
   const request = await destinationMakeup(submission.seccion_id, submission.numero_cuenta, submission.numero_semana);
   if (!request) return false;
   if (submission.estado === "calificado") {
-    const { error } = await supabase.rpc("apply_student_makeup", { p_id: request.id, p_entrega: submission.id });
+    const { data, error } = await withGradeActor(supabase.rpc("sync_quiz_makeup_grade", {
+      p_makeup: request.id, p_delivery: submission.id, p_version: submission.updated_at ?? null
+    }), instructor);
     if (error) throw error;
+    if (data !== true) throw new Error("La entrega cambió durante la sincronización de la reposición.");
   }
   return true;
 }

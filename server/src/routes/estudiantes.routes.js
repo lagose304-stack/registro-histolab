@@ -1,6 +1,8 @@
 import { Router } from "express";
 import {
   getEstudiantesBySeccion,
+  listGradeHistory,
+  getMySectionRank,
   getEstudianteByCuenta,
   createEstudiante,
   updateEstudiante,
@@ -11,7 +13,7 @@ import {
 } from "../controllers/estudiantes.controller.js";
 
 import { authenticateInstructor,authenticateStudent, requireCreator } from "../middlewares/auth.middleware.js";
-import {requireStudentEnrollmentManager,requireStudentSectionReader} from "../middlewares/studentEnrollmentAccess.middleware.js";
+import {requireStudentEnrollmentManager,requireStudentSectionReader,requireGradeHistoryReader} from "../middlewares/studentEnrollmentAccess.middleware.js";
 import { listManualDates, saveManualDate } from "../controllers/manualsSchedule.controller.js";
 
 const router = Router();
@@ -23,8 +25,11 @@ router.get("/seccion/:seccion_id/fechas-manuales", authenticateInstructor, listM
 router.put("/seccion/:seccion_id/fechas-manuales/:semana", authenticateInstructor, saveManualDate);
 router.put("/seccion/:seccion_id/manuales/:semana", authenticateInstructor, saveWeeklyManuals);
 
+router.get("/seccion/:seccion_id/historial-notas", authenticateInstructor, requireGradeHistoryReader, listGradeHistory);
+
 // Rutas de Estudiantes
 router.get("/seccion/:seccion_id", authenticateInstructor,requireStudentSectionReader,getEstudiantesBySeccion);
+router.get("/mi-ranking", authenticateStudent, getMySectionRank);
 router.get("/:carrera/:numero_cuenta", authenticateStudent,getEstudianteByCuenta);
 router.put("/seccion/:seccion_id/batch", authenticateInstructor,requireStudentSectionReader,updateBatchGrades);
 router.put("/batch/:seccion_id", authenticateInstructor,requireStudentSectionReader,updateBatchGrades);

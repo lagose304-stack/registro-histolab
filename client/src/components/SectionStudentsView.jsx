@@ -1,3 +1,4 @@
+import { navigateEnrollmentFields } from "../utils/enrollmentNavigation.mjs";
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
 import {
@@ -319,7 +320,8 @@ export default function SectionStudentsView({
               </div>
             </div>
           ) : (
-            <form id="roster-form" className="user-dialog__body" onSubmit={handleSave}>
+            <form id="roster-form" className="user-dialog__body"
+              onKeyDown={modalMode === "create" && !saving ? navigateEnrollmentFields : undefined} onSubmit={handleSave}>
               <label className="user-field">
                 Nombre completo
                 <input required name="nombre_completo" autoComplete="off" value={formData.nombre_completo} onChange={updateField} />

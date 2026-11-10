@@ -33,6 +33,8 @@ Después de confirmar una entrega, la salida de pantalla completa ya no cuenta c
 
 `StudentPortalView.jsx` abre la pestaña **Inicio**, implementada en `StudentDashboard.jsx` y `StudentDashboard.css`, salvo cuando se restaura una prueba activa. El dashboard muestra el acumulado y su desglose usando el mismo motor académico, la asistencia registrada, las alertas de derecho a examen cuando hay registros y los datos de sección. Sus accesos abren los módulos existentes de calificaciones, asistencia, pruebas y cuenta; el cierre de sesión sigue en la navegación general de `App.jsx`.
 
+Debajo del resumen, **Tu posición en la sección** muestra un puesto y un mensaje breve. `GET /api/estudiantes/mi-ranking` toma la matrícula de la sesión, aplica el cálculo y el orden de Premios de la sección a las matrículas activas con notas registradas y devuelve solo el puesto propio. Un cero registrado cuenta como calificación. La consulta se hace desde Inicio y un fallo de clasificación no bloquea el resumen académico.
+
 **Actualizar datos** vuelve a consultar semanas, temario, puntajes y el perfil de la misma cuenta como un conjunto. Ante errores o una cuenta distinta en la respuesta, el portal oculta el resumen académico y los módulos de consulta afectados y ofrece reintentar. La carga inicial distingue espera, fallo y ausencia de registros. Los avisos en vivo conservan el inicio y la restauración de evaluaciones; solo se muestra un aviso principal cuando ambas fuentes detectan la misma disponibilidad. El sondeo y la lógica de rendición no cambian. La cabecera y la navegación se comparten con los módulos de consulta; el inicio conserva su componente y estilos propios.
 
 ## Mis calificaciones

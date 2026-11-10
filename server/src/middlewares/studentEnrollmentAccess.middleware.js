@@ -3,7 +3,7 @@ import {getLocalSchedulingSections} from "../controllers/secciones.controller.js
 import {canViewSection,isInstructorTitular} from "../../../shared/sectionAccess.mjs";
 import {hasAdministrationAccess} from "../../../shared/instructorRoles.mjs";
 
-const sectionAccess=manage=>async(req,res,next)=>{
+const sectionAccess=(manage, deniedMessage)=>async(req,res,next)=>{
  const id=req.params?.seccion_id||req.body?.seccion_id;
  if(!id)return res.status(400).json({success:false,message:"Selecciona la sección del estudiante."});
  try{
@@ -12,7 +12,7 @@ const sectionAccess=manage=>async(req,res,next)=>{
   else section=getLocalSchedulingSections().find(item=>String(item.id)===String(id));
   if(!section)return res.status(404).json({success:false,message:"La sección no existe."});
   const allowed=manage?(hasAdministrationAccess(req.instructor?.rol)||isInstructorTitular(req.instructor,section)):canViewSection(req.instructor,section);
-  if(!allowed)return res.status(403).json({success:false,message:manage?"Solo el titular de la sección y Administración General pueden gestionar la matrícula y el correo.":"No tienes acceso a los estudiantes de esta sección."});
+  if(!allowed)return res.status(403).json({success:false,message:deniedMessage ?? (manage?"Solo el titular de la sección y Administración General pueden gestionar la matrícula y el correo.":"No tienes acceso a los estudiantes de esta sección.")});
   if(req.body)req.body.carrera=section.carrera;
   if(req.query)req.query.carrera=section.carrera;
   next();
@@ -20,3 +20,5 @@ const sectionAccess=manage=>async(req,res,next)=>{
 };
 export const requireStudentEnrollmentManager=sectionAccess(true);
 export const requireStudentSectionReader=sectionAccess(false);
+
+export const requireGradeHistoryReader = sectionAccess(true, "Solo el titular, Coordinación y el Creador pueden consultar este historial.");

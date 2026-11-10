@@ -1,14 +1,16 @@
+import { gradeInstructorName, localGradeSnapshot, withGradeActor } from "../services/gradeHistory.js";
 import { getAttendanceKeys, getAttendanceWindow } from "../../../shared/attendanceWindow.mjs";
 import { canViewSection, isInstructorTitular, isSectionAssignedToInstructor, matchesInstructor } from "../../../shared/sectionAccess.mjs";
 import { hasAdministrationAccess } from "../../../shared/instructorRoles.mjs";
 import { normalizeSectionCareer } from "../../../shared/sectionCode.mjs";
 import { getLocalSchedulingSections } from "./secciones.controller.js";
-import { getLocalSchedulingWeeks } from "./semanas.controller.js";
+import { buildAcademicWeeks, getLocalSchedulingWeeks } from "./semanas.controller.js";
 import { getLocalSectionAssignments } from "./asignaciones.controller.js";
 import { getSectionAttendanceEvents } from "./academicAgenda.controller.js";
 import { getManualSchedule } from "./manualsSchedule.controller.js";
 import { getLocalAcademicSettings } from "./temario.controller.js";
 import { getManualsWindow } from "../../../shared/manualsWindow.mjs";
+import { buildSectionAwardsRanking } from "../../../client/src/utils/sectionAwards.js";
 import { calculateStudentAcademicSummary } from "../../../client/src/utils/academicEngine.js";
 import fs from "node:fs";
 import path from "node:path";
@@ -65,7 +67,9 @@ function savePersistentEstudiantes(data, throwOnError = false) {
   try {
     ensureDataDir();
     const safe=Object.fromEntries(Object.entries(data).map(([table,rows])=>[table,Array.isArray(rows)?rows.map(publicStudent):rows]));
-    fs.writeFileSync(ESTUDIANTES_FILE, JSON.stringify(safe, null, 2), "utf-8");
+    const pending = ESTUDIANTES_FILE + ".tmp";
+    fs.writeFileSync(pending, JSON.stringify(safe, null, 2), "utf-8");
+    fs.renameSync(pending, ESTUDIANTES_FILE);
   } catch (err) {
     if (throwOnError) throw err;
     console.warn("Aviso al guardar estudiantes locales:", err.message);
@@ -74,6 +78,156 @@ function savePersistentEstudiantes(data, throwOnError = false) {
 
 // Memoria de respaldo por carrera respaldada en disco local
 let inMemoryEstudiantes = loadPersistentEstudiantes();
+
+function saveLocalGradeRows(table, nextRows, instructor) {
+  const existing = inMemoryEstudiantes[table] || [];
+  const history = inMemoryEstudiantes.gradeHistory || { entries: [] };
+  const added = [];
+  if (instructor?.id) {
+    const career = table.replace("estudiantes_", "");
+    const { topics } = getLocalAcademicSettings(career);
+    const weeks = getLocalSchedulingWeeks(career);
+    const fecha = new Date().toISOString();
+    nextRows.forEach((row, index) => {
+      if (row === existing[index]) return;
+      const before = localGradeSnapshot(existing[index] || {}, topics, weeks);
+      const after = localGradeSnapshot(row, topics, weeks);
+      for (const key of new Set([...before.keys(), ...after.keys()])) {
+        const anterior = before.get(key)?.value ?? null;
+        const nueva = after.get(key)?.value ?? null;
+        if (anterior === nueva) continue;
+        added.push({
+          id: (history.entries.at(-1)?.id || 0) + added.length + 1,
+          seccion_id: row.seccion_id,
+          instructor_id: instructor.id,
+          instructor_nombre: gradeInstructorName(instructor),
+          numero_cuenta: row.numero_cuenta,
+          estudiante_nombre: row.nombre_completo,
+          evaluacion: key,
+          etiqueta: (after.get(key) || before.get(key)).label,
+          anterior, nueva, fecha
+        });
+      }
+    });
+  }
+  const next = { ...inMemoryEstudiantes, [table]: nextRows };
+  if (added.length) next.gradeHistory = { entries: [...history.entries, ...added] };
+  savePersistentEstudiantes(next, true);
+  inMemoryEstudiantes = next;
+}
+
+// Los días del filtro corresponden a la hora de Honduras.
+function gradeHistoryDay(value) {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const date = new Date(value + "T00:00:00-06:00");
+  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value ? date : null;
+}
+
+const gradeHistoryTextPattern = value => '%' + value.replace(/[\\%_]/g, "\\$&") + '%';
+
+export async function getMySectionRank(req, res) {
+  res.set("Cache-Control", "private, no-store");
+  const student = req.student;
+  if (!student?.id || !student.seccion_id || !student.carrera) {
+    return res.json({ data: { posicion: null } });
+  }
+
+  const career = normalizeSectionCareer(student.carrera);
+  const table = normalizeCarreraToTable(career);
+  try {
+    let students;
+    let topics;
+    let scores;
+    let weeks;
+    if (isSupabaseConfigured && supabase) {
+      // También encuentra los nombres históricos con tilde.
+      const careerFilter = `%${career.slice(0, 5)}%`;
+      const results = await Promise.all([
+        supabase.from(table).select("id,numero_cuenta,nombre_completo,notas,primer_examen,segundo_examen,tercer_examen", { count: "exact" })
+          .eq("seccion_id", student.seccion_id).eq("activo", true),
+        supabase.from("temario").select("*").ilike("carrera", careerFilter),
+        supabase.from("configuracion_puntajes").select("*").ilike("carrera", careerFilter),
+        supabase.from("configuracion_semanas").select("*").ilike("carrera", careerFilter)
+      ]);
+      if (results.some(result => result.error || !Array.isArray(result.data))) throw new Error("Datos académicos incompletos");
+      const [roster, topicRows, scoreRows, weekRows] = results;
+      if (roster.count !== roster.data.length) throw new Error("Matrícula incompleta");
+      const sameCareer = row => normalizeSectionCareer(row.carrera) === career;
+      students = roster.data;
+      topics = topicRows.data.filter(sameCareer);
+      scores = scoreRows.data.find(sameCareer) || {};
+      weeks = buildAcademicWeeks(weekRows.data.filter(sameCareer), topics, career);
+    } else {
+      students = (inMemoryEstudiantes[table] || []).filter(row =>
+        String(row.seccion_id) === String(student.seccion_id) && row.activo !== false);
+      ({ topics, scores } = getLocalAcademicSettings(career));
+      weeks = buildAcademicWeeks(getLocalSchedulingWeeks(career), topics, career);
+    }
+
+    const ranking = buildSectionAwardsRanking(students, scores, topics, weeks).filter(entry =>
+      [entry.pruebasDesglose, entry.manualesDesglose, entry.examenesDesglose].some(group =>
+        group.some(grade => Number.isFinite(grade.nota))
+      )
+    );
+    const index = ranking.findIndex(entry => String(entry.id) === String(student.id));
+    return res.json({ data: { posicion: index < 0 ? null : index + 1 } });
+  } catch {
+    return res.status(503).json({ message: "No pudimos consultar tu posición en la sección." });
+  }
+}
+
+export async function listGradeHistory(req, res) {
+  res.set("Cache-Control", "private, no-store");
+  const { seccion_id } = req.params;
+  const { before, cuenta, instructor, evaluacion, accion, desde, hasta } = req.query;
+  const firstDay = gradeHistoryDay(desde);
+  const lastDay = gradeHistoryDay(hasta);
+  if ((before !== undefined && (typeof before !== "string" || !/^\d{1,15}$/.test(before))) ||
+      [cuenta, instructor, evaluacion].some(value => value !== undefined && (typeof value !== "string" || value.length > 64)) ||
+      [instructor, evaluacion].some(value => value?.includes("*")) ||
+      (accion !== undefined && !["asigno", "modifico", "elimino"].includes(accion)) ||
+      (desde !== undefined && !firstDay) || (hasta !== undefined && !lastDay) ||
+      (firstDay && lastDay && firstDay > lastDay)) {
+    return res.status(400).json({ message: "Revisa los filtros y el rango de fechas." });
+  }
+  const start = firstDay?.toISOString();
+  const end = lastDay ? new Date(lastDay.getTime() + 86_400_000).toISOString() : null;
+  const pageSize = 30;
+  try {
+    let rows;
+    if (isSupabaseConfigured && supabase) {
+      let query = supabase.from("historial_notas").select("*").eq("seccion_id", seccion_id)
+        .order("id", { ascending: false }).limit(pageSize + 1);
+      if (before) query = query.lt("id", before);
+      if (cuenta) query = query.eq("numero_cuenta", cuenta);
+      if (instructor) query = query.ilike("instructor_nombre", gradeHistoryTextPattern(instructor));
+      if (evaluacion) query = query.ilike("etiqueta", gradeHistoryTextPattern(evaluacion));
+      if (accion === "asigno") query = query.is("anterior", null);
+      if (accion === "modifico") query = query.not("anterior", "is", null).not("nueva", "is", null);
+      if (accion === "elimino") query = query.is("nueva", null);
+      if (start) query = query.gte("fecha", start);
+      if (end) query = query.lt("fecha", end);
+      const { data, error } = await query;
+      if (error) throw error;
+      rows = data;
+    } else {
+      const matchesText = (value, term) => !term || String(value).toLowerCase().includes(term.toLowerCase());
+      const entries = inMemoryEstudiantes.gradeHistory?.entries || [];
+      rows = [];
+      for (let i = entries.length - 1; i >= 0 && rows.length <= pageSize; i--) {
+        const row = entries[i];
+        const action = row.nueva == null ? "elimino" : row.anterior == null ? "asigno" : "modifico";
+        if (String(row.seccion_id) === seccion_id && (!before || row.id < Number(before)) &&
+            (!cuenta || row.numero_cuenta === cuenta) && (!accion || action === accion) &&
+            (!start || row.fecha >= start) && (!end || row.fecha < end) &&
+            matchesText(row.instructor_nombre, instructor) && matchesText(row.etiqueta, evaluacion)) rows.push(row);
+      }
+    }
+    return res.json({ data: rows.slice(0, pageSize), next: rows.length > pageSize ? rows[pageSize - 1].id : null });
+  } catch {
+    return res.status(503).json({ message: "No pudimos consultar el historial de notas." });
+  }
+}
 
 /**
  * Sanitiza canónicamente el objeto notas antes de persistirlo en Supabase o memoria local:
@@ -162,7 +316,8 @@ const getTableForSeccion = async (seccion_id, hintCarrera = null) => {
     }
   }
 
-  return "estudiantes_medicina";
+  const localSection = getLocalSchedulingSections().find(section => String(section.id) === String(seccion_id));
+  return normalizeCarreraToTable(localSection?.carrera);
 };
 
 // 1. Obtener todos los estudiantes de una sección (consultando la tabla de su carrera)
@@ -245,9 +400,7 @@ export const createEstudiante = async (req, res) => {
         updated_at: new Date().toISOString()
       };
 
-      const { data, error } = await supabase
-        .from(tableName)
-        .insert(newRecord)
+      const { data, error } = await withGradeActor(supabase.from(tableName).insert(newRecord), req.instructor)
         .select()
         .single();
 
@@ -302,8 +455,7 @@ export const createEstudiante = async (req, res) => {
     };
 
     assertLocalStudentAccountAvailable(cleanCuenta, null, inMemoryEstudiantes);
-    inMemoryEstudiantes[tableName].push(newInMemory);
-    savePersistentEstudiantes(inMemoryEstudiantes);
+    saveLocalGradeRows(tableName, [...inMemoryEstudiantes[tableName], newInMemory], req.instructor);
 
     return res.status(201).json({
       success: true,
@@ -414,9 +566,7 @@ export const updateEstudiante = async (req, res) => {
     }
 
     if (isSupabaseConfigured && supabase) {
-      const { data, error } = await supabase
-        .from(tableName)
-        .update(updates)
+      const { data, error } = await withGradeActor(supabase.from(tableName).update(updates), req.instructor)
         .eq("seccion_id", seccion_id)
         .eq("numero_cuenta", numero_cuenta)
         .select()
@@ -453,8 +603,9 @@ export const updateEstudiante = async (req, res) => {
 
     if (idx !== -1) {
       if (updates.numero_cuenta !== undefined) assertLocalStudentAccountAvailable(updates.numero_cuenta, { table: tableName, sectionId: seccion_id, account: numero_cuenta }, inMemoryEstudiantes);
-      inMemoryEstudiantes[tableName][idx] = { ...inMemoryEstudiantes[tableName][idx], ...updates };
-      savePersistentEstudiantes(inMemoryEstudiantes);
+      const nextRows = inMemoryEstudiantes[tableName].slice();
+      nextRows[idx] = { ...nextRows[idx], ...updates };
+      saveLocalGradeRows(tableName, nextRows, req.instructor);
       return res.json({
         success: true,
         message: "Estudiante actualizado exitosamente (memoria).",
@@ -587,7 +738,7 @@ export const updateBatchGrades = async (req, res) => {
     if (isSupabaseConfigured && supabase) {
       const results = await Promise.all(updates.map((item,index) => {
         const row = rows.find(row => String(row.numero_cuenta) === accounts[index]);
-        let query = supabase.from(tableName).update(gradePayload(item))
+        let query = withGradeActor(supabase.from(tableName).update(gradePayload(item)), req.instructor)
           .eq("seccion_id",seccion_id).eq("numero_cuenta",accounts[index]).eq("id",row.id);
         if (item.expected_updated_at !== undefined) query = item.expected_updated_at === null ? query.is("updated_at",null) : query.eq("updated_at",item.expected_updated_at);
         return query.select("id,numero_cuenta,updated_at");
@@ -606,8 +757,7 @@ export const updateBatchGrades = async (req, res) => {
       const index=accounts.indexOf(String(row.numero_cuenta));
       return index < 0 ? row : {...row,...gradePayload(updates[index])};
     });
-    savePersistentEstudiantes({...inMemoryEstudiantes,[tableName]:nextRows},true);
-    inMemoryEstudiantes[tableName]=nextRows;
+    saveLocalGradeRows(tableName, nextRows, req.instructor);
     return res.json({success:true,table:tableName,updatedCount:updates.length,
       data:nextRows.filter(row => String(row.seccion_id) === String(seccion_id) && accounts.includes(String(row.numero_cuenta))).map(row => ({id:row.id,numero_cuenta:row.numero_cuenta,updated_at:row.updated_at})),
       message:"Calificaciones guardadas correctamente."});
@@ -703,7 +853,7 @@ export const getEstudianteByCuenta = async (req, res) => {
 };
 
 // 7. Helper directo para actualizar una nota específica de un estudiante (usado por módulo de pruebas)
-export const updateEstudianteGradeDirect = async (seccion_id, numero_cuenta, carrera, key, value, strict = false) => {
+export const updateEstudianteGradeDirect = async (seccion_id, numero_cuenta, carrera, key, value, strict = false, instructor = null, delivery = null) => {
   const tableName = await getTableForSeccion(seccion_id, carrera);
 
   if (!inMemoryEstudiantes[tableName]) {
@@ -735,6 +885,12 @@ export const updateEstudianteGradeDirect = async (seccion_id, numero_cuenta, car
   if (!currentEst) { if (strict) throw new Error("No se encontró el estudiante para sincronizar la nota."); return false; }
 
   const currentNotas = { ...(currentEst.notas || {}) };
+  if (value === null && /^prueba_\d+$/.test(key)) {
+    const week = key.slice("prueba_".length);
+    delete currentNotas[`examencito_${week}`];
+    delete currentNotas[`Prueba de la semana ${week}`];
+    delete currentNotas[`${key}_real`];
+  }
   currentNotas[key] = value;
   const sanitized = sanitizeNotasPayload(currentNotas);
 
@@ -743,11 +899,24 @@ export const updateEstudianteGradeDirect = async (seccion_id, numero_cuenta, car
     updated_at: new Date().toISOString()
   };
 
+  if (isSupabaseConfigured && supabase && delivery) {
+    const { data, error } = await withGradeActor(supabase.rpc("sync_quiz_student_grade", {
+      p_delivery: delivery.id,
+      p_version: delivery.updated_at ?? null,
+      p_section: seccion_id,
+      p_account: numero_cuenta,
+      p_table: tableName,
+      p_previous: currentEst.notas ?? null,
+      p_grades: sanitized
+    }), instructor);
+    if (error) throw error;
+    if (data !== true) throw new Error("La entrega o la nota cambió durante la sincronización. Vuelve a cargar la revisión.");
+    return true;
+  }
+
   if (isSupabaseConfigured && supabase) {
     try {
-      let query = supabase
-        .from(tableName)
-        .update(payload)
+      let query = withGradeActor(supabase.from(tableName).update(payload), instructor)
         .eq("seccion_id", seccion_id)
         .eq("numero_cuenta", numero_cuenta);
       if (currentEst.id) query = query.eq("id",currentEst.id);
@@ -761,12 +930,14 @@ export const updateEstudianteGradeDirect = async (seccion_id, numero_cuenta, car
   }
 
   if (idx !== -1) {
-    inMemoryEstudiantes[tableName][idx] = {
-      ...inMemoryEstudiantes[tableName][idx],
-      notas: sanitized,
-      updated_at: payload.updated_at
-    };
-    savePersistentEstudiantes(inMemoryEstudiantes, strict);
+    const nextRows = inMemoryEstudiantes[tableName].slice();
+    nextRows[idx] = { ...nextRows[idx], ...payload };
+    if (isSupabaseConfigured && supabase) {
+      inMemoryEstudiantes[tableName] = nextRows;
+      savePersistentEstudiantes(inMemoryEstudiantes, strict);
+    } else {
+      saveLocalGradeRows(tableName, nextRows, instructor);
+    }
   }
 
   return true;
@@ -928,7 +1099,7 @@ export const saveWeeklyManuals = async (req, res) => {
         if (!getManualsWindow(schedule.section, schedule.weeks, number, new Date(), schedule.events, schedule.deadlines).isOpen) {
           return res.status(403).json({ message: "El plazo terminó durante el guardado. Actualiza la lista para comprobar los registros." });
         }
-        let query = supabase.from(tableName).update({ notas, total, updated_at: new Date().toISOString() })
+        let query = withGradeActor(supabase.from(tableName).update({ notas, total, updated_at: new Date().toISOString() }), req.instructor)
           .eq("seccion_id", seccion_id).eq("numero_cuenta", row.numero_cuenta);
         query = row.notas === null ? query.is("notas", null) : query.eq("notas", JSON.stringify(row.notas));
         const result = await query.select("numero_cuenta");
@@ -940,8 +1111,7 @@ export const saveWeeklyManuals = async (req, res) => {
         const change = changes.find(item => item.row === row);
         return change ? { ...row, notas: change.notas, total: change.total, updated_at: new Date().toISOString() } : row;
       });
-      savePersistentEstudiantes({ ...inMemoryEstudiantes, [tableName]: nextRows }, true);
-      inMemoryEstudiantes[tableName] = nextRows;
+      saveLocalGradeRows(tableName, nextRows, req.instructor);
     }
     return res.json({ success: true, updatedCount: changes.length });
   } catch (error) {

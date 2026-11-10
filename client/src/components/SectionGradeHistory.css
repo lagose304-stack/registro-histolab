@@ -1,0 +1,59 @@
+.grade-history { display: grid; gap: 1rem; min-width: 0; color: #18364a; overflow-wrap: anywhere; }
+.grade-history :is(h2, h3, h4, p, ol, dl, dd) { margin: 0; }
+.grade-history :is(button, input, select) { min-height: 44px; }
+.grade-history :is(button, input, select):focus-visible { outline: 2px solid #08749c; outline-offset: 2px; }
+.grade-history button:disabled { cursor: default; opacity: .6; }
+.grade-history__hero, .grade-history__filters, .grade-history__results {
+  border: 1px solid #d4e2e9;
+  border-radius: 1rem;
+  background: #fff;
+  padding: clamp(.85rem, 3vw, 1.35rem);
+  min-width: 0;
+}
+.grade-history__hero {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: .7rem .85rem;
+  background: #eef7fa;
+}
+.grade-history__hero h2 { font-size: clamp(1.2rem, 3vw, 1.65rem); line-height: 1.2; }
+.grade-history__hero p { margin-top: .35rem; color: #405b6e; }
+.grade-history__hero button { grid-column: 1 / -1; justify-self: start; }
+.grade-history__icon {
+  display: grid; place-items: center; width: 2.75rem; height: 2.75rem;
+  border-radius: .8rem; background: #d9edf4; color: #12627e;
+}
+.grade-history__fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 13rem), 1fr));
+  gap: .75rem;
+}
+.grade-history__fields label { display: grid; gap: .3rem; min-width: 0; font-size: .9rem; font-weight: 650; }
+.grade-history__fields :is(input, select) {
+  width: 100%; min-width: 0; box-sizing: border-box; padding: .5rem .65rem;
+  border: 1px solid #b9cdd7; border-radius: .55rem; background: #fff; color: #18364a; font: inherit; font-weight: 400; font-size: 1rem;
+}
+.grade-history__filter-actions, .grade-history__pages { display: flex; align-items: center; flex-wrap: wrap; gap: .55rem; margin-top: .9rem; }
+.grade-history__results-heading { display: flex; align-items: baseline; flex-wrap: wrap; gap: .25rem 1rem; margin-bottom: .75rem; }
+.grade-history__results-heading span, .grade-history__muted, .grade-history__meta time, .grade-history__change dt { color: #486175; font-size: .85rem; }
+.grade-history__list { padding: 0; list-style: none; display: grid; }
+.grade-history__entry { display: grid; gap: .65rem; padding: .85rem .2rem; border-top: 1px solid #dfebf0; }
+.grade-history__entry h4 { font-size: 1rem; }
+.grade-history__change { display: flex; align-items: center; flex-wrap: wrap; gap: .55rem .8rem; }
+.grade-history__change dl { display: flex; flex-wrap: wrap; gap: .45rem 1rem; }
+.grade-history__change dd { font-weight: 700; font-variant-numeric: tabular-nums; }
+.grade-history__badge { border-radius: 999px; padding: .18rem .6rem; font-size: .8rem; font-weight: 700; color: #124d72; background: #e5f1fb; }
+.grade-history__badge[data-action="assigned"] { color: #116145; background: #def4e9; }
+.grade-history__badge[data-action="removed"] { color: #922e37; background: #fce8eb; }
+.grade-history__meta { display: grid; align-content: center; gap: .2rem; font-size: .9rem; }
+.grade-history__meta time { display: flex; align-items: center; gap: .3rem; }
+.grade-history__meta time svg { flex-shrink: 0; }
+.grade-history__state { display: grid; justify-items: start; gap: .65rem; padding: 1rem; border-radius: .65rem; background: #f3f7f9; }
+.grade-history__state[role="alert"] { background: #fff1f1; color: #872c34; }
+.grade-history__pages { justify-content: space-between; border-top: 1px solid #dfebf0; padding-top: .8rem; font-size: .85rem; }
+@media (min-width: 700px) {
+  .grade-history__hero { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .grade-history__hero button { grid-column: auto; align-self: center; }
+  .grade-history__entry { grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1fr); align-items: center; }
+}

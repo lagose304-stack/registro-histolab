@@ -1,3 +1,4 @@
+import { withGradeActor } from "../services/gradeHistory.js";
 import { supabase, isSupabaseConfigured } from "../db/supabase.js";
 import { MAKEUP_TABLE } from "../services/studentMakeups.js";
 import { normalizeCarreraToTable } from "./estudiantes.controller.js";
@@ -202,6 +203,6 @@ export const saveReceivingMakeup = endpoints(async (req, res) => {
     const window = windows.manualWindow;
     fail(!window.isOpen, 409, window.reason);
   }
-  const data = await query(supabase.rpc("apply_student_makeup", { p_id: request.id, p_manuales: patch, p_asistio: asistio ?? null, p_actor: req.instructor.id }));
+  const data = await query(withGradeActor(supabase.rpc("apply_student_makeup", { p_id: request.id, p_manuales: patch, p_asistio: asistio ?? null, p_actor: req.instructor.id }), req.instructor));
   res.json({ success: true, data, message: "Registro guardado en la sección original del estudiante." });
 });

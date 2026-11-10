@@ -45,6 +45,14 @@
 .student-dashboard__breakdown dd { display: flex; align-items: baseline; flex-wrap: wrap; gap: .4rem; margin-top: .35rem; color: #274e67; font-size: 1.12rem; font-weight: 800; font-variant-numeric: tabular-nums; }
 .student-dashboard__breakdown small { color: #627e92; font-size: .7rem; font-weight: 450; }
 .student-dashboard__text-button { display: inline-flex; align-items: center; justify-content: space-between; gap: .5rem; min-height: 44px; padding: .4rem 0; border: 0; background: transparent; color: var(--student-accent); font: inherit; font-size: .82rem; font-weight: 750; text-align: left; cursor: pointer; }
+.student-dashboard__rank {
+  display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: .8rem;
+  padding: clamp(.85rem, 3vw, 1.1rem); border: 1px solid var(--student-line, #b7cdda);
+  border-radius: .85rem; background: var(--student-soft, #f4f9fc);
+}
+.student-dashboard__rank .student-dashboard__icon { background: #fff; }
+.student-dashboard__rank p { margin-top: .2rem; color: #3d5d72; font-size: .86rem; line-height: 1.55; }
+.student-dashboard__rank strong { color: #173d56; }
 .student-dashboard__attendance { border-top: 3px solid #448568; }
 .student-dashboard__attendance .student-dashboard__icon { background: #edf7f0; color: #3d7e5b; border-color: #bcd8c6; }
 .student-dashboard__attendance-total { display: flex; align-items: center; gap: .8rem; padding: .4rem 0; }

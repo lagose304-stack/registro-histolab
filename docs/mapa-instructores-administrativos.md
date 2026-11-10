@@ -18,6 +18,11 @@
 
 Desde el área Estudiantes, el botón **Ver estudiantes** abre la matrícula de la sección elegida. El panel permite matricular, editar o eliminar desde el listado y acceder al cuadro de notas. Sigue `api.estudiantes` en `services/api.js`, `estudiantes.routes.js` y `estudiantes.controller.js` para las operaciones de matrícula.
 
+Los formularios de alta manual permiten avanzar con Enter y retroceder con Mayús+Enter. Las flechas mueven el foco según la posición de los campos visibles. En el selector de rol, las flechas conservan su función de cambiar la opción. El registro se confirma con el botón del formulario.
+
+En **Herramientas de la sección**, **Historial de calificaciones** permite a Coordinación y al Creador consultar quién cambió una calificación en esa sección y filtrar por cuenta. El flujo de guardado y consulta se describe en el [mapa de instructores](mapa-instructores.md).
+
+
 La administración permite secciones de carreras distintas en el mismo horario. Dentro de una misma carrera y periodo, los horarios del mismo día no pueden traslaparse. Los códigos automáticos nuevos incluyen un sufijo de carrera, por ejemplo `MI1300-ENF`, para que cada sección conserve un código único.
 
 **Mis secciones** muestra a cada docente las secciones que coordina o tiene asignadas. Debajo, Creador y Coordinador ven **Todas las secciones**, agrupadas por día y ordenadas por hora. La API de secciones aplica la misma visibilidad con `shared/sectionAccess.mjs`. `hasFullSectionAccess` en `client/src/utils/sectionRoleUtils.js` permite operar todos los módulos de sección a ambos roles globales y al titular de esa sección. Consulta el [mapa del instructor](mapa-instructores.md).

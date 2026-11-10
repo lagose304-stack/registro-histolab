@@ -29,7 +29,18 @@ const database={from(table){const predicates=[];let operation="read",payload,sin
     if(table==="reposiciones_estudiantes"&&source.some(row=>row.seccion_origen_id===payload.seccion_origen_id&&row.numero_cuenta===payload.numero_cuenta&&row.numero_semana===payload.numero_semana&&["solicitada","asignada","completada"].includes(row.estado)))return resolve({error:{code:"23505"}});
     const row={id:`row-${source.length+1}`,estado:"solicitada",manual_notas:{},notas_aplicadas:{},asistio:false,created_at:new Clock().toISOString(),...payload};source.push(row);data=[row];
   }if(operation==="update")data.forEach(row=>Object.assign(row,payload));const count=data.length;if(range)data=data.slice(range[0],range[1]+1);if(fields!=="*")data=data.map(row=>Object.fromEntries(fields.split(",").filter(key=>key in row).map(key=>[key,row[key]])));resolve({data:clone(single?data[0]||null:data),count,error:null});}
-};return query;},async rpc(name,payload){rpcCalls.push({name,payload});const row=tables.reposiciones_estudiantes.find(row=>row.id===payload.p_id);if(name==="assign_student_makeup"){if(row.estado!=="solicitada")return {error:{code:"P0001",message:"Ya resuelta"}};Object.assign(row,{estado:"asignada",seccion_destino_id:payload.p_destino,destino_codigo:"DESTINO",practica_at:payload.p_practica});}else{const patch=payload.p_manuales||{};if(payload.p_entrega){const sub=tables.entregas_pruebas.find(item=>item.id===payload.p_entrega);patch[`prueba_${row.numero_semana}`]=sub.nota_obtenida;patch[`prueba_${row.numero_semana}_real`]=sub.nota_real??sub.nota_obtenida;}Object.assign(student.notas,patch);Object.assign(row.manual_notas,payload.p_manuales||{});if(payload.p_asistio!=null){row.asistio=payload.p_asistio;row.asistencia_reposicion=payload.p_asistio?'Asistio':'Falta injustificada';student.asistencias['reposicion_'+row.numero_semana]=payload.p_asistio?'Repuso':'No repuso';}}return {data:clone(row),error:null};}};
+};return query;},rpc(name,payload){
+ const headers = {};
+ const request = {setHeader(key,value){headers[key]=value;return request;},then(resolve,reject){
+ return Promise.resolve().then(()=>database.runRpc(name,payload,headers)).then(resolve,reject);
+ }};
+ return request;
+},runRpc(name,payload,headers){rpcCalls.push({name,payload,headers});
+  if(name==="sync_quiz_makeup_grade"){
+    const result=database.runRpc("apply_student_makeup",{p_id:payload.p_makeup,p_entrega:payload.p_delivery},headers);
+    return {data:!result.error,error:result.error};
+  }
+  const row=tables.reposiciones_estudiantes.find(row=>row.id===payload.p_id);if(name==="assign_student_makeup"){if(row.estado!=="solicitada")return {error:{code:"P0001",message:"Ya resuelta"}};Object.assign(row,{estado:"asignada",seccion_destino_id:payload.p_destino,destino_codigo:"DESTINO",practica_at:payload.p_practica});}else{const patch=payload.p_manuales||{};if(payload.p_entrega){const sub=tables.entregas_pruebas.find(item=>item.id===payload.p_entrega);patch[`prueba_${row.numero_semana}`]=sub.nota_obtenida;patch[`prueba_${row.numero_semana}_real`]=sub.nota_real??sub.nota_obtenida;}Object.assign(student.notas,patch);Object.assign(row.manual_notas,payload.p_manuales||{});if(payload.p_asistio!=null){row.asistio=payload.p_asistio;row.asistencia_reposicion=payload.p_asistio?'Asistio':'Falta injustificada';student.asistencias['reposicion_'+row.numero_semana]=payload.p_asistio?'Repuso':'No repuso';}}return {data:clone(row),error:null};}};
 async function compiled(entry){const output=await build({entryPoints:[entry],bundle:true,platform:"node",format:"cjs",write:false,logLevel:"silent",external:["jsonwebtoken"],plugins:[{name:"isolated",setup(b){
   b.onResolve({filter:/db\/supabase\.js$/},()=>({path:"db",namespace:"mock"}));b.onResolve({filter:/auth\.middleware\.js$/},()=>({path:"auth",namespace:"mock"}));
   b.onResolve({filter:/estudiantes\.controller\.js$/},()=>({path:"students",namespace:"mock"}));b.onResolve({filter:/academicAgenda\.controller\.js$/},()=>({path:"agenda",namespace:"mock"}));
@@ -82,3 +93,7 @@ assert.equal((await call(controllers.saveReceivingMakeup,{instructor:{id:"outsid
 assert.equal((await call(controllers.saveReceivingMakeup,{instructor:receiver,params:{id:created.id},body:{manuales:{manual_t1:1.001}}})).status,400);
 assert.equal(student.asistencias.asistencia_1,"Falta justificada");assert.equal(student.seccion_id,"origin");
 console.log("PASS: titular y falta justificada, exclusión de exámenes/secciones iniciadas/otras carreras, decisiones administrativas, privacidad, acceso temporal por semana sin cambiar matrícula, prueba receptora y notas sincronizadas a origen, ventanas de asistencia/manuales y rechazo de terceros.");
+
+const makeupGradeCalls = rpcCalls.filter(call => call.name === "apply_student_makeup");
+assert.ok(makeupGradeCalls.some(call => call.headers["x-histolab-grade-actor"] === receiver.id));
+assert.ok(makeupGradeCalls.some(call => call.payload.p_entrega && !call.headers["x-histolab-grade-actor"]));

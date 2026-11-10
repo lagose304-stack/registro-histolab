@@ -81,6 +81,72 @@ function getParcialForWeek(semanaNum, totalWeeks = 15) {
   return "III Parcial";
 }
 
+export function buildAcademicWeeks(savedWeeks, careerTemas, normCarrera) {
+  // Agrupar temas por semana
+  const temasPorSemana = {};
+  const temasListPorSemana = {};
+  const temasIdsPorSemana = {};
+
+  careerTemas.forEach((t) => {
+    const sem = Number(t.semana) || 0;
+    if (sem > 0) {
+      if (!temasPorSemana[sem]) temasPorSemana[sem] = [];
+      if (!temasListPorSemana[sem]) temasListPorSemana[sem] = [];
+      if (!temasIdsPorSemana[sem]) temasIdsPorSemana[sem] = [];
+
+      temasPorSemana[sem].push(t.titulo || t.nombre);
+      temasListPorSemana[sem].push(t);
+      temasIdsPorSemana[sem].push(t.id);
+    }
+  });
+
+  // Unir números de semana de configuracion_semanas y de temario
+  const semanasSet = new Set([
+    ...savedWeeks.map((w) => Number(w.numero_semana)),
+    ...Object.keys(temasPorSemana).map(Number)
+  ]);
+
+  const semanasNumeros = Array.from(semanasSet).sort((a, b) => a - b);
+  const totalWeeksCount = semanasNumeros.length || 12;
+
+  return semanasNumeros.map((semNum) => {
+    const found = savedWeeks.find((w) => Number(w.numero_semana) === semNum);
+    const isExam = found
+      ? Boolean(
+          found.es_examen ||
+            found.temas === "EXAMEN" ||
+            (found.descripcion && found.descripcion.toLowerCase().includes("examen"))
+        )
+      : false;
+
+    const temasArray = isExam ? [] : temasPorSemana[semNum] || [];
+    const temasList = isExam ? [] : temasListPorSemana[semNum] || [];
+    const temasIds = isExam ? [] : temasIdsPorSemana[semNum] || [];
+
+    let examDefaultName = `Examen ${String(found?.parcial || getParcialForWeek(semNum, totalWeeksCount)).includes("III") ? "III" : String(found?.parcial || getParcialForWeek(semNum, totalWeeksCount)).includes("II") ? "II" : "I"}`;
+    let cleanNombre = found?.descripcion || (isExam ? examDefaultName : `Semana ${semNum}`);
+    if (isExam && /^Semana\s*\d+\s*[-:•–—]?\s*Examen/i.test(cleanNombre)) {
+      cleanNombre = cleanNombre.replace(/^Semana\s*\d+\s*[-:•–—]?\s*/i, "").replace(/^Examen\s+([IVX\d]+)\s+Parcial$/i, "Examen $1");
+    }
+
+    return {
+      numero_semana: semNum,
+      nombre_semana: cleanNombre,
+      carrera: normCarrera,
+      parcial: found?.parcial || getParcialForWeek(semNum, totalWeeksCount),
+      es_examen: isExam,
+      temas: isExam
+        ? `Examen ${found?.parcial || getParcialForWeek(semNum, totalWeeksCount)}`
+        : temasArray.join(", "),
+      temas_list: temasList,
+      temas_ids: temasIds,
+      fecha_inicio: found?.fecha_inicio || null,
+      fecha_fin: found?.fecha_fin || null,
+      descripcion: cleanNombre
+    };
+  });
+}
+
 // 1. Obtener la configuración de semanas y los temas asignados a cada una
 export const getSemanasConfig = async (req, res) => {
   try {
@@ -113,69 +179,7 @@ export const getSemanasConfig = async (req, res) => {
       savedWeeks = inMemorySemanasConfig[normCarrera] || [];
     }
 
-    // Agrupar temas por semana
-    const temasPorSemana = {};
-    const temasListPorSemana = {};
-    const temasIdsPorSemana = {};
-
-    careerTemas.forEach((t) => {
-      const sem = Number(t.semana) || 0;
-      if (sem > 0) {
-        if (!temasPorSemana[sem]) temasPorSemana[sem] = [];
-        if (!temasListPorSemana[sem]) temasListPorSemana[sem] = [];
-        if (!temasIdsPorSemana[sem]) temasIdsPorSemana[sem] = [];
-
-        temasPorSemana[sem].push(t.titulo || t.nombre);
-        temasListPorSemana[sem].push(t);
-        temasIdsPorSemana[sem].push(t.id);
-      }
-    });
-
-    // Unir números de semana de configuracion_semanas y de temario
-    const semanasSet = new Set([
-      ...savedWeeks.map((w) => Number(w.numero_semana)),
-      ...Object.keys(temasPorSemana).map(Number)
-    ]);
-
-    const semanasNumeros = Array.from(semanasSet).sort((a, b) => a - b);
-    const totalWeeksCount = semanasNumeros.length || 12;
-
-    const result = semanasNumeros.map((semNum) => {
-      const found = savedWeeks.find((w) => Number(w.numero_semana) === semNum);
-      const isExam = found
-        ? Boolean(
-            found.es_examen ||
-              found.temas === "EXAMEN" ||
-              (found.descripcion && found.descripcion.toLowerCase().includes("examen"))
-          )
-        : false;
-
-      const temasArray = isExam ? [] : temasPorSemana[semNum] || [];
-      const temasList = isExam ? [] : temasListPorSemana[semNum] || [];
-      const temasIds = isExam ? [] : temasIdsPorSemana[semNum] || [];
-
-      let examDefaultName = `Examen ${String(found?.parcial || getParcialForWeek(semNum, totalWeeksCount)).includes("III") ? "III" : String(found?.parcial || getParcialForWeek(semNum, totalWeeksCount)).includes("II") ? "II" : "I"}`;
-      let cleanNombre = found?.descripcion || (isExam ? examDefaultName : `Semana ${semNum}`);
-      if (isExam && /^Semana\s*\d+\s*[-:•–—]?\s*Examen/i.test(cleanNombre)) {
-        cleanNombre = cleanNombre.replace(/^Semana\s*\d+\s*[-:•–—]?\s*/i, "").replace(/^Examen\s+([IVX\d]+)\s+Parcial$/i, "Examen $1");
-      }
-
-      return {
-        numero_semana: semNum,
-        nombre_semana: cleanNombre,
-        carrera: normCarrera,
-        parcial: found?.parcial || getParcialForWeek(semNum, totalWeeksCount),
-        es_examen: isExam,
-        temas: isExam
-          ? `Examen ${found?.parcial || getParcialForWeek(semNum, totalWeeksCount)}`
-          : temasArray.join(", "),
-        temas_list: temasList,
-        temas_ids: temasIds,
-        fecha_inicio: found?.fecha_inicio || null,
-        fecha_fin: found?.fecha_fin || null,
-        descripcion: cleanNombre
-      };
-    });
+    const result = buildAcademicWeeks(savedWeeks, careerTemas, normCarrera);
 
     const currentWeek = getCurrentAcademicWeek(result);
     res.json({
