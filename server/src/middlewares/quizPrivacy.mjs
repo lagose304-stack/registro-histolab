@@ -1,4 +1,4 @@
-import { randomInt } from "node:crypto";
+import { quizMatchingOptions } from "../../../shared/quizItems.mjs";
 
 const pick = (value, keys) => Object.fromEntries(keys.filter(key => value?.[key] !== undefined).map(key => [key, value[key]]));
 export function studentQuiz(quiz) {
@@ -11,11 +11,7 @@ export function studentQuiz(quiz) {
     if (item.opciones) clean.opciones = item.opciones.map(option => pick(option,["id","texto"]));
     if (item.pares) {
       clean.pares = item.pares.map(pair => pick(pair,["id","termino"]));
-      clean.definiciones = item.pares.map(pair => pair.definicion).filter(Boolean);
-      for (let index = clean.definiciones.length - 1; index > 0; index--) {
-        const target = randomInt(index + 1);
-        [clean.definiciones[index], clean.definiciones[target]] = [clean.definiciones[target], clean.definiciones[index]];
-      }
+      clean.definiciones = quizMatchingOptions({ id: item.id, pares: item.pares });
     }
     return clean;
   }) }));

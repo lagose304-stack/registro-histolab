@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { studentQuiz } from "../src/middlewares/quizPrivacy.mjs";
 import { createQuizItem, syncQuizItemAnswerKey, quizItemIssues, quizPublicationIssues, quizItemSlotCount, isQuizItemMultiSlot, quizMatchingOptions, completionBlankCount, quizItemLabel } from "../../shared/quizItems.mjs";
 const short = createQuizItem("texto_corto","short");
 const list = {...createQuizItem("listado","list"), cantidad:4};
@@ -64,6 +65,13 @@ for (let count=2;count<=10;count++) {
     assert.deepEqual([...shuffled].sort(),[...original].sort(),"Se conserva cada definición exactamente una vez");
     shuffled.forEach((definition,index)=>assert.notEqual(definition,original[index],`No puede coincidir la posición ${index}, con ${count} pares`));
     assert.deepEqual(quizMatchingOptions(structuredClone(item)),shuffled,"El orden permanece estable al reconstruir el apartado");
+    const publicQuiz=studentQuiz({publicada:true,preguntas:[{id:"q",items:[item]}]});
+    const publicItem=publicQuiz.preguntas[0].items[0];
+    const staleBankItem=studentQuiz({publicada:true,preguntas:[{id:"q",items:[{...item,definiciones:original}]}]}).preguntas[0].items[0];
+    assert.deepEqual(quizMatchingOptions(staleBankItem),shuffled,"Un banco antiguo guardado no anula la mezcla que prepara el servidor");
+    assert.deepEqual(quizMatchingOptions(publicItem),shuffled,"La proyección del servidor y el desplegable conservan el mismo orden sin coincidencias");
+    assert(publicItem.pares.every(pair=>!Object.hasOwn(pair,"definicion")),"La proyección no revela la clave de cada término");
+    assert.deepEqual(quizMatchingOptions(studentQuiz({publicada:true,preguntas:[{id:"q",items:[item]}]}).preguntas[0].items[0]),shuffled,"Recargar no cambia la mezcla");
     assert.deepEqual(item.pares.map(pair=>pair.definicion),original,"La clave de corrección no se reordena");
   }
 }

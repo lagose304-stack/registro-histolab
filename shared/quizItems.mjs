@@ -97,7 +97,10 @@ export function quizPublicationIssues(questions = []) {
 // Sattolo genera un ciclo sin posiciones fijas: ninguna definición coincide con su término.
 // La semilla depende del apartado y sus pares para mantener el orden durante la respuesta y al recargar.
 export function quizMatchingOptions(item) {
-  const options = [...new Set((Array.isArray(item.definiciones) ? item.definiciones : (item.pares || []).map(pair => pair.definicion)).filter(Boolean))];
+  // El servidor ya mezcló el banco sin posiciones fijas usando la clave privada.
+  // Volver a mezclarlo aquí podría devolver una definición a su posición original.
+  if (Array.isArray(item.definiciones)) return [...new Set(item.definiciones.filter(Boolean))];
+  const options = [...new Set((item.pares || []).map(pair => pair.definicion).filter(Boolean))];
   let seed = 2166136261;
   const identity = JSON.stringify([item.id, (item.pares || []).map(pair => [pair.id, pair.termino, pair.definicion])]);
   for (let index = 0; index < identity.length; index++) seed = Math.imul(seed ^ identity.charCodeAt(index), 16777619) >>> 0;

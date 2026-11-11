@@ -17,10 +17,6 @@
 .quiz-response--completion > p { margin: 0; font-size: 1rem; line-height: 2; white-space: pre-wrap; overflow-wrap: anywhere; }
 .quiz-response--completion input[type="text"] { display: inline-block; width: min(100%, 12rem); max-width: 100%; min-height: 44px; margin: .25rem .35rem; vertical-align: middle; border: 0; border-bottom: 2px solid #3f87a6; border-radius: .4rem .4rem 0 0; background: #eef7fb; }
 
-.quiz-response__definitions { padding: .85rem; border: 1px solid #bed3e0; border-radius: .6rem; background: #fff; font-size: .9rem; line-height: 1.7; overflow-wrap: anywhere; }
-.quiz-response__definitions > strong { font-size: .8rem; color: #557c94; }
-.quiz-response__definitions ol { padding-left: 1.5rem; margin: .5rem 0 0; }
-.quiz-response__definitions li { padding: .3rem 0 .3rem .2rem; }
 .quiz-response__selected-definition { grid-column: 1 / -1; line-height: 1.7; overflow-wrap: anywhere; }
 .quiz-response--completion input[type="text"] { width: min(calc(100% - .7rem), 12rem); }
 
