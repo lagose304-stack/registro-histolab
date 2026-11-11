@@ -14,6 +14,8 @@
 
 ## Relación con las secciones
 
+En el control de pruebas en vivo, únicamente el rol global **Creador** puede habilitar e iniciar preguntas fuera de la fecha y horario de la sección. La excepción permite verificaciones y no se extiende a Coordinador, titular ni asignados. `canBypassQuizSchedule` en `shared/instructorRoles.mjs` se aplica en `LiveQuizControlView.jsx` y en `liveQuiz.controller.js`, usando en el servidor el rol vigente de la cuenta autenticada. Véase [Programación de pruebas](programacion-pruebas.md).
+
 **Titular de sección** es una asignación por sección que se guarda en la columna histórica `secciones.coordinador`. El rol global **Coordinador** se guarda en `instructores.rol`.
 
 Desde el área Estudiantes, el botón **Ver estudiantes** abre la matrícula de la sección elegida. El panel permite matricular, editar o eliminar desde el listado y acceder al cuadro de notas. Sigue `api.estudiantes` en `services/api.js`, `estudiantes.routes.js` y `estudiantes.controller.js` para las operaciones de matrícula.

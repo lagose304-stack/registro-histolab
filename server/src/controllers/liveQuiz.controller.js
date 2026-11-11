@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { supabase, isSupabaseConfigured } from "../db/supabase.js";
 import { loadQuizSchedule } from "../services/quizSchedule.js";
 import { getQuizWindow } from "../../../shared/quizSchedule.mjs";
+import { canBypassQuizSchedule } from "../../../shared/instructorRoles.mjs";
 
 const __dirname = (() => {
   try {
@@ -333,14 +334,15 @@ export const controlLiveQuiz = async (req, res) => {
     if (["habilitar","iniciar_pregunta_1","iniciar_pregunta","siguiente_pregunta"].includes(accion)) {
       const section = req.quizSection || await getSectionByIdBackend(seccion_id);
       if (!section) return res.status(404).json({success:false,message:"Sección no encontrada."});
-      let context;
-      try { context = await loadQuizSchedule(section, DATA_DIR); }
-      catch { return res.status(503).json({success:false,message:"No pudimos verificar la programación de la prueba. Reintenta."}); }
-      const window = getQuizWindow(section, context.weeks, semana, new Date(), context.events);
-      // Las facultades del titular conservan la excepción horaria, no cambian la fecha académica.
-      const full = req.quizFullAccess === true;
-      const advancing = accion === "siguiente_pregunta";
-      if (!window.isPracticeDay || (!full && !advancing && !window.isOpen)) return res.status(403).json({success:false,message:window.reason});
+      // Only the authenticated account's current global Creador role bypasses
+      // date/time checks. Body flags, Coordinador and titular access cannot.
+      if (!canBypassQuizSchedule(req.instructor?.rol)) {
+        let context;
+        try { context = await loadQuizSchedule(section, DATA_DIR); }
+        catch { return res.status(503).json({success:false,message:"No pudimos verificar la programación de la prueba. Reintenta."}); }
+        const window = getQuizWindow(section, context.weeks, semana, new Date(), context.events);
+        if (!window.isPracticeDay || !window.isOpen) return res.status(403).json({success:false,message:window.reason});
+      }
     }
     const session = await getOrCreateSession(seccion_id, semana);
     const now = Date.now();

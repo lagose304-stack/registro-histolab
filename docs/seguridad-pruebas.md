@@ -4,16 +4,22 @@ La implementación se verificó con datos aislados y se publicó en Cloudflare e
 
 ## Controles aplicados
 
-- `quizAccess.middleware.js` autentica todas las rutas de pruebas y verifica cuenta, sección, semana y función asignada. La identidad enviada en el cuerpo no decide quién entrega. Calificar o eliminar una entrega verifica su registro real. El servidor decide si quien habilita es titular o asignado y aplica su regla de horario.
+- `quizAccess.middleware.js` autentica todas las rutas de pruebas y verifica cuenta, sección, semana y función asignada. La identidad enviada en el cuerpo no decide quién entrega. Calificar o eliminar una entrega verifica su registro real. El servidor aplica la ventana de programación; únicamente el rol global Creador de la cuenta autenticada puede habilitar y dirigir pruebas fuera de fecha y horario. Coordinador y titular no reciben esa excepción.
 - `quizPrivacy.mjs` entrega al estudiante una proyección sin claves, modelos ni respuestas esperadas. Los términos pareados conservan términos y un banco de definiciones independiente, sin revelar la asociación correcta. Las consultas en vivo no entregan nombres, IP ni respuestas de compañeros. Los borradores permanecen fuera del catálogo estudiantil.
 - La corrección usa la clave guardada en el servidor. La entrega exige una prueba publicada y una sesión iniciada. Los reintentos de entregas selladas son idempotentes, incluso para pruebas manuales; las respuestas originales prevalecen. La restricción única de la base y un bloqueo local por entrega evitan duplicados concurrentes.
 - Una falla al verificar la sesión central produce un error recuperable en lugar de reactivar una sesión vieja del proceso. Los contadores declarados de integridad se respaldan en los latidos existentes, sin nuevos sondeos, y no pueden disminuir mediante un latido posterior de la misma sesión.
 
-## Política de visibilidad y falsos positivos
+## Pantalla completa, navegación y advertencias (11 de noviembre de 2026)
 
-`quizIntegrity.mjs` observa eventos y mantiene un episodio por ausencia; no realiza comprobaciones periódicas. Solo cuenta una advertencia cuando una pregunta activa deja de estar visible al menos dos segundos. Un regreso breve, el lobby, un diálogo de confirmación o un envío no cuentan. Eventos duplicados de foco/visibilidad no duplican la advertencia. La tercera salida sostenida mantiene la regla previa de cerrar y entregar, con revisión del instructor.
+La política `pantalla-completa-foco-v3` exige pantalla completa real antes de crear el intento. `quizFullscreen.mjs` comprueba la API estándar o WebKit y verifica el resultado; si el navegador no la admite o la rechaza, no se inicia. Un intento restaurado sin pantalla completa queda bloqueado por `QuizFullscreenGate.jsx` hasta recuperarla. Los campos quedan deshabilitados mientras se muestra una advertencia o confirmación, durante el envío y después del sellado.
 
-Perder el foco, abrir un selector, girar el dispositivo, abrir el teclado, cambiar de tamaño, usar gestos o perder pantalla completa no demuestra una salida de aplicación y no genera sanciones por sí solo. Se bloquearon copiar/pegar y atajos restringidos dentro de la evaluación sin registrar el contenido privado del portapapeles ni convertir el intento en prueba de fraude. Se retiraron el sondeo con `debugger`, la huella digital y la medición de cadencia. La marca visible de la prueba se conserva sin observadores globales de mutaciones.
+`quizIntegrity.mjs` observa `blur`, visibilidad y salida de pantalla completa. La advertencia es inmediata, sin tolerancia de dos segundos ni espera al regreso, desde la entrada hasta la finalización, incluidos lobby, pausas y diálogos. Un mismo episodio cuenta una vez aunque emita los tres eventos; se rearma cuando la página está visible, enfocada y en pantalla completa. La tercera advertencia bloquea la edición y envía una única entrega con las respuestas actuales. Si falla el envío, se conserva el payload sellado para reintentar. El servidor admite los motivos de finalización por salida o infracciones en el lobby habilitado; una entrega normal antes de iniciar sigue rechazada. Los reintentos no sustituyen las respuestas selladas.
+
+`quizNavigation.mjs` mantiene el intento al pulsar Atrás en el historial del mismo documento. El botón interno usa la misma confirmación: salir finaliza y envía; cancelar exige volver a pantalla completa. La pérdida de pantalla completa también abre esta confirmación para el botón Atrás de dispositivos que solo abandonan ese modo sin cambiar el historial. Los diálogos no suspenden la detección de salidas. Solo el envío/sellado/finalización suspende nuevas advertencias. El cierre o recarga completa conserva el aviso nativo `beforeunload`, sujeto al navegador; no permite reemplazarlo por el diálogo de la aplicación.
+
+`App.jsx` registra el guardián de salida de `StudentPortalView.jsx`: el cierre de sesión voluntario de la barra superior abre la misma confirmación mientras hay un intento activo. La caducidad o revocación efectiva de una sesión conserva su manejo de autenticación.
+
+Cambiar de tamaño, rotar, abrir el teclado o usar gestos no genera advertencias si no provoca alguno de los eventos vigilados. Si un selector o una interrupción del sistema produce una pérdida real de foco, la regla estricta también cuenta ese evento. Copiar/pegar y atajos restringidos continúan bloqueados sin leer contenido privado del portapapeles. No se restaura el sondeo con `debugger`, la huella digital ni la medición de cadencia. La marca visible se conserva.
 
 Las incidencias del navegador se etiquetan como información declarada, no como evidencia infalible. Una llamada o interrupción del sistema puede ocultar realmente la página: el navegador no puede establecer su intención. La revisión muestra esta limitación y no atribuye automáticamente una captura o uso de IA. Tampoco puede impedir una cámara externa, otro dispositivo o un navegador manipulado. El catálogo conserva los enunciados para restaurar la evaluación; no hay una garantía de embargo de preguntas futuras. No se añadió cámara, micrófono, vigilancia remota ni dependencias.
 
@@ -21,6 +27,8 @@ Las incidencias del navegador se etiquetan como información declarada, no como 
 
 ```text
 node server/scripts/test_quiz_integrity.mjs
+node server/scripts/test_quiz_portal_integrity.mjs
+node server/scripts/test_quiz_creator_schedule.mjs
 node server/scripts/test_quiz_auth.mjs
 node server/scripts/test_quiz_security.mjs
 node server/scripts/test_quiz_submission_security.mjs
@@ -29,7 +37,7 @@ node server/scripts/test_quiz_auto_grading.mjs
 npm run build
 ```
 
-Las pruebas aisladas de navegador verificaron los seis tipos de preguntas a 320×640, 390×844, 640×360, 768×1024, 1024×768 y 1366×900; temporizador visible; reconexión y restauración; copia/pegado bloqueados; señales ambiguas sin sanción; tres salidas sostenidas sin doble conteo y una sola entrega íntegra. Son pruebas automatizadas con tamaños simulados, no una certificación de dispositivos físicos.
+Las verificaciones históricas de navegador correspondían a la política anterior y no certifican la política estricta. `test_quiz_integrity.mjs` comprueba eventos inmediatos, deduplicación, fallos de permisos de pantalla completa, envío único y Atrás repetido con datos aislados. `test_quiz_submission_security.mjs` incluye finalizaciones en lobby y conservación de las respuestas originales. `test_quiz_integrity_browser.mjs` contiene la verificación del portal con API simulada, pantalla completa, Atrás, restauración, sellado sin conexión y tamaños 320×640, 640×360, 768×1024 y 1024×768. Requiere Playwright y Chromium; acepta `HISTOLAB_PLAYWRIGHT_MODULE` y `HISTOLAB_CHROMIUM_PATH`. En esta revisión su ejecución quedó bloqueada por el cierre de Chromium al arrancar en el entorno restringido; no se da por aprobada la comprobación visual ni la de dispositivos físicos. La actualización del código no implica una publicación en producción.
 
 ## Estado de producción y cierre verificado
 

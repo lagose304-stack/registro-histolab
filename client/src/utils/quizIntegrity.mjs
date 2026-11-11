@@ -1,30 +1,43 @@
-// Only sustained document visibility changes count toward the explicit exam policy.
-// Focus, resizing, keyboard, touch gestures and debugger timing cannot prove misconduct.
-export const HIDDEN_GRACE_MS = 2000;
-export function observeQuizIntegrity({ document: doc, window: win, isActive, isSuppressed, onHidden, onVisible, onDeparture, onBlocked, onFullscreen, now = () => performance.now() }) {
-  let hiddenAt = null;
+// One warning per departure episode, immediately, throughout the active attempt.
+// A single system gesture can emit blur, visibility and fullscreen events together.
+export function observeQuizIntegrity({ document: doc, window: win, isActive, isSuppressed, onHidden, onVisible, onDeparture, onReturn = () => {}, onBlocked, onFullscreen, now = () => performance.now() }) {
+  let departureAt = null;
+  let focused = doc.hasFocus?.() ?? true;
   let hadFullscreen = Boolean(doc.fullscreenElement || doc.webkitFullscreenElement);
   const blockedAt = new Map();
-  const visibility = () => {
-    if (doc.hidden) {
-      if (hiddenAt === null && isActive() && !isSuppressed()) {
-        hiddenAt = now();
-        onHidden();
-      }
-    } else {
-      const started = hiddenAt;
-      hiddenAt = null;
-      onVisible();
-      if (started !== null && isActive() && !isSuppressed()) {
-        const duration = Math.max(0, now() - started);
-        if (duration >= HIDDEN_GRACE_MS) onDeparture(Math.round(duration / 1000));
-      }
+  const depart = type => {
+    if (!isActive() || isSuppressed() || departureAt !== null) return;
+    departureAt = now();
+    onDeparture(0, type);
+  };
+  const recover = () => {
+    if (doc.hidden || !focused || !hadFullscreen) return;
+    onVisible();
+    if (departureAt !== null) {
+      const started = departureAt;
+      departureAt = null;
+      onReturn(Math.max(0, Math.round((now() - started) / 1000)));
     }
   };
+  const visibility = () => {
+    if (doc.hidden) {
+      if (isActive() && !isSuppressed()) onHidden();
+      depart('salida_de_pantalla');
+    } else {
+      onVisible();
+      focused = doc.hasFocus?.() ?? focused;
+      recover();
+    }
+  };
+  const blur = () => { focused = false; depart('perdida_de_foco'); };
+  const focus = () => { focused = true; visibility(); };
   const fullscreen = () => {
     const current = Boolean(doc.fullscreenElement || doc.webkitFullscreenElement);
-    if (current !== hadFullscreen) onFullscreen(current, hadFullscreen);
+    const previous = hadFullscreen;
     hadFullscreen = current;
+    if (current !== previous) onFullscreen(current, previous);
+    if (previous && !current) depart('salida_pantalla_completa');
+    recover();
   };
   const block = (event, type) => {
     if (!isActive() || isSuppressed() || !event.target?.closest?.('.quiz-player')) return;
@@ -43,7 +56,7 @@ export function observeQuizIntegrity({ document: doc, window: win, isActive, isS
   const key = event => {
     if ((event.ctrlKey || event.metaKey) && ['p', 's', 'u'].includes(event.key.toLowerCase())) block(event, 'atajo_restringido');
   };
-  const listeners = [[doc,'visibilitychange',visibility], [win,'focus',visibility], [doc,'fullscreenchange',fullscreen], [doc,'webkitfullscreenchange',fullscreen], [doc,'copy',copy], [doc,'paste',paste], [doc,'cut',cut], [doc,'contextmenu',context], [doc,'dragstart',drag], [doc,'keydown',key]];
+  const listeners = [[doc,'visibilitychange',visibility], [win,'blur',blur], [win,'focus',focus], [doc,'fullscreenchange',fullscreen], [doc,'webkitfullscreenchange',fullscreen], [doc,'copy',copy], [doc,'paste',paste], [doc,'cut',cut], [doc,'contextmenu',context], [doc,'dragstart',drag], [doc,'keydown',key]];
   listeners.forEach(([target,event,handler]) => target.addEventListener(event,handler,true));
-  return () => { listeners.forEach(([target,event,handler]) => target.removeEventListener(event,handler,true)); hiddenAt = null; onVisible(); };
+  return () => { listeners.forEach(([target,event,handler]) => target.removeEventListener(event,handler,true)); departureAt = null; onVisible(); };
 }

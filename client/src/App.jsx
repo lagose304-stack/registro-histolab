@@ -56,6 +56,8 @@ export default function App() {
   }, []);
 
   const lastActivityRef = useRef(Date.now());
+  const studentQuizExitRef = useRef(null);
+  const registerStudentQuizExit = useCallback(handler => { studentQuizExitRef.current = handler; }, []);
 
   // Cerrar sesión de instructor
   const handleLogout = useCallback(async (reasonText = "Sesión cerrada correctamente.") => {
@@ -205,12 +207,12 @@ export default function App() {
         {/* Barra Superior IDÉNTICA en ambos portales */}
         <Navbar
           currentStudent={currentStudent}
-          onLogout={handleStudentLogout}
+          onLogout={() => studentQuizExitRef.current ? studentQuizExitRef.current() : handleStudentLogout()}
         />
 
         <main className="main-content" style={{ paddingTop: "1rem" }}>
           <Suspense fallback={<PortalSkeleton student />}>
-            <StudentPortalView key={`${currentStudent.id}:${currentStudent.carrera}:${currentStudent.seccion_id}:${currentStudent.numero_cuenta}`} student={currentStudent} notify={notify} />
+            <StudentPortalView key={`${currentStudent.id}:${currentStudent.carrera}:${currentStudent.seccion_id}:${currentStudent.numero_cuenta}`} student={currentStudent} notify={notify} onExitGuardChange={registerStudentQuizExit} />
           </Suspense>
         </main>
 

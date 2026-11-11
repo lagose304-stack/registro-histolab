@@ -496,7 +496,11 @@ export const submitPruebaEstudiante = async (req,res) => {
       if (!(quiz.publicada === true || String(quiz.publicada) === "true" || quiz.estado === "publicada")) return res.status(403).json({success:false,message:"Esta prueba no está publicada."});
       const live = await getLiveQuizEvidence(seccion_id,numSemana);
       integrityEvidence = live.alumnos_conectados?.[String(numero_cuenta)]?.integridad;
-      if (!["en_pregunta","esperando_siguiente","finalizada"].includes(live.estado)) return res.status(409).json({success:false,message:"La prueba aún no se ha iniciado para esta sección."});
+      // Entering the lobby already starts the fullscreen/integrity commitment.
+      // Explicit exit and the third warning must be sealable before question 1.
+      const earlyTermination = ["entrega_anticipada_por_salida", "expulsion_infracciones"].includes(clientAudit?.motivo_finalizacion);
+      const canEndLobbyAttempt = live.estado === "lobby" && live.habilitada && earlyTermination;
+      if (!["en_pregunta","esperando_siguiente","finalizada"].includes(live.estado) && !canEndLobbyAttempt) return res.status(409).json({success:false,message:"La prueba aún no se ha iniciado para esta sección."});
     }
     const assessment=buildAutomaticQuizAssessment(quiz.preguntas,answers);
     const result=resolveQuizAssessment(assessment);

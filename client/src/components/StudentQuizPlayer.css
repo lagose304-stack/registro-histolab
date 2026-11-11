@@ -47,5 +47,10 @@
 @media(prefers-reduced-motion: reduce) { .quiz-player * { animation: none !important; scroll-behavior: auto !important; } }
 
 .quiz-player-dialog, .student-portal[data-taking-quiz="true"] .sp-violation-modal-overlay { padding: .75rem !important; overflow-y: auto; }
+.quiz-fullscreen-gate { position: fixed; inset: 0; z-index: 999998; display: grid; place-items: center; padding: .75rem; background: #132c40; overflow-y: auto; }
+.quiz-fullscreen-gate > div { width: min(100%, 460px); max-height: calc(100dvh - 1.5rem); overflow-y: auto; display: grid; gap: 1rem; padding: clamp(1rem,3vw,2rem); border-radius: 1rem; background: white; color: #244c65; }
+.quiz-fullscreen-gate h2, .quiz-fullscreen-gate p { margin: 0; line-height: 1.5; overflow-wrap: anywhere; }
+.quiz-fullscreen-gate button { min-height: 48px; padding: .75rem; border: 1px solid #176f96; border-radius: .6rem; background: #176f96; color: white; font: inherit; cursor: pointer; }
+.quiz-fullscreen-gate button:last-child { background: white; color: #a12432; border-color: #d798a0; }
 .quiz-player-dialog > div, .student-portal[data-taking-quiz="true"] .sp-violation-modal-overlay > div { max-height: calc(100dvh - 1.5rem); overflow-y: auto; padding: clamp(1rem,3vw,2rem) !important; }
 html:has(.student-portal[data-taking-quiz="true"]), body:has(.student-portal[data-taking-quiz="true"]), .app-container:has(.student-portal[data-taking-quiz="true"]) { overflow-x: clip; }
