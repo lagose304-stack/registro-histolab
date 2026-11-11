@@ -48,7 +48,7 @@ Las cinco tablas de estudiantes tienen una protección antes de actualizar `nota
 
 La migración se aplicó en el proyecto RegistroHisto (`dghmrqyxrjgxceolqplt`). La verificación del panel mostró RLS activo, lectura pública deshabilitada, modificación directa por `authenticated` deshabilitada, escritura de la API habilitada, cero solicitudes y las cinco protecciones de notas instaladas. No se modificaron matrículas, asistencias, contraseñas ni calificaciones reales durante las pruebas.
 
-La implementación está disponible en el sitio local. No incluye un nuevo envío a GitHub ni una publicación del cliente y servidor en Cloudflare.
+El cliente y el servidor se publicaron mediante GitHub Actions desde el commit `5eba02b`. Se comprobaron en línea las correcciones de Numeración y Completación en LU1300-MED sin guardar cambios en el borrador existente. El piloto de 25 sesiones fue local; no se ejecutó un piloto de entregas con 25 alumnos en producción.
 
 ## Verificación de asistencia y semana de contenido
 
@@ -56,4 +56,8 @@ La implementación está disponible en el sitio local. No incluye un nuevo enví
 
 `test_grade_isolation.mjs` incluye rechazo de manuales por ID y alias, calificación general y directa, faltas consecutivas, reposición asistida/ausente y cero al pasar lista sin abrir el portal. `test_student_makeups.mjs` comprueba el bloqueo de entrada y entrega. `test_quiz_schedule.mjs` comprueba el desfase y las dos pruebas previas al examen.
 
-**Validación SQL aprobada; pendiente de instalación en producción:** `practice_absence_makeup_migration.sql` reemplaza la función transaccional de reposición para guardar cero al registrar una falta receptora e impedir que las notas aplicadas previamente restauren un positivo. Debe aplicarse después de `student_makeup_attendance_migration.sql`. `test_student_makeups_sql.mjs` pasó en PostgreSQL aislado: migración aplicada dos veces, cero oficial y real, rechazo de manuales positivos, protección frente a una carga antigua y recuperación tras corregir a Asistió. La migración todavía no se ha aplicado a la base real. El despliegue de Actions publica el cliente y el servidor, pero no ejecuta automáticamente archivos SQL.
+**Aplicada en producción y verificada:** `practice_absence_makeup_migration.sql` reemplaza la función transaccional de reposición para guardar cero al registrar una falta receptora e impedir que las notas aplicadas previamente restauren un positivo. Se aplicó después de `student_makeup_attendance_migration.sql` en el proyecto `dghmrqyxrjgxceolqplt`, mediante una transacción con espera de bloqueo máxima de cinco segundos. La ejecución terminó con éxito y no invocó la función ni actualizó filas de estudiantes.
+
+`test_student_makeups_sql.mjs` pasó en PostgreSQL aislado: migración aplicada dos veces, cero oficial y real, rechazo de manuales positivos, protección frente a una carga antigua y recuperación tras corregir a Asistió. En producción, seis comprobaciones de catálogo confirmaron la coincidencia del cuerpo de la función con el archivo validado, `SECURITY INVOKER`, ejecución deshabilitada para `anon` y `authenticated`, ejecución habilitada para `service_role` y presencia de la regla de falta injustificada. La huella MD5 del cuerpo, normalizando saltos de línea CRLF a LF, es `cc54b07c0631325f8e1532ebf187b6b6`.
+
+El despliegue de Actions publica el cliente y el servidor, pero no ejecuta automáticamente archivos SQL. Esta migración ya no está pendiente; las futuras modificaciones de base de datos requieren su aplicación y verificación separadas.
