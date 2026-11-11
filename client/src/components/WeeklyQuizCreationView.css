@@ -168,3 +168,6 @@
 }
 
 .quiz-item-editor__auto { padding: .7rem .85rem; border: 1px solid #a7c9b3; border-radius: .6rem; background: #eaf6ef; color: #2a6544; font-size: .85rem; line-height: 1.6; }
+.quiz-item-editor__count { display: grid; grid-template-columns: 44px minmax(0, 7rem) 44px; gap: .5rem; align-items: center; }
+.quiz-item-editor__count input { text-align: center; font: inherit; font-size: 1rem; padding: .6rem; border: 1px solid #b9cbd7; border-radius: .45rem; background: #fff; color: #183e55; }
+.quiz-item-editor__count button { min-height: 44px; padding: .5rem; justify-content: center; }

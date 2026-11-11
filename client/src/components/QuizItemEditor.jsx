@@ -1,4 +1,5 @@
 import GradeInput from "./GradeInput";
+import QuizAnswerCountInput from "./QuizAnswerCountInput";
 import { isAutomaticQuizItem } from "../../../shared/quizAutoGrading.mjs";
 import React, { useId } from "react";
 import { Plus, Trash2 } from "lucide-react";
@@ -47,7 +48,7 @@ export default function QuizItemEditor({ item, index, onChange, onRemove }) {
         const answers=Array.from({length:completionBlankCount(item.texto_completar)},(_,index)=>item.respuestas_esperadas?.[index]||"");answers[blankIndex]=event.target.value;patch({respuestas_esperadas:answers});
       }} /></label>)}
     </div> : <>
-      {item.tipo === "listado" && <label className="user-field">Número de respuestas<input aria-label="Número de respuestas" type="number" min="1" max="10" value={item.cantidad || 3} onChange={event => patch({ cantidad:Math.max(1,Math.min(10,Number(event.target.value)||1)) })} /><small>{((Number(item.puntos)||0)/(item.cantidad||3)).toFixed(3)} puntos por respuesta.</small></label>}
+      {item.tipo === "listado" && <><QuizAnswerCountInput value={item.cantidad ?? 3} onChange={cantidad => patch({ cantidad })} /><small>{((Number(item.puntos)||0)/(item.cantidad||3)).toFixed(3)} puntos por respuesta.</small></>}
       <label className="user-field quiz-item-editor__answer-key">Respuestas posibles · Solo docente<textarea aria-label="Respuestas posibles · Solo docente" rows={3} value={answersText} onChange={event => { const text=event.target.value; patch({respuestas_posibles_texto:text,respuesta_modelo:text,respuestas_esperadas:text.split(/[\n,]+/).map(answer=>answer.trim()).filter(Boolean)}); }} placeholder="Una respuesta por línea o separadas por comas." /><small>Guía para quien revisa las respuestas. No se muestra al estudiante.</small></label>
     </>}
     {issues.length > 0 && <div className="quiz-item-editor__issues"><strong>Para completar este apartado</strong><ul>{issues.map((issue,issueIndex)=><li key={issueIndex}>{issue}</li>)}</ul></div>}

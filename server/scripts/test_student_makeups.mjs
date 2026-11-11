@@ -1,5 +1,6 @@
 // Controladores, autorización de pruebas y sincronización reales con persistencia aislada.
 import assert from "node:assert/strict";
+import { quizzesDueAtPractice } from "../../shared/quizSchedule.mjs";
 import { build } from "esbuild";
 import vm from "node:vm";
 import { createRequire } from "node:module";
@@ -46,7 +47,7 @@ async function compiled(entry){const output=await build({entryPoints:[entry],bun
   b.onResolve({filter:/estudiantes\.controller\.js$/},()=>({path:"students",namespace:"mock"}));b.onResolve({filter:/academicAgenda\.controller\.js$/},()=>({path:"agenda",namespace:"mock"}));
   b.onResolve({filter:/liveQuiz\.controller\.js$/},()=>({path:"live",namespace:"mock"}));b.onResolve({filter:/secciones\.controller\.js$/},()=>({path:"sections",namespace:"mock"}));b.onResolve({filter:/asignaciones\.controller\.js$/},()=>({path:"assignments",namespace:"mock"}));b.onResolve({filter:/^node:fs$/},()=>({path:"fs",namespace:"mock"}));
   if(entry.includes("middleware"))b.onResolve({filter:/pruebas\.controller\.js$/},()=>({path:"submissions",namespace:"mock"}));
-  b.onLoad({filter:/.*/,namespace:"mock"},({path:p})=>({contents:({db:"export const supabase=globalThis.database,isSupabaseConfigured=true;",auth:"export const authenticateInstructor=(r,s,n)=>n(),authenticateStudent=(r,s,n)=>n();",students:"export const normalizeCarreraToTable=()=> 'estudiantes_medicina';export const updateEstudianteGradeDirect=async(...a)=>globalThis.normalGrades.push(a);",agenda:"export const getSectionAttendanceEvents=async()=>[];",live:"export const getLiveQuizEvidence=async()=>({estado:'en_pregunta',alumnos_conectados:{}});",sections:"export const getLocalSchedulingSections=()=>[];",assignments:"export const getLocalSectionAssignments=()=>[];",submissions:"export const getQuizSubmissionForAccess=async()=>null;",fs:"export default {existsSync:()=>false,mkdirSync(){},writeFileSync(){}};"})[p]}));
+  b.onLoad({filter:/.*/,namespace:"mock"},({path:p})=>({contents:({db:"export const supabase=globalThis.database,isSupabaseConfigured=true;",auth:"export const authenticateInstructor=(r,s,n)=>n(),authenticateStudent=(r,s,n)=>n();",students:"export const hasPracticeAbsence=async()=>false;export const normalizeCarreraToTable=()=> 'estudiantes_medicina';export const updateEstudianteGradeDirect=async(...a)=>globalThis.normalGrades.push(a);",agenda:"export const getSectionAttendanceEvents=async()=>[];",live:"export const getLiveQuizEvidence=async()=>({estado:'en_pregunta',alumnos_conectados:{}});",sections:"export const getLocalSchedulingSections=()=>[];",assignments:"export const getLocalSectionAssignments=()=>[];",submissions:"export const getQuizSubmissionForAccess=async()=>null;",fs:"export default {existsSync:()=>false,mkdirSync(){},writeFileSync(){}};"})[p]}));
   }}]});const module={exports:{}};vm.runInNewContext(output.outputFiles[0].text,{module,exports:module.exports,database,normalGrades,Date:Clock,require,console,process:{cwd:()=>process.cwd()}});return module.exports;}
 const controllers=await compiled("server/src/controllers/studentMakeups.controller.js");
 const middleware=await compiled("server/src/middlewares/quizAccess.middleware.js");
@@ -88,7 +89,16 @@ assert.equal((await call(controllers.saveReceivingMakeup,{instructor:receiver,pa
 now=Date.parse("2026-11-07T18:00:00Z");assert.equal((await call(controllers.saveReceivingMakeup,{instructor:receiver,params:{id:created.id},body:{asistencia_reposicion:'Asistio'}})).status,200);
 assert.equal((await call(controllers.saveReceivingMakeup,{instructor:receiver,params:{id:created.id},body:{manuales:{manual_t1:.625}}})).status,409,"Los manuales se cargan en la siguiente práctica, no durante la reposición");
 assert.equal(student.asistencias.asistencia_1,'Falta justificada');assert.equal(student.asistencias.reposicion_1,'Repuso');assert.equal((await call(controllers.saveReceivingMakeup,{instructor:receiver,params:{id:created.id},body:{asistencia_reposicion:'Falta injustificada'}})).status,200);assert.equal(student.asistencias.reposicion_1,'No repuso');assert.equal(student.asistencias.asistencia_1,'Falta justificada');assert.equal((await call(controllers.saveReceivingMakeup,{instructor:receiver,params:{id:created.id},body:{asistencia_reposicion:'Falta justificada'}})).status,400);
-now=Date.parse("2026-11-14T18:00:00Z");assert.equal((await call(controllers.saveReceivingMakeup,{instructor:receiver,params:{id:created.id},body:{manuales:{manual_t1:.875}}})).status,200);assert.equal(student.notas.manual_t1,.875);
+auth=await call(middleware.quizAccess({student:true}),{student,params:{seccion_id:"origin",semana:"1"}});
+assert.equal(auth.status,403);assert.equal(auth.payload.nota,0);
+assert(normalGrades.some(args=>args[3]==='prueba_1' && args[4]===0));
+const absentStudent={...student,asistencias:{asistencia_2:'Falta injustificada'}};
+auth=await call(middleware.quizAccess({student:true}),{student:absentStudent,params:{seccion_id:"origin",semana:"2"}});
+assert.equal(auth.status,403);assert.equal(auth.payload.reason,'PRACTICE_ABSENCE');
+now=Date.parse("2026-11-14T18:00:00Z");
+assert.equal((await call(controllers.saveReceivingMakeup,{instructor:receiver,params:{id:created.id},body:{manuales:{manual_t1:.875}}})).status,409,"Una falta en reposición impide registrar manuales positivos");
+tables.reposiciones_estudiantes.find(row=>row.id===created.id).asistencia_reposicion='Asistio';
+assert.equal((await call(controllers.saveReceivingMakeup,{instructor:receiver,params:{id:created.id},body:{manuales:{manual_t1:.875}}})).status,200);assert.equal(student.notas.manual_t1,.875);
 assert.equal((await call(controllers.saveReceivingMakeup,{instructor:{id:"outsider",rol:"Instructor"},params:{id:created.id},body:{manuales:{manual_t1:1}}})).status,403);
 assert.equal((await call(controllers.saveReceivingMakeup,{instructor:receiver,params:{id:created.id},body:{manuales:{manual_t1:1.001}}})).status,400);
 assert.equal(student.asistencias.asistencia_1,"Falta justificada");assert.equal(student.seccion_id,"origin");
@@ -97,3 +107,20 @@ console.log("PASS: titular y falta justificada, exclusión de exámenes/seccione
 const makeupGradeCalls = rpcCalls.filter(call => call.name === "apply_student_makeup");
 assert.ok(makeupGradeCalls.some(call => call.headers["x-histolab-grade-actor"] === receiver.id));
 assert.ok(makeupGradeCalls.some(call => call.payload.p_entrega && !call.headers["x-histolab-grade-actor"]));
+
+// Casos de Juan: el día de rendición no sustituye la semana de contenido.
+const regularWeeks=[1,2,3,4].map(numero_semana=>({numero_semana,es_examen:numero_semana===4}));
+assert.deepEqual(quizzesDueAtPractice(regularWeeks,2),[1]);
+assert.deepEqual(quizzesDueAtPractice(regularWeeks,3),[2,3]);
+const juan={...student,numero_cuenta:'JUAN',asistencias:{asistencia_1:'Falta injustificada',asistencia_2:'Asistio',asistencia_3:'Asistio'}};
+const accessJuan=number=>call(middleware.quizAccess({student:true}),{student:juan,params:{seccion_id:'origin',semana:String(number)}});
+assert.equal((await accessJuan(1)).status,403);assert((await accessJuan(2)).next);
+juan.asistencias.asistencia_2='Falta justificada';
+tables.reposiciones_estudiantes.push({id:'juan-makeup',numero_cuenta:'JUAN',numero_semana:2,seccion_origen_id:'origin',seccion_destino_id:'host',estado:'asignada',asistencia_reposicion:'Asistio'});
+assert.equal((await accessJuan(1)).status,403);
+assert((await accessJuan(2)).next);assert((await accessJuan(3)).next);
+tables.reposiciones_estudiantes.at(-1).asistencia_reposicion='Falta injustificada';
+assert.equal((await accessJuan(2)).status,403);assert((await accessJuan(3)).next);
+tables.reposiciones_estudiantes.pop();juan.asistencias.asistencia_2='Falta injustificada';
+assert.equal((await accessJuan(1)).status,403);assert.equal((await accessJuan(2)).status,403);assert((await accessJuan(3)).next);
+console.log('PASS casos de Juan: falta en práctica 1, reposición de práctica 2, dos faltas y dos pruebas antes del examen con permisos independientes.');

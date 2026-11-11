@@ -194,6 +194,9 @@ export const saveReceivingMakeup = endpoints(async (req, res) => {
   fail(manuales != null && (typeof manuales !== "object" || Array.isArray(manuales)), 400, "Formato de notas inválido.");
   fail(asistio != null && typeof asistio !== "boolean", 400, "Asistencia inválida.");
   const patch = manuales || {};
+  const absent = asistencia_reposicion === "Falta injustificada" || asistio === false ||
+    (asistio == null && request.asistencia_reposicion === "Falta injustificada");
+  fail(absent && Object.values(patch).some(value => Number(value) > 0), 409, "No puedes registrar una nota de manual con falta injustificada en la reposición.");
   fail(Object.entries(patch).some(([key, value]) => !request.manual_ids.includes(key) || !makeupGrade(value)), 400, "Revisa los manuales: de 0 a 1, con hasta tres decimales.");
   const [weeks, events, deadlines] = await Promise.all([weeksFor(section.carrera), getSectionAttendanceEvents(section),
     query(supabase.from("fechas_carga_manuales").select("numero_semana,fecha_carga").eq("seccion_id", section.id))]);

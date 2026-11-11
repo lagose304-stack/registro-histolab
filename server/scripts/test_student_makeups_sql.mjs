@@ -70,5 +70,21 @@ try {
   const before=(await q("SELECT manual_notas FROM reposiciones_estudiantes WHERE id=$1",[id(5)])).rows[0].manual_notas;
   await assert.rejects(q("SELECT apply_student_makeup($1,'{\"manual_t1\":1}')",[id(5)]));
   assert.deepEqual((await q("SELECT manual_notas FROM reposiciones_estudiantes WHERE id=$1",[id(5)])).rows[0].manual_notas,before);
+  const absenceMigration = await readFile(new URL("../src/db/practice_absence_makeup_migration.sql", import.meta.url), "utf8");
+  await db.exec(absenceMigration);
+  await db.exec(absenceMigration);
+  await q("UPDATE estudiantes_medicina SET seccion_id=$1 WHERE numero_cuenta='DEMO'",[id(2)]);
+  await q("SELECT apply_student_makeup($1,NULL,false)",[id(5)]);
+  let absentGrades=(await q("SELECT notas FROM estudiantes_medicina WHERE numero_cuenta='DEMO'")).rows[0].notas;
+  assert.equal(absentGrades.prueba_1,0);assert.equal(absentGrades.prueba_1_real,0);assert.equal(absentGrades.manual_t1,0);
+  await assert.rejects(q("SELECT apply_student_makeup($1,'{\"manual_t1\":0.875}')",[id(5)]));
+  await assert.rejects(q("SELECT apply_student_makeup($1,NULL,NULL,$2)",[id(5),id(6)]));
+  await q("UPDATE estudiantes_medicina SET notas='{\"otra_nota\":4,\"prueba_1\":5}' WHERE numero_cuenta='DEMO'");
+  absentGrades=(await q("SELECT notas FROM estudiantes_medicina WHERE numero_cuenta='DEMO'")).rows[0].notas;
+  assert.equal(absentGrades.prueba_1,0,"Una carga antigua no restaura la nota positiva de reposición");
+  assert.equal(absentGrades.otra_nota,4);
+  await q("SELECT apply_student_makeup($1,NULL,true)",[id(5)]);
+  await q("SELECT apply_student_makeup($1,'{\"manual_t1\":0.875}',NULL,$2)",[id(5),id(6)]);
+  assert.equal((await q("SELECT notas FROM estudiantes_medicina WHERE numero_cuenta='DEMO'")).rows[0].notas.prueba_1,4.125);
   console.log("PASS: migración idempotente, asignación única y futura, carrera, tres decimales y cero, sincronización atómica a origen, matrícula intacta, protección ante cargas antiguas, RLS/EXECUTE, entrega ajena y rollback si cambia la matrícula.");
 } finally { await db.close(); }

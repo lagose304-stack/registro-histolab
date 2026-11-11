@@ -562,6 +562,10 @@ export default function StudentPortalView({ student, notify = () => {} }) {
 
   // Iniciar la realización de una prueba semanal en vivo
   const handleStartQuiz = (quiz, liveSess = null) => {
+    if (quiz.falta_injustificada) {
+      window.alert(quiz.mensaje_asistencia);
+      return;
+    }
     // 1. Las preguntas se mantienen en orden secuencial estricto para sincronización global
     const originalQuestions = quiz.preguntas || [];
     setShuffledQuestions(originalQuestions);

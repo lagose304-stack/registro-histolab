@@ -283,7 +283,7 @@ export const savePruebaSemanal = async (req, res) => {
       : [];
     for (const [questionIndex, question] of rawPreguntas.entries()) {
       for (const [itemIndex, item] of (question.items || []).entries()) {
-        if (!["seleccion_multiple", "verdadero_falso", "terminos_pareados", "completacion"].includes(item?.tipo)) continue;
+        if (!["texto_corto", "listado", "seleccion_multiple", "verdadero_falso", "terminos_pareados", "completacion"].includes(item?.tipo)) continue;
         const issues = quizItemIssues(item, isPublicada);
         if (issues.length) return res.status(400).json({ success: false, message: `Pregunta ${questionIndex + 1}, apartado ${itemIndex + 1}: ${issues.join(" ")}` });
       }
@@ -856,6 +856,8 @@ export const calificarEntrega = async (req, res) => {
       message: "Error al calificar la entrega",
       error: error.message
     });
+  } finally {
+    releaseLocalLock?.();
   }
 };
 
@@ -919,8 +921,6 @@ export const getAllEntregasPorSeccion = async (req, res) => {
       message: "Error al consultar todas las entregas de la sección",
       error: error.message
     });
-  } finally {
-    releaseLocalLock?.();
   }
 };
 

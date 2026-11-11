@@ -35,14 +35,19 @@ const normalizeSixQuestions = (rawQuestions = []) => {
     if (rawQuestions[i]) {
       const q = rawQuestions[i];
       const rawItems = Array.isArray(q.items) ? q.items : [];
-      const normalizedItems = rawItems.map((it) => {
+      const normalizedItems = rawItems.map((it, itemIndex) => {
+        const type = QUIZ_ITEM_TYPES.some(type => type.id === it.tipo) ? it.tipo : "listado";
+        const defaults = createQuizItem(type, it.id || `item_${i + 1}_${itemIndex + 1}`);
         const itemPts = it.puntos !== undefined && !isNaN(Number(it.puntos))
           ? Number(it.puntos)
           : (rawItems.length > 0 ? parseFloat((1.0 / rawItems.length).toFixed(3)) : 0.5);
         return {
+          ...defaults,
           ...it,
+          id: defaults.id,
+          tipo: type,
           puntos: itemPts,
-          cantidad: it.cantidad || (it.tipo === "listado" ? 3 : 1)
+          cantidad: it.cantidad ?? defaults.cantidad
         };
       });
 
@@ -433,7 +438,8 @@ export default function WeeklyQuizCreationView({
   const handleReplaceSubItem = (questionId, itemId, replacement) => {
     setQuizData(previous => ({ ...previous, preguntas: previous.preguntas.map(question => {
       if (question.id !== questionId) return question;
-      const items = (question.items || []).map(item => item.id === itemId ? syncQuizItemAnswerKey(replacement) : item);
+      // Conservar el borrador mientras se edita; las claves se sincronizan al guardar.
+      const items = (question.items || []).map(item => item.id === itemId ? replacement : item);
       return { ...question, items, puntos: Number(items.reduce((sum,item) => sum + (Number(item.puntos)||0),0).toFixed(3)) };
     }) }));
     setHasUnsavedChanges(true);

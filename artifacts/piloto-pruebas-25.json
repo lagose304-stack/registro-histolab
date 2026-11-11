@@ -1,0 +1,266 @@
+{
+  "success": true,
+  "mode": "HTTP local con archivos temporales reales; consultas de cuentas/programación aisladas; sin Supabase ni proveedor de acceso real",
+  "participants": 25,
+  "quizTypes": [
+    "texto_corto",
+    "listado",
+    "completacion",
+    "seleccion_multiple",
+    "verdadero_falso",
+    "terminos_pareados"
+  ],
+  "checks": [
+    "sesiones firmadas y rechazo de acceso anónimo, otra sección, otro alumno y control docente por alumno",
+    "creación y publicación de una prueba con seis tipos; 25 catálogos sin claves de corrección",
+    "falta injustificada bloqueada; entrega anticipada rechazada; 25 participantes conectados al lobby",
+    "seis preguntas con 25 respuestas por ronda, vencimiento real del cronómetro, avances docentes, privacidad y cinco reingresos sin pérdida",
+    "25 entregas mixtas, automáticas correctas, pendientes manuales y 50 reintentos sin duplicados ni cambios de respuestas",
+    "revisión manual incompleta conserva cinco pendientes y no publica una nota definitiva",
+    "25 revisiones completas con notas independientes exactas a tres decimales; bonus y tope oficial de 5 respetados",
+    "25 comprobantes y 25 fichas académicas coinciden, sin cruces entre estudiantes",
+    "resumen docente de 25 resultados sin error y sin exponer respuestas en la consulta de premios",
+    "reinicio de la aplicación: 25 entregas y sus notas permanecen guardadas en archivos temporales reales"
+  ],
+  "requests": 441,
+  "expectedRejections": 7,
+  "unexpectedServerErrors": 0,
+  "latencyLocalMs": {
+    "median": 28,
+    "p95": 102,
+    "note": "Tiempo local del piloto, no es una medición de capacidad de producción."
+  },
+  "results": [
+    {
+      "cuenta": "PILOTO01",
+      "nota_esperada": 5,
+      "nota_oficial": 5,
+      "nota_real": 6,
+      "nota_real_esperada": 6,
+      "estado": "calificado",
+      "verificada": true
+    },
+    {
+      "cuenta": "PILOTO02",
+      "nota_esperada": 0,
+      "nota_oficial": 0,
+      "nota_real": 0,
+      "nota_real_esperada": 0,
+      "estado": "calificado",
+      "verificada": true
+    },
+    {
+      "cuenta": "PILOTO03",
+      "nota_esperada": 4.333,
+      "nota_oficial": 4.333,
+      "nota_real": 4.333,
+      "nota_real_esperada": 4.333,
+      "estado": "calificado",
+      "verificada": true
+    },
+    {
+      "cuenta": "PILOTO04",
+      "nota_esperada": 2.834,
+      "nota_oficial": 2.834,
+      "nota_real": 2.834,
+      "nota_real_esperada": 2.834,
+      "estado": "calificado",
+      "verificada": true
+    },
+    {
+      "cuenta": "PILOTO05",
+      "nota_esperada": 4.833,
+      "nota_oficial": 4.833,
+      "nota_real": 4.833,
+      "nota_real_esperada": 4.833,
+      "estado": "calificado",
+      "verificada": true
+    },
+    {
+      "cuenta": "PILOTO06",
+      "nota_esperada": 4.333,
+      "nota_oficial": 4.333,
+      "nota_real": 4.333,
+      "nota_real_esperada": 4.333,
+      "estado": "calificado",
+      "verificada": true
+    },
+    {
+      "cuenta": "PILOTO07",
+      "nota_esperada": 2.834,
+      "nota_oficial": 2.834,
+      "nota_real": 2.834,
+      "nota_real_esperada": 2.834,
+      "estado": "calificado",
+      "verificada": true
+    },
+    {
+      "cuenta": "PILOTO08",
+      "nota_esperada": 4.833,
+      "nota_oficial": 4.833,
+      "nota_real": 4.833,
+      "nota_real_esperada": 4.833,
+      "estado": "calificado",
+      "verificada": true
+    },
+    {
+      "cuenta": "PILOTO09",
+      "nota_esperada": 4.333,
+      "nota_oficial": 4.333,
+      "nota_real": 4.333,
+      "nota_real_esperada": 4.333,
+      "estado": "calificado",
+      "verificada": true
+    },
+    {
+      "cuenta": "PILOTO10",
+      "nota_esperada": 2.834,
+      "nota_oficial": 2.834,
+      "nota_real": 2.834,
+      "nota_real_esperada": 2.834,
+      "estado": "calificado",
+      "verificada": true
+    },
+    {
+      "cuenta": "PILOTO11",
+      "nota_esperada": 4.833,
+      "nota_oficial": 4.833,
+      "nota_real": 4.833,
+      "nota_real_esperada": 4.833,
+      "estado": "calificado",
+      "verificada": true
+    },
+    {
+      "cuenta": "PILOTO12",
+      "nota_esperada": 4.333,
+      "nota_oficial": 4.333,
+      "nota_real": 4.333,
+      "nota_real_esperada": 4.333,
+      "estado": "calificado",
+      "verificada": true
+    },
+    {
+      "cuenta": "PILOTO13",
+      "nota_esperada": 2.834,
+      "nota_oficial": 2.834,
+      "nota_real": 2.834,
+      "nota_real_esperada": 2.834,
+      "estado": "calificado",
+      "verificada": true
+    },
+    {
+      "cuenta": "PILOTO14",
+      "nota_esperada": 4.833,
+      "nota_oficial": 4.833,
+      "nota_real": 4.833,
+      "nota_real_esperada": 4.833,
+      "estado": "calificado",
+      "verificada": true
+    },
+    {
+      "cuenta": "PILOTO15",
+      "nota_esperada": 4.333,
+      "nota_oficial": 4.333,
+      "nota_real": 4.333,
+      "nota_real_esperada": 4.333,
+      "estado": "calificado",
+      "verificada": true
+    },
+    {
+      "cuenta": "PILOTO16",
+      "nota_esperada": 2.834,
+      "nota_oficial": 2.834,
+      "nota_real": 2.834,
+      "nota_real_esperada": 2.834,
+      "estado": "calificado",
+      "verificada": true
+    },
+    {
+      "cuenta": "PILOTO17",
+      "nota_esperada": 4.833,
+      "nota_oficial": 4.833,
+      "nota_real": 4.833,
+      "nota_real_esperada": 4.833,
+      "estado": "calificado",
+      "verificada": true
+    },
+    {
+      "cuenta": "PILOTO18",
+      "nota_esperada": 4.333,
+      "nota_oficial": 4.333,
+      "nota_real": 4.333,
+      "nota_real_esperada": 4.333,
+      "estado": "calificado",
+      "verificada": true
+    },
+    {
+      "cuenta": "PILOTO19",
+      "nota_esperada": 2.834,
+      "nota_oficial": 2.834,
+      "nota_real": 2.834,
+      "nota_real_esperada": 2.834,
+      "estado": "calificado",
+      "verificada": true
+    },
+    {
+      "cuenta": "PILOTO20",
+      "nota_esperada": 4.833,
+      "nota_oficial": 4.833,
+      "nota_real": 4.833,
+      "nota_real_esperada": 4.833,
+      "estado": "calificado",
+      "verificada": true
+    },
+    {
+      "cuenta": "PILOTO21",
+      "nota_esperada": 4.333,
+      "nota_oficial": 4.333,
+      "nota_real": 4.333,
+      "nota_real_esperada": 4.333,
+      "estado": "calificado",
+      "verificada": true
+    },
+    {
+      "cuenta": "PILOTO22",
+      "nota_esperada": 2.834,
+      "nota_oficial": 2.834,
+      "nota_real": 2.834,
+      "nota_real_esperada": 2.834,
+      "estado": "calificado",
+      "verificada": true
+    },
+    {
+      "cuenta": "PILOTO23",
+      "nota_esperada": 4.833,
+      "nota_oficial": 4.833,
+      "nota_real": 4.833,
+      "nota_real_esperada": 4.833,
+      "estado": "calificado",
+      "verificada": true
+    },
+    {
+      "cuenta": "PILOTO24",
+      "nota_esperada": 4.333,
+      "nota_oficial": 4.333,
+      "nota_real": 4.333,
+      "nota_real_esperada": 4.333,
+      "estado": "calificado",
+      "verificada": true
+    },
+    {
+      "cuenta": "PILOTO25",
+      "nota_esperada": 2.834,
+      "nota_oficial": 2.834,
+      "nota_real": 2.834,
+      "nota_real_esperada": 2.834,
+      "estado": "calificado",
+      "verificada": true
+    }
+  ],
+  "warnings": [],
+  "limitations": [
+    "No valida Supabase, Cloudflare, Google Auth ni redes/dispositivos reales.",
+    "No prueba reposiciones individuales, indisponibles en almacenamiento local.",
+    "No son 25 navegadores ni una prueba de carga de producción; son 25 sesiones HTTP concurrentes con autenticación y controladores reales."
+  ]
+}

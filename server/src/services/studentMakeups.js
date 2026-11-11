@@ -6,7 +6,7 @@ export const MAKEUP_TABLE = "reposiciones_estudiantes";
 const missing = error => ["PGRST205", "42P01"].includes(error?.code);
 export async function studentMakeups(section, account) {
   if (!isSupabaseConfigured || !supabase) return [];
-  const { data, error } = await supabase.from(MAKEUP_TABLE).select("id,seccion_origen_id,seccion_destino_id,numero_cuenta,numero_semana,carrera,estado,practica_at,origen_codigo,destino_codigo")
+  const { data, error } = await supabase.from(MAKEUP_TABLE).select("id,seccion_origen_id,seccion_destino_id,numero_cuenta,numero_semana,carrera,estado,practica_at,origen_codigo,destino_codigo,asistencia_reposicion")
     .eq("seccion_origen_id", section).eq("numero_cuenta", String(account)).in("estado", ACTIVE_MAKEUP_STATES);
   // Antes de aplicar la migración no se concede ninguna excepción de acceso.
   if (missing(error)) return [];

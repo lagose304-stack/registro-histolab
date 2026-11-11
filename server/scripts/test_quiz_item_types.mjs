@@ -4,6 +4,12 @@ const short = createQuizItem("texto_corto","short");
 const list = {...createQuizItem("listado","list"), cantidad:4};
 assert.equal(quizItemSlotCount(short),1);
 assert.equal(quizItemSlotCount(list),4);
+for (const cantidad of [0, -1, 11, 1.5, "", undefined, NaN]) {
+  assert(quizItemIssues({...list,cantidad},false).length, `Cantidad inválida: ${cantidad}`);
+}
+for (const cantidad of [1, 3, 10]) {
+  assert.deepEqual(quizItemIssues({...list,cantidad,instruccion:"Enumera"}),[]);
+}
 assert.equal(isQuizItemMultiSlot(short),false);
 assert.equal(isQuizItemMultiSlot(list),true);
 let choice=createQuizItem("seleccion_multiple","choice");

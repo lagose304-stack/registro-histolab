@@ -48,6 +48,7 @@ export function syncQuizItemAnswerKey(item) {
 
 export function quizItemIssues(item, published = true) {
   const issues = [];
+  if (item.tipo === "listado" && (!Number.isInteger(Number(item.cantidad)) || Number(item.cantidad) < 1 || Number(item.cantidad) > 10)) issues.push("El número de respuestas debe ser un entero entre 1 y 10.");
   if (typeof (item.instruccion ?? "") !== "string" || typeof (item.etiqueta ?? "") !== "string") issues.push("La instrucción debe ser texto.");
   if (published && !String(item.instruccion || item.etiqueta || "").trim()) issues.push("Escribe la instrucción o afirmación.");
   if (item.tipo === "completacion") {

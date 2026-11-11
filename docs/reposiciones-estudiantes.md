@@ -15,6 +15,8 @@ La falta justificada original se conserva; la asistencia a la reposición se reg
 
 ### Resultado de asistencia a la reposición
 
+Una falta injustificada en la práctica bloquea la entrada y entrega de su prueba y registra cero en las claves oficial y real al guardar la lista semanal; el portal también reconcilia los registros anteriores al consultar las pruebas. El catálogo muestra el motivo y la nota cero. En una reposición se consulta `asistencia_reposicion`: **Asistio** permite la evaluación y **Falta injustificada** la bloquea sin sustituir la falta justificada original. El servidor rechaza notas positivas de manuales de la práctica con falta injustificada en el registro semanal, la carga general de notas y el registro receptor. Tampoco permite recalificar una entrega de esa práctica mientras persista la falta.
+
 La lista receptora solo permite **Asistió** y **Falta injustificada**. `asistencia_reposicion` guarda ese registro de manera independiente; `asistio` se conserva por compatibilidad y para completar el flujo. La falta original no se sustituye: se añade `asistencias.reposicion_<semana>` con **Repuso** o **No repuso**, respectivamente. El cuadro de asistencia, el registro semanal, el portal estudiantil y el Excel muestran la anotación junto a **Falta justificada**. Los conteos y el derecho a examen siguen usando la asistencia original.
 
 Antes de pasar lista, `asistencia_reposicion` permanece nula: no se interpreta el antiguo `asistio=false` como una falta registrada. `student_makeup_attendance_migration.sql` actualiza las instalaciones existentes y protege las anotaciones en las cinco carreras frente a cargas anteriores de asistencia. Las asistencias positivas ya registradas se reconocen como **Repuso**; las negativas desconocidas quedan pendientes hasta un registro explícito. El guardado de la anotación y el registro receptor son transaccionales.
@@ -47,3 +49,11 @@ Las cinco tablas de estudiantes tienen una protección antes de actualizar `nota
 La migración se aplicó en el proyecto RegistroHisto (`dghmrqyxrjgxceolqplt`). La verificación del panel mostró RLS activo, lectura pública deshabilitada, modificación directa por `authenticated` deshabilitada, escritura de la API habilitada, cero solicitudes y las cinco protecciones de notas instaladas. No se modificaron matrículas, asistencias, contraseñas ni calificaciones reales durante las pruebas.
 
 La implementación está disponible en el sitio local. No incluye un nuevo envío a GitHub ni una publicación del cliente y servidor en Cloudflare.
+
+## Verificación de asistencia y semana de contenido
+
+`numero_semana` de la prueba, `temario.semana` del manual y las claves de asistencia identifican la práctica de origen. `shared/quizSchedule.mjs` calcula la fecha de rendición aparte: siguiente práctica o la misma antes del examen. La carga de manuales conserva su plazo regular o la fecha especial del titular.
+
+`test_grade_isolation.mjs` incluye rechazo de manuales por ID y alias, calificación general y directa, faltas consecutivas, reposición asistida/ausente y cero al pasar lista sin abrir el portal. `test_student_makeups.mjs` comprueba el bloqueo de entrada y entrega. `test_quiz_schedule.mjs` comprueba el desfase y las dos pruebas previas al examen.
+
+**Validación SQL aprobada; pendiente de instalación en producción:** `practice_absence_makeup_migration.sql` reemplaza la función transaccional de reposición para guardar cero al registrar una falta receptora e impedir que las notas aplicadas previamente restauren un positivo. Debe aplicarse después de `student_makeup_attendance_migration.sql`. `test_student_makeups_sql.mjs` pasó en PostgreSQL aislado: migración aplicada dos veces, cero oficial y real, rechazo de manuales positivos, protección frente a una carga antigua y recuperación tras corregir a Asistió. La migración todavía no se ha aplicado a la base real. El despliegue de Actions publica el cliente y el servidor, pero no ejecuta automáticamente archivos SQL.

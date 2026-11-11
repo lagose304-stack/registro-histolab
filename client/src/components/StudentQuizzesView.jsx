@@ -22,7 +22,7 @@ export default function StudentQuizzesView({ quizzes, submissions, sessions, par
   const items = [...quizzes].sort((a, b) => Number(a.numero_semana) - Number(b.numero_semana)).map(quiz => {
     const submission = submissions[quiz.numero_semana];
     const session = sessions[quiz.numero_semana];
-    const state = submission ? submission.estado === "calificado" ? "graded" : "submitted" : sessionEnabled(session) ? "live" : "waiting";
+    const state = quiz.falta_injustificada ? "graded" : submission ? submission.estado === "calificado" ? "graded" : "submitted" : sessionEnabled(session) ? "live" : "waiting";
     return { quiz, submission, session, state };
   });
   const counts = { live: 0, waiting: 0, submitted: 0, graded: 0 };
@@ -46,8 +46,9 @@ export default function StudentQuizzesView({ quizzes, submissions, sessions, par
     const times = questions.map(question => Number(question.tiempo_segundos || quiz.tiempo_por_pregunta_segundos || 90));
     const uniformTime = times.length > 0 && times.every(time => time === times[0]);
     const duration = Number(quiz.duracion_minutos || quiz.tiempo_limite_minutos || quiz.duracionMinutos);
-    const hasGrade = submission?.nota_obtenida !== null && submission?.nota_obtenida !== undefined && Number.isFinite(Number(submission.nota_obtenida));
-    const realGrade = Number(submission?.nota_real ?? submission?.nota_con_bonus ?? submission?.auditoria?.nota_real);
+    const officialGrade = quiz.falta_injustificada ? 0 : submission?.nota_obtenida;
+    const hasGrade = officialGrade !== null && officialGrade !== undefined && Number.isFinite(Number(officialGrade));
+    const realGrade = quiz.falta_injustificada ? 0 : Number(submission?.nota_real ?? submission?.nota_con_bonus ?? submission?.auditoria?.nota_real);
     return <article className="student-quizzes__card" data-state={state} data-week={quiz.numero_semana} key={quiz.id || quiz.numero_semana}>
       <div className="student-quizzes__card-top"><span>Semana {quiz.numero_semana}</span><span className="student-quizzes__badge"><Icon size={14} />{label}</span></div>
       <h4>{quiz.titulo || `Prueba semanal ${quiz.numero_semana}`}</h4>
@@ -56,9 +57,11 @@ export default function StudentQuizzesView({ quizzes, submissions, sessions, par
       <div className="student-quizzes__metadata"><span><FileEdit size={15} />{questions.length} {questions.length === 1 ? "pregunta" : "preguntas"}</span>{duration > 0 && <span><Clock size={15} />{duration} min de duración</span>}{questions.length > 0 && <span><Clock size={15} />{uniformTime ? `${formatSeconds(times[0])} por pregunta` : "Tiempo variable por pregunta"}</span>}</div>
       {quiz.instrucciones && <details className="student-quizzes__instructions"><summary>Instrucciones de la prueba</summary><p>{quiz.instrucciones}</p></details>}
       <div className="student-quizzes__card-bottom">
-        {state === "graded" ? <div className="student-quizzes__grade"><span>Nota oficial</span><strong>{hasGrade ? `${Number(submission.nota_obtenida).toFixed(3)} / 5.000 pts` : "Nota por sincronizar"}</strong>{realGrade > 5 && <small>Puntaje con bonus: {realGrade.toFixed(3)} pts</small>}</div>
+        {quiz.falta_injustificada && <p className="student-quizzes__status-note" role="alert">{quiz.mensaje_asistencia}</p>}
+        {state === "graded" ? <div className="student-quizzes__grade"><span>Nota oficial</span><strong>{hasGrade ? `${Number(officialGrade).toFixed(3)} / 5.000 pts` : "Nota por sincronizar"}</strong>{realGrade > 5 && <small>Puntaje con bonus: {realGrade.toFixed(3)} pts</small>}</div>
           : <p className="student-quizzes__status-note">{state === "live" ? "La sesión está habilitada. Puedes ingresar a la evaluación." : state === "submitted" ? "Tu entrega está registrada y espera la revisión del instructor titular de la sección." : "La prueba está publicada. Podrás ingresar cuando el instructor titular de la sección la habilite en vivo."}</p>}
-        {submission ? <button type="button" className="student-portal__button" onClick={() => onReview(quiz, submission)}><Eye size={17} />Ver respuestas y comprobante<ChevronRight size={15} /></button>
+        {quiz.falta_injustificada ? <button type="button" className="student-portal__button" disabled><Lock size={16} />Nota: 0.000 / 5.000 pts</button>
+          : submission ? <button type="button" className="student-portal__button" onClick={() => onReview(quiz, submission)}><Eye size={17} />Ver respuestas y comprobante<ChevronRight size={15} /></button>
           : state === "live" ? <button type="button" className="student-quizzes__start" onClick={() => onStart(quiz, session)}><Play size={17} />Entrar a la prueba<ChevronRight size={16} /></button>
           : <button type="button" className="student-portal__button" disabled><Lock size={16} />En espera de habilitación</button>}
       </div>

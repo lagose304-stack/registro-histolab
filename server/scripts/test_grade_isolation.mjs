@@ -18,7 +18,7 @@ const seed=()=>[
   {id:"b1",numero_cuenta:"B",seccion_id:"s1",carrera:"Medicina",activo:true,notas:{prueba_1:4},updated_at:"2026-11-01T00:00:00Z"},
   {id:"a2",numero_cuenta:"A",seccion_id:"s2",carrera:"Medicina",activo:true,notas:{prueba_1:2},updated_at:"2026-11-01T00:00:00Z"}
 ];
-function setup(configured=true, gradeHistory=[]){
+function setup(configured=true, gradeHistory=[], now=null){
  const fixture={configured,rows:Object.fromEntries(tables.map(t=>[t,[]])),fileWrites:0,dbWrites:0,offline:false,failAccount:null,conflictAccount:null};
  fixture.rows.estudiantes_medicina=seed();fixture.rows.secciones=[{id:"s1",carrera:"Medicina"},{id:"s2",carrera:"Medicina"}];
  fixture.rows.historial_notas=gradeHistory;
@@ -46,7 +46,7 @@ function setup(configured=true, gradeHistory=[]){
    return {data:structuredClone(single?selected[0]||null:selected),count:includeCount?selected.length:null};
   }).then(resolve,reject);}
  };return q;}};
- const module={exports:{}};vm.runInNewContext(bundle.outputFiles[0].text,{module,exports:module.exports,require,fixture,console:{log(){},warn(){},error(){}},process:{cwd:()=>process.cwd(),env:{}}});
+ const module={exports:{}};vm.runInNewContext(bundle.outputFiles[0].text,{module,exports:module.exports,require,fixture,Date: now ? class extends Date { constructor(...args){super(...(args.length?args:[now]));} static now(){return Date.parse(now);} } : Date,console:{log(){},warn(){},error(){}},process:{cwd:()=>process.cwd(),env:{}}});
  return {api:module.exports,fixture};
 }
 async function call(fn,req){let status=200,body;const res={set(){return res;},status(value){status=value;return res;},json(value){body=value;return res;}};await fn({params:{},query:{},body:{},...req},res);return {status,body};}
@@ -169,3 +169,38 @@ for (const [id, position] of [["b1", 1], ["a1", 2], ["zero", 3], ["pending", nul
 rankFixture.fixture.offline = true;
 assert.equal((await myRank("a1")).status, 503);
 console.log("PASS clasificación individual: solo el puesto de la sesión, sección aislada, cero registrado y ausencia de datos.");
+
+// La semana de contenido conserva la asistencia aunque la evaluación se rinda después.
+({api,fixture}=setup());
+fixture.rows.temario=[{id:'topic1',numero_tema:1,titulo:'Práctica uno',semana:1,carrera:'Medicina'},
+  {id:'topic2',numero_tema:2,titulo:'Práctica dos',semana:2,carrera:'Medicina'}];
+const juan=fixture.rows.estudiantes_medicina.find(row=>row.id==='a1');
+juan.asistencias={asistencia_1:'Falta injustificada',asistencia_2:'Asistio'};
+for(const notes of [{prueba_1:5},{prueba_1_real:6},{manual_topic1:1},{manual_tema_1:1},{'Manual de Práctica uno':1}]) {
+  assert.equal((await call(api.updateBatchGrades,batch([{numero_cuenta:'A',notas:notes}]))).status,409);
+}
+assert.equal((await call(api.updateBatchGrades,batch([{numero_cuenta:'A',notas:{prueba_1:0,prueba_1_real:0,prueba_2:5,manual_topic2:1}}]))).status,200);
+assert.equal(juan.notas.prueba_1,0);assert.equal(juan.notas.prueba_2,5);
+juan.asistencias.asistencia_2='Falta injustificada';
+assert.equal((await call(api.updateBatchGrades,batch([{numero_cuenta:'A',notas:{prueba_1:0,prueba_2:5}}]))).status,409);
+await assert.rejects(api.updateEstudianteGradeDirect('s1','A','Medicina','prueba_2',5,true),/falta injustificada/);
+juan.asistencias.asistencia_2='Falta justificada';
+fixture.rows.reposiciones_estudiantes=[{id:'makeup',seccion_origen_id:'s1',seccion_destino_id:'host',numero_cuenta:'A',numero_semana:2,estado:'asignada',asistencia_reposicion:'Asistio'}];
+assert.equal((await call(api.updateBatchGrades,batch([{numero_cuenta:'A',notas:{prueba_1:0,prueba_2:4,manual_topic2:1}}]))).status,200);
+fixture.rows.reposiciones_estudiantes[0].asistencia_reposicion='Falta injustificada';
+assert.equal((await call(api.updateBatchGrades,batch([{numero_cuenta:'A',notas:{prueba_2:4}}]))).status,409);
+assert.equal((await call(api.updateBatchGrades,batch([{numero_cuenta:'A',notas:{manual_topic2:1}}]))).status,409);
+assert.equal(await api.hasPracticeAbsence('host','A','Medicina',2),true);
+assert.equal(juan.asistencias.asistencia_2,'Falta justificada');
+console.log('PASS asistencia y notas: semana de contenido, manuales por ID y alias, dos faltas, reposición asistida y ausente, calificación directa y matrícula original.');
+
+({api,fixture}=setup(true,[],"2026-11-06T17:30:00Z"));
+fixture.rows.secciones[0]={id:'s1',carrera:'Medicina',dia:'Viernes',hora_inicio:'11:00',hora_fin:'13:00'};
+fixture.rows.configuracion_semanas=[{carrera:'Medicina',numero_semana:1,fecha_inicio:'2026-11-02',fecha_fin:'2026-11-08'}];
+const attendanceStudent=fixture.rows.estudiantes_medicina.find(row=>row.id==='a1');
+attendanceStudent.asistencias={};attendanceStudent.notas={prueba_2:4};
+const attendanceResult=await call(api.saveWeeklyAttendance,{instructor:{id:'admin',rol:'Coordinador'},params:{seccion_id:'s1',semana:'1'},body:{updates:[{numero_cuenta:'A',estado:'Falta injustificada'}]}});
+assert.equal(attendanceResult.status,200,JSON.stringify(attendanceResult.body));
+assert.equal(attendanceStudent.notas.prueba_1,0);assert.equal(attendanceStudent.notas.prueba_1_real,0);
+assert.equal(attendanceStudent.notas.prueba_2,4);
+console.log('PASS: pasar lista guarda cero de la práctica ausente sin abrir el portal ni alterar otra prueba.');

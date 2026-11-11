@@ -1,4 +1,6 @@
 import jwt from "jsonwebtoken";
+import { practiceAbsent, ABSENCE_MESSAGE } from "../../../shared/practiceAttendance.mjs";
+import { updateEstudianteGradeDirect, hasPracticeAbsence } from "../controllers/estudiantes.controller.js";
 import { authenticateInstructor, authenticateStudent } from "./auth.middleware.js";
 import { supabase, isSupabaseConfigured } from "../db/supabase.js";
 import { getLocalSchedulingSections } from "../controllers/secciones.controller.js";
@@ -39,7 +41,22 @@ export function quizAccess({ student = false, kind = "quiz", permission = "read"
         // La matrícula sigue en origen. Solo estas rutas y esta semana se redirigen.
         const makeups = await studentMakeups(sectionId, account);
         req.studentMakeups = makeups;
+        req.absentPracticeWeeks = [...new Set([
+          ...Object.keys(req.student.asistencias || {}).map(key => Number(key.match(/^(?:asistencia_|semana_)(\d+)$/)?.[1])).filter(Boolean),
+          ...makeups.map(item => Number(item.numero_semana))
+        ])].filter(number => practiceAbsent(req.student, number, makeups.find(item => Number(item.numero_semana) === number)));
+        if (!week && kind === "quiz") {
+          for (const number of req.absentPracticeWeeks) for (const suffix of ["", "_real"]) {
+            await updateEstudianteGradeDirect(sectionId, account, req.student.carrera, `prueba_${number}${suffix}`, 0, true);
+          }
+        }
         const makeup = makeups.find(item => Number(item.numero_semana) === Number(week));
+        if (week && practiceAbsent(req.student, week, makeup)) {
+          for (const suffix of ["", "_real"]) {
+            await updateEstudianteGradeDirect(sectionId, account, req.student.carrera, `prueba_${Number(week)}${suffix}`, 0, true);
+          }
+          return res.status(403).json({ success: false, reason: "PRACTICE_ABSENCE", message: ABSENCE_MESSAGE, nota: 0 });
+        }
         if (makeup) {
           req.makeup = makeup;
           req.params.seccion_id = makeup.seccion_destino_id;
@@ -85,6 +102,9 @@ export function quizAccess({ student = false, kind = "quiz", permission = "read"
         if (req.body && kind === "control") { req.body.es_titular = full; req.body.carrera=section.carrera; req.quizSection=section; req.quizFullAccess=full; }
       }
       // Bind destructive identifiers to the checked resource, never to body/query overrides.
+      if (record && req.method === "PUT" && await hasPracticeAbsence(sectionId, record.numero_cuenta, record.carrera, week)) {
+        return res.status(409).json({ success: false, message: ABSENCE_MESSAGE });
+      }
       if (record) req.quizSubmission = record;
       const json = res.json.bind(res);
       res.json = payload => {
@@ -100,7 +120,12 @@ export function quizAccess({ student = false, kind = "quiz", permission = "read"
             payload = { ...payload, activa: false }; data = null;
           }
           if (req.student && kind === "quiz") data=Array.isArray(data)?data.map(studentQuiz).filter(Boolean):studentQuiz(data);
+          if (req.student && kind === "quiz" && Array.isArray(data)) data = data.map(quiz =>
+            req.absentPracticeWeeks?.includes(Number(quiz.numero_semana)) ? { ...quiz, preguntas: [], falta_injustificada: true, mensaje_asistencia: ABSENCE_MESSAGE, nota_obtenida: 0 } : quiz);
           if (req.student && kind === "live") data=studentLiveState(data);
+          if (req.student && kind === "live" && !week && data && req.absentPracticeWeeks?.includes(Number(data.numero_semana))) {
+            payload = { ...payload, activa: false, message: ABSENCE_MESSAGE }; data = null;
+          }
           // Awards need all weeks' grades, but never answer sheets or audit data.
           if (kind === "awards" && Array.isArray(data)) data=data.map(item=>Object.fromEntries(["id","numero_cuenta","numero_semana","estado","nota_obtenida","nota_real","nota_con_bonus"].filter(key=>item[key]!==undefined).map(key=>[key,item[key]])));
           if (allowedWeeks && Array.isArray(data)) data=data.filter(item=>allowedWeeks.includes(Number(item.numero_semana)));
