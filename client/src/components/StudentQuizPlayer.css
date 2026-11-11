@@ -1,4 +1,9 @@
 .quiz-player { position: relative; display: grid; gap: 1rem; min-width: 0; padding: clamp(.85rem,2.5vw,1.6rem); border: 1px solid #b4ccdb; border-radius: .9rem; background: #fff; color: #244c65; overflow-wrap: anywhere; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+/* Hide exam content at the browser's fullscreen transition, before React handles
+   fullscreenchange. Unsupported browsers also remain closed by default. */
+.quiz-player { visibility: hidden; pointer-events: none; }
+:root:fullscreen .quiz-player { visibility: visible; pointer-events: auto; }
+:root:-webkit-full-screen .quiz-player { visibility: visible; pointer-events: auto; }
 .quiz-player *, .quiz-player *::before, .quiz-player *::after { box-sizing: border-box; min-width: 0; }
 .quiz-player > :not(.quiz-player__watermark) { position: relative; z-index: 1; }
 .quiz-player :is(h2,h3,h4,p,figure) { margin: 0; }

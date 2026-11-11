@@ -105,16 +105,17 @@ fixture.win.history.back(); await fixture.flush();
 assert.equal(fixture.player().props.locked, true);
 fixture.setDenied(true); await fixture.doc.exitFullscreen(); await fixture.flush();
 assert.equal(fixture.player().props.strikes, 1);
-await fixture.button('Cancelar y volver').props.onClick(); await fixture.flush();
-assert.equal(fixture.player().props.locked, true, 'Denied fullscreen cannot dismiss exit confirmation');
-fixture.setDenied(false); await fixture.button('Cancelar y volver').props.onClick(); await fixture.flush();
+assert(!fixture.nodes().some(node => node.type === 'button' && node.props.children?.includes?.('Salir y Enviar Respuestas')), 'Fullscreen departure shows a violation instead of exit confirmation');
+await fixture.button('Continuar Evaluaci�n').props.onClick(); await fixture.flush();
+assert.equal(fixture.player().props.locked, true, 'Denied fullscreen cannot dismiss warning');
+fixture.setDenied(false); await fixture.button('Continuar Evaluaci�n').props.onClick(); await fixture.flush();
 assert.equal(fixture.player().props.locked, false);
 fixture.player().props.onChange('q', 'a', 'Respuesta conservada'); await fixture.flush();
 fixture.exitGuard(); await fixture.flush();
 fixture.doc.focused = false; fixture.win.emit('blur'); await fixture.flush();
 assert.equal(fixture.player().props.strikes, 2, 'Exit dialog must not suppress warnings');
 fixture.doc.focused = true; fixture.win.emit('focus');
-await fixture.button('Cancelar y volver').props.onClick(); await fixture.flush();
+await fixture.button('Continuar Evaluaci�n').props.onClick(); await fixture.flush();
 fixture.win.emit('blur'); fixture.doc.hidden = true; fixture.doc.emit('visibilitychange'); await fixture.doc.exitFullscreen(); await fixture.flush();
 assert.equal(fixture.sent.length, 1); assert.equal(fixture.sent[0].auditoria.strikes, 3);
 assert.equal(fixture.sent[0].respuestas.q.a, 'Respuesta conservada');
@@ -125,7 +126,7 @@ assert.equal(fixture.player(), undefined);
 fixture = await scenario({ phase: 'lobby', offline: true });
 for (let index = 1; index <= 3; index++) {
   fixture.doc.focused = false; fixture.win.emit('blur'); await fixture.flush();
-  if (index < 3) { assert.equal(fixture.player().props.strikes, index); fixture.doc.focused = true; fixture.win.emit('focus'); await fixture.button('Continuar Evaluación').props.onClick(); await fixture.flush(); }
+  if (index < 3) { assert.equal(fixture.player().props.strikes, index); fixture.doc.focused = true; fixture.win.emit('focus'); await fixture.button('Continuar Evaluaci�n').props.onClick(); await fixture.flush(); }
 }
 assert.equal(fixture.sent.length, 1);
 const sealed = JSON.parse(fixture.map.get('histolab_sealed_quiz_fixture_sem_1'));
