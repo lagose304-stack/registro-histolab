@@ -1,8 +1,30 @@
 // Isolated event/permission/history tests: no real accounts or network.
 import assert from 'node:assert/strict';
-import { observeQuizIntegrity } from '../../client/src/utils/quizIntegrity.mjs';
+import { createQuizIntegritySession, observeQuizIntegrity } from '../../client/src/utils/quizIntegrity.mjs';
 import { enterQuizFullscreen } from '../../client/src/utils/quizFullscreen.mjs';
 import { guardQuizNavigation } from '../../client/src/utils/quizNavigation.mjs';
+
+// State machine invariants independent of DOM or React.
+{
+  let environment = { visible: true, focused: true, fullscreen: true };
+  let enabled = true, warnings = 0, locked = false, clock = 0;
+  const durations = [];
+  const session = createQuizIntegritySession({ readEnvironment: () => environment,
+    enabled: () => enabled, now: () => clock, onLock: value => { locked = value; },
+    onDeparture: () => warnings++, onReturn: seconds => durations.push(seconds) });
+  assert(session.canRespond());
+  environment.focused = false; session.signal('perdida_de_foco');
+  assert(locked); assert.equal(warnings, 1); assert(!session.canRespond());
+  environment.focused = true;
+  assert(!session.canRespond(), 'A safe environment alone cannot dismiss a warning');
+  for (let i = 0; i < 1000; i++) { environment.focused = false; session.signal('perdida_de_foco'); environment.focused = true; }
+  assert.equal(warnings, 1);
+  enabled = false; assert(!session.resume()); enabled = true;
+  clock = 3500; assert(session.resume()); assert(!locked); assert.deepEqual(durations, [4]);
+  assert(session.resume()); assert.deepEqual(durations, [4], 'Double acknowledgment cannot count time twice');
+  session.dispose(); assert(!session.canRespond()); assert(!session.resume());
+  environment.visible = false; session.signal('salida_de_pantalla'); assert.equal(warnings, 1);
+}
 
 class Surface {
   listeners = new Map(); hidden = false; focused = true; fullscreenElement = {};
@@ -15,7 +37,7 @@ let clock = 0, active = true, submitting = false, departures = [], returns = [],
 const doc = new Surface(), win = new Surface();
 const dispose = observeQuizIntegrity({
   document: doc, window: win, now: () => clock, isActive: () => active, isSuppressed: () => submitting,
-  onHidden() {}, onVisible() {}, onFullscreen() {}, onReturn: seconds => returns.push(seconds),
+  onFullscreen() {}, onReturn: seconds => returns.push(seconds),
   onDeparture: (seconds, type) => { departures.push(type); if (departures.length === 3) { submissions++; submitting = true; } },
   onBlocked: type => blocked.push(type)
 });
@@ -24,14 +46,19 @@ const visible = () => { doc.hidden = false; doc.emit('visibilitychange'); };
 const blur = () => { doc.focused = false; win.emit('blur'); };
 const focus = () => { doc.focused = true; win.emit('focus'); };
 const fullscreen = value => { doc.fullscreenElement = value ? {} : null; doc.emit('fullscreenchange'); doc.emit('webkitfullscreenchange'); };
-blur(); hidden(); fullscreen(false);
+blur(); assert.equal(dispose.canRespond(), false); hidden(); fullscreen(false);
+assert.equal(dispose.resume(), false, 'Acknowledgment requires visible, focused fullscreen');
 assert.deepEqual(departures, ['perdida_de_foco']);
 clock += 500; visible(); focus();
 assert.equal(departures.length, 1);
 blur(); focus(); assert.equal(departures.length, 1, 'Focus alone cannot resume an episode outside fullscreen');
-fullscreen(true); assert.equal(returns.length, 1);
+fullscreen(true);
+assert.equal(returns.length, 0, 'Returning does not acknowledge an open warning');
+blur(); focus(); fullscreen(false); fullscreen(true);
+assert.equal(departures.length, 1, 'An open warning cannot accumulate strikes');
+assert.equal(dispose.resume(), true); assert.equal(returns.length, 1);
 hidden(); assert.equal(departures.length, 2, 'Immediate warning, without waiting for return');
-clock += 4000; visible(); assert.deepEqual(returns, [1, 4]);
+clock += 4000; visible(); assert.equal(dispose.canRespond(), false); assert.equal(dispose.resume(), true); assert.deepEqual(returns, [1, 4]);
 for (const type of ['resize', 'touchstart', 'touchcancel', 'orientationchange', 'keydown']) win.emit(type, {});
 assert.equal(departures.length, 2);
 fullscreen(false); blur(); hidden();
@@ -75,4 +102,4 @@ const remount = guardQuizNavigation({ window: browser, onBack: () => prompts++ }
 assert.equal(entries.length, 2, 'StrictMode/later attempts reuse the entry without asynchronous Back');
 browser.history.back(); assert.equal(prompts, 3); remount();
 assert.equal(browser.listeners.get('popstate').size, 0);
-console.log('PASS: immediate focus/visibility/fullscreen warnings, one per episode, third-warning single delivery, cleanup, permission failures and repeated Back confirmation.');
+console.log('PASS: explicit recovery, immediate focus/visibility/fullscreen warnings, one per episode, third-warning single delivery, cleanup, permission failures and repeated Back confirmation.');

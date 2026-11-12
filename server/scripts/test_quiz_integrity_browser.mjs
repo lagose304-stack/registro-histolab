@@ -79,7 +79,7 @@ try {
   await page.evaluate(() => document.exitFullscreen());
   await waitWarnings(page, 1);
   assert.equal(await page.getByRole('textbox', { includeHidden: true }).isDisabled(), true);
-  await page.getByRole('button', { name: 'Cancelar y volver a pantalla completa' }).click();
+  await page.getByRole('button', { name: /Continuar Evaluación/ }).click();
   assert.equal(await fullscreen(page), true);
   await page.evaluate(() => { window.dispatchEvent(new Event('blur')); window.dispatchEvent(new Event('blur')); });
   await waitWarnings(page, 2);

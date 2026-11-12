@@ -59,3 +59,4 @@
 .quiz-fullscreen-gate button:last-child { background: white; color: #a12432; border-color: #d798a0; }
 .quiz-player-dialog > div, .student-portal[data-taking-quiz="true"] .sp-violation-modal-overlay > div { max-height: calc(100dvh - 1.5rem); overflow-y: auto; padding: clamp(1rem,3vw,2rem) !important; }
 html:has(.student-portal[data-taking-quiz="true"]), body:has(.student-portal[data-taking-quiz="true"]), .app-container:has(.student-portal[data-taking-quiz="true"]) { overflow-x: clip; }
+:root[data-quiz-blocked="true"] .quiz-player { visibility: hidden; pointer-events: none; }

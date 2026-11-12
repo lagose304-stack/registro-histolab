@@ -108,7 +108,7 @@ const CARRERA_THEMES = {
 export default function StudentPortalView({ student, notify = () => {}, onExitGuardChange }) {
   const cuentaKey = student?.numero_cuenta || "";
 
-  // Recuperar sesi�n activa de evaluaci�n persistida si hubo recarga
+  // Recuperar sesión activa de evaluación persistida si hubo recarga
   const savedActiveQuizSession = useMemo(() => {
     try {
       const cKey = student?.numero_cuenta || "estudiante";
@@ -145,7 +145,7 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
   const [academicError, setAcademicError] = useState("");
   const [academicReload, setAcademicReload] = useState(0);
 
-  // Estados para Pruebas Semanales en L�nea y Sincronizaci�n en Vivo
+  // Estados para Pruebas Semanales en Línea y Sincronización en Vivo
   const [onlineQuizzes, setOnlineQuizzes] = useState(() => {
     if (savedActiveQuizSession?.quiz) return [savedActiveQuizSession.quiz];
     return [];
@@ -173,7 +173,7 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
   const [existingSubmissions, setExistingSubmissions] = useState({});
   const [reviewingSubmission, setReviewingSubmission] = useState(null);
 
-  // Estados de Control en Vivo y Sincronizaci�n Global
+  // Estados de Control en Vivo y Sincronización Global
   const [liveSessionsMap, setLiveSessionsMap] = useState(() => {
     if (savedActiveQuizSession?.quiz && savedActiveQuizSession?.liveSess) {
       return { [savedActiveQuizSession.quiz.numero_semana]: savedActiveQuizSession.liveSess };
@@ -190,7 +190,7 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
   const [liveConnection, setLiveConnection] = useState("connecting");
   const lastKnownQuestionIdxRef = useRef(null);
 
-  // Estados del Sistema de Integridad Acad�mica y Antitrampas (M�vil, Escritorio y Resiliencia de Red)
+  // Estados del Sistema de Integridad Académica y Antitrampas (Móvil, Escritorio y Resiliencia de Red)
   const [shuffledQuestions, setShuffledQuestions] = useState(() => savedActiveQuizSession?.quiz?.preguntas || []);
   const [timeRemainingSeconds, setTimeRemainingSeconds] = useState(() => {
     if (savedActiveQuizSession?.liveSess?.tiempo_restante_segundos != null) {
@@ -212,69 +212,25 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
   const [confirmExitModalOpen, setConfirmExitModalOpen] = useState(false);
   const [activeLiveBannerSession, setActiveLiveBannerSession] = useState(null);
   const [answeredQuestionsMap, setAnsweredQuestionsMap] = useState({});
-  const [isScreenBlackedOut, setIsScreenBlackedOut] = useState(false);
 
   const quizStartTimeRef = React.useRef(null);
   const quizEndTimeRef = React.useRef(null);
   const lastTickTimeRef = React.useRef(Date.now());
   const reloadAuditLoggedRef = React.useRef(false);
-  const outStartTimeRef = React.useRef(null);
   const totalTimeOutRef = React.useRef(0);
   const strikesCountRef = React.useRef(0);
   const incidentsListRef = React.useRef([]);
   const autoSubmitTriggeredRef = React.useRef(false);
   const isConfirmingRef = React.useRef(false);
   const isSubmittingRef = React.useRef(false);
-  const blackoutTimeoutRef = React.useRef(null);
-  const lastAlertTimestampRef = React.useRef(0);
-  const isFromTopBorderRef = React.useRef(false);
-  const violationModalRef = React.useRef(null);
   const pasteCountRef = React.useRef(0);
-
-  useEffect(() => {
-    violationModalRef.current = violationModal;
-  }, [violationModal]);
-
-  // Desactivaci�n segura e inmediata del apag�n de pantalla (con resguardo total anti-bloqueo)
-  const deactivateDrmBlackout = useCallback(() => {
-    if (blackoutTimeoutRef.current) {
-      clearTimeout(blackoutTimeoutRef.current);
-      blackoutTimeoutRef.current = null;
-    }
-    setIsScreenBlackedOut(false);
-    if (typeof document !== "undefined") {
-      if (document.body) {
-        document.body.classList.remove("anticheat-blackout-on");
-      }
-      const rawCurtain = document.getElementById("anti-cheat-blackout-curtain");
-      if (rawCurtain) rawCurtain.style.display = "none";
-    }
-  }, []);
-
-  // Activaci�n con Watchdog de seguridad (la pantalla NUNCA se queda pegada en negro)
-  const activateDrmBlackout = useCallback((autoDismissMs = 1800) => {
-    setIsScreenBlackedOut(true);
-    if (typeof document !== "undefined") {
-      if (document.body) {
-        document.body.classList.add("anticheat-blackout-on");
-      }
-      const rawCurtain = document.getElementById("anti-cheat-blackout-curtain");
-      if (rawCurtain) rawCurtain.style.display = "flex";
-    }
-    // Watchdog autom�tico que garantiza reactivaci�n en m�ximo 1.8 segundos
-    if (blackoutTimeoutRef.current) {
-      clearTimeout(blackoutTimeoutRef.current);
-    }
-    blackoutTimeoutRef.current = setTimeout(() => {
-      deactivateDrmBlackout();
-    }, autoDismissMs);
-  }, [deactivateDrmBlackout]);
+  const integrityControllerRef = useRef(null);
 
   // Sincronizar si cambia el prop student desde el padre (aislamiento estricto por cuenta)
   useEffect(() => {
     if (student) {
       setCurrentStudentData((prev) => {
-        // Descartar el estado anterior si cambia cualquier parte de la matr�cula.
+        // Descartar el estado anterior si cambia cualquier parte de la matrícula.
         if (!sameStudentEnrollment(prev, student)) {
           return student;
         }
@@ -296,7 +252,7 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
   const asistencias = effectiveStudent?.asistencias || {};
   const seccion = effectiveStudent?.seccion || {};
 
-  // Cargar configuraci�n de semanas, temario, puntajes y perfil actualizado del estudiante
+  // Cargar configuración de semanas, temario, puntajes y perfil actualizado del estudiante
   useEffect(() => {
     let isMounted = true;
     const loadAcademicData = async () => {
@@ -313,7 +269,7 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
         ]);
         if (!Array.isArray(resSemanas?.data) || !Array.isArray(resTemario?.data) ||
           (cuentaKey && !sameStudentEnrollment(resStudent?.data, student))) {
-          throw new Error("La informaci�n acad�mica est� incompleta.");
+          throw new Error("La información académica está incompleta.");
         }
         if (isMounted) {
           setSemanasConfig(resSemanas.data);
@@ -326,13 +282,13 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
                 safeStorage.setItem(`histolab_student_user_${cuentaKey}`, JSON.stringify(resStudent.data));
               }
             } catch (e) {
-              console.warn("Aviso al actualizar sesi�n en safeStorage:", e);
+              console.warn("Aviso al actualizar sesión en safeStorage:", e);
             }
           }
         }
       } catch (err) {
-        console.error("Error al cargar datos acad�micos de estudiante:", err);
-        if (isMounted) setAcademicError("No pudimos actualizar tu informaci�n acad�mica. Revisa tu conexi�n y vuelve a intentarlo.");
+        console.error("Error al cargar datos académicos de estudiante:", err);
+        if (isMounted) setAcademicError("No pudimos actualizar tu información académica. Revisa tu conexión y vuelve a intentarlo.");
       } finally {
         if (isMounted) {
           setLoadingAcademic(false);
@@ -345,7 +301,7 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
     };
   }, [carreraKey, cuentaKey, student?.id, student?.seccion_id, academicReload]);
 
-  // Resolver el ID real de la secci�n del estudiante con m�ltiples niveles de contingencia
+  // Resolver el ID real de la sección del estudiante con múltiples niveles de contingencia
   const resolveStudentSectionId = useCallback(async () => {
     if (effectiveStudent?.seccion_id) return effectiveStudent.seccion_id;
     if (effectiveStudent?.seccion?.id) return effectiveStudent.seccion.id;
@@ -371,7 +327,7 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
     return null;
   }, [effectiveStudent, carreraKey]);
 
-  // Cargar cat�logo, estado en vivo y entregas como una instant�nea de la secci�n.
+  // Cargar catálogo, estado en vivo y entregas como una instantánea de la sección.
   const loadStudentQuizzes = useCallback(async () => {
     const request = ++quizLoadRequestRef.current;
     setLoadingQuizzes(true);
@@ -379,9 +335,9 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
     try {
       const secId = effectiveStudent?.seccion_id || effectiveStudent?.seccion?.id || await resolveStudentSectionId();
       if (request !== quizLoadRequestRef.current) return;
-      if (!secId) throw new Error("No se pudo identificar tu secci�n. Actualiza tus datos e int�ntalo de nuevo.");
+      if (!secId) throw new Error("No se pudo identificar tu sección. Actualiza tus datos e inténtalo de nuevo.");
       const res = await api.pruebas.getBySeccion(secId);
-      if (res?.success === false || !Array.isArray(res?.data)) throw new Error("No se pudo consultar el cat�logo de pruebas.");
+      if (res?.success === false || !Array.isArray(res?.data)) throw new Error("No se pudo consultar el catálogo de pruebas.");
       const liveEntries = await Promise.all(res.data.map(async quiz => {
         const response = await api.pruebas.getLiveState(secId, quiz.numero_semana);
         if (response?.success === false) throw new Error("No se pudo verificar el estado de las pruebas.");
@@ -412,28 +368,28 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
         }).catch(() => {});
       });
     } catch (error) {
-      if (request === quizLoadRequestRef.current) setQuizLoadError(error.message || "No se pudieron cargar las pruebas. Revisa tu conexi�n e int�ntalo de nuevo.");
+      if (request === quizLoadRequestRef.current) setQuizLoadError(error.message || "No se pudieron cargar las pruebas. Revisa tu conexión e inténtalo de nuevo.");
     } finally {
       if (request === quizLoadRequestRef.current) setLoadingQuizzes(false);
     }
   }, [effectiveStudent, cuentaKey, resolveStudentSectionId]);
 
-  // Cargar cat�logo de pruebas de inmediato al montar la vista
+  // Cargar catálogo de pruebas de inmediato al montar la vista
   useEffect(() => {
     loadStudentQuizzes();
     return () => { quizLoadRequestRef.current += 1; };
   }, [loadStudentQuizzes]);
 
-  // Refrescar si el usuario entra expl�citamente a la pesta�a de pruebas
+  // Refrescar si el usuario entra explícitamente a la pestaña de pruebas
   useEffect(() => {
     if (activeTab === "pruebas") {
       loadStudentQuizzes();
     }
   }, [activeTab, loadStudentQuizzes]);
 
-  // Sondeo continuo cada 1.8s con detecci�n instant�nea tipo Kahoot
+  // Sondeo continuo cada 1.8s con detección instantánea tipo Kahoot
   useEffect(() => {
-    if (activeQuizToTake) return; // Si ya est� dentro del examen, la sincronizaci�n se realiza por el heartbeat del examen
+    if (activeQuizToTake) return; // Si ya está dentro del examen, la sincronización se realiza por el heartbeat del examen
 
     let isMounted = true;
     const pollLiveSession = async () => {
@@ -463,7 +419,7 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
             }).catch(() => {});
           }
 
-          // Si a�n no tenemos las pruebas en memoria o falta esta semana, refrescar cat�logo
+          // Si aún no tenemos las pruebas en memoria o falta esta semana, refrescar catálogo
           if (!onlineQuizzes || !onlineQuizzes.some((q) => Number(q.numero_semana) === liveSem)) {
             loadStudentQuizzes();
           }
@@ -481,7 +437,7 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
     };
   }, [activeQuizToTake, effectiveStudent, resolveStudentSectionId, cuentaKey, onlineQuizzes, loadStudentQuizzes]);
 
-  // Identificar si existe alguna prueba con sesi�n en vivo habilitada por el docente pendiente de realizar
+  // Identificar si existe alguna prueba con sesión en vivo habilitada por el docente pendiente de realizar
   const anyLiveQuiz = useMemo(() => {
     if (quizLoadError || loadingQuizzes) return null;
     return (onlineQuizzes || []).find((q) => {
@@ -566,7 +522,7 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
     [cuentaKey, getActiveAttemptStorageKey]
   );
 
-  // Iniciar la realizaci�n de una prueba semanal en vivo
+  // Iniciar la realización de una prueba semanal en vivo
   const handleStartQuiz = async (quiz, liveSess = null) => {
     if (quizStartingRef.current || activeQuizToTake || existingSubmissions[quiz.numero_semana]) return;
     if (quiz.falta_injustificada) {
@@ -577,11 +533,11 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
     const entered = await requestQuizFullscreen();
     quizStartingRef.current = false;
     if (!entered) return;
-    // 1. Las preguntas se mantienen en orden secuencial estricto para sincronizaci�n global
+    // 1. Las preguntas se mantienen en orden secuencial estricto para sincronización global
     const originalQuestions = quiz.preguntas || [];
     setShuffledQuestions(originalQuestions);
 
-    // 2. Determinar estado inicial seg�n sesi�n en vivo
+    // 2. Determinar estado inicial según sesión en vivo
     const liveQIdx = liveSess?.pregunta_actual_idx ?? 0;
     const isEnPregunta = liveSess?.estado === "en_pregunta";
     const duracionQ = Number(originalQuestions[liveQIdx]?.tiempo_segundos || quiz.tiempo_por_pregunta_segundos || 90);
@@ -589,7 +545,7 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
       ? (liveSess?.tiempo_restante_segundos ?? duracionQ)
       : duracionQ;
 
-    // 3. Inicializar respuestas vac�as; marcar preguntas previas como sin_responder si entra tarde
+    // 3. Inicializar respuestas vacías; marcar preguntas previas como sin_responder si entra tarde
     const initAnswers = {};
     originalQuestions.forEach((q, qIdx) => {
       initAnswers[q.id] = {};
@@ -627,7 +583,7 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
     quizEndTimeRef.current = now + initialSecs * 1000;
     lastTickTimeRef.current = now;
 
-    // 4. Reiniciar auditor�a y contadores de integridad
+    // 4. Reiniciar auditoría y contadores de integridad
     setStrikesCount(0);
     setIncidentsList([]);
     setViolationModal(null);
@@ -636,7 +592,6 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
     strikesCountRef.current = 0;
     incidentsListRef.current = [];
     totalTimeOutRef.current = 0;
-    outStartTimeRef.current = null;
     autoSubmitTriggeredRef.current = false;
     reloadAuditLoggedRef.current = false;
 
@@ -654,25 +609,25 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
       );
     } catch (_) {}
 
-    // La pantalla completa se verific� antes de crear el intento.
+    // La pantalla completa se verificó antes de crear el intento.
   };
 
-  // Procesar �xito de entrega de prueba
+  // Procesar éxito de entrega de prueba
   const handlePostSubmitSuccess = useCallback(
     (submittedData, forcedReason, targetQuiz = activeQuizToTake) => {
       const quizSem = targetQuiz?.numero_semana || submittedData?.numero_semana;
       // La salida de pantalla completa ocurre antes de que React retire los
-      // listeners del examen. No debe crear una infracci�n ni restaurar el intento.
+      // listeners del examen. No debe crear una infracción ni restaurar el intento.
       autoSubmitTriggeredRef.current = true;
 
       if (forcedReason?.motivo === "expulsion_infracciones") {
-        notify("Prueba bloqueada y enviada autom�ticamente por exceder el l�mite de advertencias.", "warning");
+        notify("Prueba bloqueada y enviada automáticamente por exceder el límite de advertencias.", "warning");
       } else if (forcedReason?.motivo === "tiempo_agotado") {
         notify("Tiempo concluido. Tu prueba ha sido enviada exitosamente.", "info");
       } else if (forcedReason?.motivo === "entrega_anticipada_por_salida") {
-        notify("Evaluaci�n finalizada y enviada con las respuestas contestadas hasta este momento.", "info");
+        notify("Evaluación finalizada y enviada con las respuestas contestadas hasta este momento.", "info");
       } else {
-        notify(submittedData?.estado === "calificado" ? "�Prueba entregada y calificada autom�ticamente!" : "�Prueba entregada! Los apartados autom�ticos est�n calificados; los dem�s esperan revisi�n del instructor titular de la secci�n.", "success");
+        notify(submittedData?.estado === "calificado" ? "¡Prueba entregada y calificada automáticamente!" : "¡Prueba entregada! Los apartados automáticos están calificados; los demás esperan revisión del instructor titular de la sección.", "success");
       }
 
       const finalData = {
@@ -696,7 +651,6 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
         quiz: targetQuiz || { numero_semana: quizSem, titulo: `Semana ${quizSem}` },
         submission: finalData
       });
-      deactivateDrmBlackout();
       setActiveQuizToTake(null);
       setQuizAnswers({});
       setViolationModal(null);
@@ -704,7 +658,6 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
       setConfirmExitModalOpen(false);
       isConfirmingRef.current = false;
       isSubmittingRef.current = false;
-      outStartTimeRef.current = null;
       setIsExamSealedOffline(false);
       setPendingSubmissionPayload(null);
       loadStudentQuizzes();
@@ -714,10 +667,10 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
         else if (document.webkitExitFullscreen) document.webkitExitFullscreen().catch(() => {});
       } catch (_) {}
     },
-    [activeQuizToTake, clearActiveAttemptFromDisk, getPendingSubmissionStorageKey, loadStudentQuizzes, notify, deactivateDrmBlackout]
+    [activeQuizToTake, clearActiveAttemptFromDisk, getPendingSubmissionStorageKey, loadStudentQuizzes, notify]
   );
 
-  // Estad�sticas de preguntas respondidas para el di�logo de confirmaci�n de entrega
+  // Estadísticas de preguntas respondidas para el diálogo de confirmación de entrega
   const getAnsweredStats = useMemo(() => {
     if (!activeQuizToTake || !Array.isArray(activeQuizToTake.preguntas)) {
       return { answered: 0, total: 0 };
@@ -758,7 +711,7 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
     return { answered, total };
   }, [activeQuizToTake, quizAnswers]);
 
-  // Ejecuci�n del env�o de la prueba semanal al servidor (sellado e inmutabilidad)
+  // Ejecución del envío de la prueba semanal al servidor (sellado e inmutabilidad)
   const executeSubmitQuiz = async (forcedReason = null) => {
     if (!activeQuizToTake || isSubmittingRef.current || isExamSealedOffline) return;
     // Lock synchronously before any await; fullscreen/focus events can arrive
@@ -768,7 +721,6 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
     setSubmittingQuiz(true);
     let secId = effectiveStudent?.seccion_id || effectiveStudent?.seccion?.id;
     isConfirmingRef.current = false;
-    outStartTimeRef.current = null;
 
     const now = Date.now();
     const startTime = quizStartTimeRef.current || now;
@@ -785,7 +737,7 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
       incidentes: incidentsListRef.current,
       pantalla_completa_solicitada: true,
       conexion_al_enviar: navigator.onLine ? "online" : "offline",
-      politica_integridad: "pantalla-completa-foco-v3",
+      politica_integridad: "integridad-estados-v4",
       intentos_pegar_texto: pasteCountRef.current || 0,
 
     };
@@ -802,9 +754,9 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
 
     try {
       if (!secId) secId = await resolveStudentSectionId();
-      if (!secId) throw new Error("No se pudo identificar la secci�n del estudiante para registrar la entrega.");
+      if (!secId) throw new Error("No se pudo identificar la sección del estudiante para registrar la entrega.");
       if (!navigator.onLine) {
-        throw new Error("Conexi�n offline en dispositivo");
+        throw new Error("Conexión offline en dispositivo");
       }
 
       const res = await api.pruebas.submit(secId, payload);
@@ -825,7 +777,7 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
       } catch (_) {}
 
       notify(
-        "?? Sin conexi�n con el servidor. Tu evaluaci�n ha sido sellada y resguardada de forma segura en este dispositivo. Se enviar� de inmediato al restablecerse la se�al.",
+        "📶 Sin conexión con el servidor. Tu evaluación ha sido sellada y resguardada de forma segura en este dispositivo. Se enviará de inmediato al restablecerse la señal.",
         "warning"
       );
     } finally {
@@ -834,18 +786,17 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
     }
   };
 
-  // Apertura del modal in-app de confirmaci�n de entrega (sin disparar alertas de seguridad ni desenfoque)
+  // Apertura del modal in-app de confirmación de entrega (sin disparar alertas de seguridad ni desenfoque)
   const handleSubmitQuiz = (forcedReason = null) => {
     if (forcedReason || isExamSealedOffline) {
       executeSubmitQuiz(forcedReason);
     } else {
       isConfirmingRef.current = true;
-      outStartTimeRef.current = null;
       setConfirmSubmitModalOpen(true);
     }
   };
 
-  // Sincronizaci�n autom�tica de entrega sellada al recuperar se�al
+  // Sincronización automática de entrega sellada al recuperar señal
   const dispatchPendingOfflineSubmission = useCallback(async () => {
     if (!pendingSubmissionPayload || syncingOfflineSubmission) return;
     let secId = effectiveStudent?.seccion_id || effectiveStudent?.seccion?.id;
@@ -866,7 +817,7 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
       };
       const res = await api.pruebas.submit(secId, payloadToSend);
       if (res?.success) {
-        notify("? �Conexi�n restablecida! Tu evaluaci�n sellada ha sido entregada exitosamente al servidor.", "success");
+        notify("✅ ¡Conexión restablecida! Tu evaluación sellada ha sido entregada exitosamente al servidor.", "success");
         handlePostSubmitSuccess(
           res.data || payloadToSend,
           { motivo: pendingSubmissionPayload.auditoria?.motivo_finalizacion },
@@ -877,7 +828,7 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
       }
     } catch (err) {
       console.warn("Aviso al sincronizar entrega offline:", err.message);
-      notify("Fallo al contactar el servidor. Verifica tu conexi�n e int�ntalo de nuevo.", "error");
+      notify("Fallo al contactar el servidor. Verifica tu conexión e inténtalo de nuevo.", "error");
     } finally {
       setSyncingOfflineSubmission(false);
     }
@@ -915,7 +866,7 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
         clearActiveAttemptFromDisk(sem);
         setActiveQuizToTake(null);
         setQuizAnswers({});
-        notify("Tienes una prueba de reposici�n asignada. Ingresa desde el cat�logo actualizado.", "info");
+        notify("Tienes una prueba de reposición asignada. Ingresa desde el catálogo actualizado.", "info");
         return;
       }
       if (existingSubmissions[sem]) {
@@ -947,7 +898,7 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
                 reloadAuditLoggedRef.current = true;
                 restoredIncidents.push({
                   tipo: "recarga_o_reapertura",
-                  detalle: "El estudiante recarg� o reabri� la p�gina de la evaluaci�n",
+                  detalle: "El estudiante recargó o reabrió la página de la evaluación",
                   strike: saved.strikes || 0,
                   segundosFuera: 0,
                   hora: new Date().toLocaleTimeString()
@@ -976,7 +927,7 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
       const pendingKey = getPendingSubmissionStorageKey(sem);
       const activeKey = getActiveAttemptStorageKey(sem);
 
-      // 1. Revisar si hay un env�o sellado pendiente de sincronizaci�n
+      // 1. Revisar si hay un envío sellado pendiente de sincronización
       const pendingRaw = safeStorage.getItem(pendingKey);
       if (pendingRaw) {
         try {
@@ -998,7 +949,7 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
           if (saved?.quiz?.id && saved.quiz.id !== quiz.id) { clearActiveAttemptFromDisk(sem); continue; }
           if (saved) {
             const now = Date.now();
-            // Intento vigente: restaurar �ntegramente
+            // Intento vigente: restaurar íntegramente
             setActiveQuizToTake(saved.quiz || quiz);
             setShuffledQuestions(saved.shuffledQuestions || quiz.preguntas || []);
             setQuizAnswers(saved.quizAnswers || {});
@@ -1010,7 +961,7 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
               reloadAuditLoggedRef.current = true;
               restoredIncidents.push({
                 tipo: "recarga_o_reapertura",
-                detalle: "El estudiante recarg� o reabri� la p�gina de la evaluaci�n",
+                detalle: "El estudiante recargó o reabrió la página de la evaluación",
                 strike: saved.strikes || 0,
                 segundosFuera: 0,
                 hora: new Date().toLocaleTimeString()
@@ -1026,7 +977,7 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
             const remainingSec = saved.endTime ? Math.max(1, Math.floor((saved.endTime - now) / 1000)) : 90;
             setTimeRemainingSeconds(remainingSec);
 
-            notify("?? Evaluaci�n restaurada. La recarga de la p�gina ha quedado registrada en tu bit�cora de integridad.", "info");
+            notify("⚠️ Evaluación restaurada. La recarga de la página ha quedado registrada en tu bitácora de integridad.", "info");
             return;
           }
         } catch (e) {
@@ -1036,13 +987,13 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
     }
   }, [onlineQuizzes, activeQuizToTake, existingSubmissions, isExamSealedOffline, getActiveAttemptStorageKey, getPendingSubmissionStorageKey, clearActiveAttemptFromDisk, notify]);
 
-  // Interceptor para evitar cierre o recarga involuntaria de pesta�a durante la prueba
+  // Interceptor para evitar cierre o recarga involuntaria de pestaña durante la prueba
   useEffect(() => {
     if (!activeQuizToTake || isExamSealedOffline) return;
 
     const handleBeforeUnload = (e) => {
       e.preventDefault();
-      e.returnValue = "Tienes una evaluaci�n activa. Si sales o recargas, se registrar� una incidencia en tu bit�cora.";
+      e.returnValue = "Tienes una evaluación activa. Si sales o recargas, se registrará una incidencia en tu bitácora.";
       return e.returnValue;
     };
 
@@ -1064,26 +1015,25 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
     strikesCountRef.current = nextStrike;
     totalTimeOutRef.current += segundosFuera;
     setStrikesCount(nextStrike);
-    const incident = { tipo, detalle, strike: nextStrike, segundosFuera, hora: new Date().toISOString(), origen: "cliente", politica: "pantalla-completa-foco-v3" };
+    const incident = { tipo, detalle, strike: nextStrike, segundosFuera, hora: new Date().toISOString(), origen: "cliente", politica: "integridad-estados-v4" };
     incidentsListRef.current = [...incidentsListRef.current.slice(-99), incident];
     setIncidentsList(incidentsListRef.current);
     saveActiveAttemptToDisk(activeQuizToTake, shuffledQuestions, quizAnswersRef.current, quizStartTimeRef.current, quizEndTimeRef.current, nextStrike, incidentsListRef.current, totalTimeOutRef.current);
-    deactivateDrmBlackout();
     if (nextStrike >= 3) {
       autoSubmitTriggeredRef.current = true;
       setConfirmExitModalOpen(false);
       setConfirmSubmitModalOpen(false);
-      setViolationModal({ strike: 3, isFinal: true, mensaje: "Se registraron tres advertencias por salir de pantalla completa, cambiar de pesta�a o aplicaci�n, o perder el foco. La prueba se cierra y se env�a con las respuestas completadas hasta este momento." });
+      setViolationModal({ strike: 3, isFinal: true, mensaje: "Se registraron tres advertencias por salir de pantalla completa, cambiar de pestaña o aplicación, o perder el foco. La prueba se cierra y se envía con las respuestas completadas hasta este momento." });
       submitQuizRef.current({ motivo: "expulsion_infracciones" });
     } else {
-      setViolationModal({ strike: nextStrike, isFinal: false, segundosFuera, mensaje: `${detalle} Advertencia ${nextStrike} de 3. La tercera advertencia termina y env�a la prueba con las respuestas que lleves. Para continuar debes volver a pantalla completa.` });
+      setViolationModal({ strike: nextStrike, isFinal: false, segundosFuera, mensaje: `${detalle} Advertencia ${nextStrike} de 3. La tercera advertencia termina y envía la prueba con las respuestas que lleves. Para continuar debes volver a pantalla completa.` });
     }
   };
 
   const confirmedAnswersRef = useRef(answeredQuestionsMap);
   confirmedAnswersRef.current = answeredQuestionsMap;
 
-  // Sincronizaci�n en vivo v�a Heartbeat con el servidor durante la prueba
+  // Sincronización en vivo vía Heartbeat con el servidor durante la prueba
   useEffect(() => {
     if (!activeQuizToTake || isExamSealedOffline) return;
 
@@ -1142,7 +1092,7 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
           }
           setActiveLiveState(liveData);
 
-          // Detecci�n cuando el docente desde control en vivo cambia de pregunta con los botones
+          // Detección cuando el docente desde control en vivo cambia de pregunta con los botones
           const incomingIdx = liveData.pregunta_actual_idx;
           const prevIdx = lastKnownQuestionIdxRef.current;
 
@@ -1164,12 +1114,12 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
               totalTimeOutRef.current
             );
 
-            // 3. Desenfocar input activo para ocultar teclado en m�viles
+            // 3. Desenfocar input activo para ocultar teclado en móviles
             if (document.activeElement && typeof document.activeElement.blur === "function") {
               document.activeElement.blur();
             }
 
-            notify(`Pregunta #${incomingIdx + 1} iniciada por el instructor titular de la secci�n. Tu respuesta previa qued� guardada.`, "info");
+            notify(`Pregunta #${incomingIdx + 1} iniciada por el instructor titular de la sección. Tu respuesta previa quedó guardada.`, "info");
           } else if (typeof incomingIdx === "number") {
             lastKnownQuestionIdxRef.current = incomingIdx;
           }
@@ -1178,7 +1128,7 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
             setTimeRemainingSeconds(liveData.tiempo_restante_segundos ?? 90);
           }
 
-          // Si el docente finaliz� la prueba para toda la secci�n
+          // Si el docente finalizó la prueba para toda la sección
           if (liveData.estado === "finalizada" && !autoSubmitTriggeredRef.current) {
             autoSubmitTriggeredRef.current = true;
             handleSubmitQuiz({ motivo: "finalizada_por_docente" });
@@ -1228,7 +1178,7 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
     }
   }, [timeRemainingSeconds, activeQuizToTake, isExamSealedOffline, activeLiveState?.estado, shuffledQuestions, saveActiveAttemptToDisk]);
 
-  // Decremento local fluido de segundo a segundo mientras est� en pregunta
+  // Decremento local fluido de segundo a segundo mientras está en pregunta
   useEffect(() => {
     if (!activeQuizToTake || isExamSealedOffline || activeLiveState?.estado !== "en_pregunta") return;
 
@@ -1250,8 +1200,8 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
     isSuppressed: () => isSubmittingRef.current,
     onDeparture: (seconds, type) => {
       const details = {
-        salida_de_pantalla: "La evaluaci�n dej� de estar visible al cambiar de pesta�a o aplicaci�n.",
-        perdida_de_foco: "La ventana de la evaluaci�n perdi� el foco.",
+        salida_de_pantalla: "La evaluación dejó de estar visible al cambiar de pestaña o aplicación.",
+        perdida_de_foco: "La ventana de la evaluación perdió el foco.",
         salida_pantalla_completa: "Saliste del modo de pantalla completa obligatorio."
       };
       registerViolation(type, details[type], seconds);
@@ -1267,21 +1217,19 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
     },
     onBlocked: type => {
       if (type === "pegar_texto") pasteCountRef.current += 1;
-      const incident = { tipo: type, detalle: "Acci�n bloqueada dentro de la evaluaci�n; no implica una infracci�n confirmada.", strike: strikesCountRef.current, segundosFuera: 0, hora: new Date().toISOString(), origen: "cliente" };
+      const incident = { tipo: type, detalle: "Acción bloqueada dentro de la evaluación; no implica una infracción confirmada.", strike: strikesCountRef.current, segundosFuera: 0, hora: new Date().toISOString(), origen: "cliente" };
       incidentsListRef.current = [...incidentsListRef.current.slice(-99), incident];
       setIncidentsList(incidentsListRef.current);
       saveActiveAttemptToDisk(activeQuizToTake, shuffledQuestions, quizAnswersRef.current, quizStartTimeRef.current, quizEndTimeRef.current, strikesCountRef.current, incidentsListRef.current, totalTimeOutRef.current);
-      notify("Esta acci�n est� deshabilitada durante la evaluaci�n.", "warning");
+      notify("Esta acción está deshabilitada durante la evaluación.", "warning");
     }
   };
   useEffect(() => {
     if (!activeQuizToTake || isExamSealedOffline) return;
-    return observeQuizIntegrity({
+    const controller = observeQuizIntegrity({
       document, window,
       isActive: () => integrityCallbacksRef.current.isActive(),
       isSuppressed: () => integrityCallbacksRef.current.isSuppressed(),
-      onHidden: () => activateDrmBlackout(),
-      onVisible: deactivateDrmBlackout,
       onDeparture: (seconds, type) => integrityCallbacksRef.current.onDeparture(seconds, type),
       onReturn: seconds => integrityCallbacksRef.current.onReturn(seconds),
       onBlocked: type => integrityCallbacksRef.current.onBlocked(type),
@@ -1291,7 +1239,9 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
         // Only an explicit exit request opens the submission confirmation.
       }
     });
-  }, [activeQuizToTake, isExamSealedOffline, activateDrmBlackout, deactivateDrmBlackout]);
+    integrityControllerRef.current = controller;
+    return () => { controller(); integrityControllerRef.current = null; };
+  }, [activeQuizToTake, isExamSealedOffline]);
 
   const requestQuizExit = () => {
     if (!activeQuizToTake || autoSubmitTriggeredRef.current || isExamSealedOffline || isSubmittingRef.current) return;
@@ -1313,7 +1263,10 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
   const resumeQuizFullscreen = async () => {
     if (!(await requestQuizFullscreen())) return;
     if (autoSubmitTriggeredRef.current || isSubmittingRef.current || isExamSealedOffline) return;
-    deactivateDrmBlackout();
+    if (!integrityControllerRef.current?.resume()) {
+      setFullscreenError("Vuelve a la ventana de la prueba para continuar.");
+      return;
+    }
     setConfirmExitModalOpen(false);
     setConfirmSubmitModalOpen(false);
     setViolationModal(null);
@@ -1351,7 +1304,7 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
 
   // Manejar cambio en casilla de respuesta con auto-guardado persistente
   const handleAnswerChange = (preguntaId, itemId, indexOrText, textIfList = null) => {
-    if (isExamSealedOffline || autoSubmitTriggeredRef.current || isSubmittingRef.current || !hasQuizFullscreen(document) || violationModal || confirmExitModalOpen || confirmSubmitModalOpen) return;
+    if (isExamSealedOffline || autoSubmitTriggeredRef.current || isSubmittingRef.current || !integrityControllerRef.current?.canRespond() || !hasQuizFullscreen(document) || violationModal || confirmExitModalOpen || confirmSubmitModalOpen) return;
     setQuizAnswers((prev) => {
       const prevVal = prev[preguntaId];
       const currentQ = (prevVal && typeof prevVal === "object" && !Array.isArray(prevVal)) ? { ...prevVal } : {};
@@ -1432,25 +1385,25 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
       totalTimeOutRef.current
     );
 
-    // Sincronizaci�n inmediata de latido con respuestas parciales al servidor
+    // Sincronización inmediata de latido con respuestas parciales al servidor
     if (sendHeartbeatRef.current) {
       sendHeartbeatRef.current();
     }
   };
 
-  // Ver comprobante / revisi�n de una prueba entregada
+  // Ver comprobante / revisión de una prueba entregada
   const handleOpenReview = (quiz, submission) => {
     if (activeQuizToTake) { requestQuizExit(); return; }
     setReviewingSubmission({ quiz, submission });
     setActiveQuizToTake(null);
   };
 
-  // Semanas reales configuradas para la carrera matriculada (sin asumir n�mero fijo)
+  // Semanas reales configuradas para la carrera matriculada (sin asumir número fijo)
   const activeCareerWeeks = useMemo(() => {
     if (Array.isArray(semanasConfig) && semanasConfig.length > 0) {
       return [...semanasConfig].sort((a, b) => Number(a.numero_semana) - Number(b.numero_semana));
     }
-    // Fallback din�mico: solo semanas que tengan alg�n registro
+    // Fallback dinámico: solo semanas que tengan algún registro
     const fallbackList = [];
     for (let i = 1; i <= 20; i++) {
       if (
@@ -1469,7 +1422,7 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
     return fallbackList;
   }, [semanasConfig, asistencias, effectiveStudent, notas]);
 
-  // Calcular m�tricas de asistencia basadas en las semanas reales de la carrera
+  // Calcular métricas de asistencia basadas en las semanas reales de la carrera
   const attendanceStats = useMemo(() => {
     if (loadingAcademic) {
       return {
@@ -1517,7 +1470,7 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
   }, [activeCareerWeeks, asistencias, effectiveStudent, loadingAcademic]);
 
   // =========================================================================
-  // C�LCULOS DIN�MICOS ACAD�MICOS UNIFICADOS (MOTOR CENTRAL ACAD�MICO)
+  // CÁLCULOS DINÁMICOS ACADÉMICOS UNIFICADOS (MOTOR CENTRAL ACADÉMICO)
   // =========================================================================
   const academicSummary = useMemo(() => {
     if (loadingAcademic || academicError || !effectiveStudent) {
@@ -1561,7 +1514,7 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
     pruebasList
   } = academicSummary;
 
-  // 8. C�lculo din�mico de Derecho a Examen por cada examen de la carrera
+  // 8. Cálculo dinámico de Derecho a Examen por cada examen de la carrera
   const derechoExamenesStatus = useMemo(() => {
     if (loadingAcademic) {
       return {
@@ -1643,7 +1596,7 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
         perdioAlguno: perdio,
         todosHabilitados: !perdio,
         habilitadosCount: perdio ? 0 : 1,
-        titulo: perdio ? "Sin Derecho (2+ Faltas)" : "Habilitado (1 Examen) V"
+        titulo: perdio ? "Sin Derecho (2+ Faltas)" : "Habilitado (1 Examen) ✓"
       };
     }
 
@@ -1654,10 +1607,10 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
     let titulo = "";
     if (!perdioAlguno) {
       titulo = list.length === 1
-        ? "Habilitado (1 Examen) V"
-        : `Habilitado (${list.length} Ex�menes) V`;
+        ? "Habilitado (1 Examen) ✓"
+        : `Habilitado (${list.length} Exámenes) ✓`;
     } else if (habilitadosCount === 0) {
-      titulo = `Sin Derecho en todos (${list.length} Ex�menes)`;
+      titulo = `Sin Derecho en todos (${list.length} Exámenes)`;
     } else {
       titulo = `Sin Derecho en ${perdidos.map((p) => p.label).join(", ")}`;
     }
@@ -1673,8 +1626,8 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
   }, [examenesList, semanasConfig, asistencias, effectiveStudent, activeCareerWeeks, loadingAcademic]);
 
   // =========================================================================
-  // AGRUPACI�N INTEGRAL Y AUTORITATIVA POR PARCIALES (I, II, III PARCIAL)
-  // Garantiza cero mezclas ni translocaciones entre periodos acad�micos
+  // AGRUPACIÓN INTEGRAL Y AUTORITATIVA POR PARCIALES (I, II, III PARCIAL)
+  // Garantiza cero mezclas ni translocaciones entre periodos académicos
   // =========================================================================
   const parcialesData = useMemo(() => {
     const palette = [
@@ -1758,7 +1711,7 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
         };
       });
 
-      // P�rdida de derecho a examen en este parcial por 2+ faltas injustificadas
+      // Pérdida de derecho a examen en este parcial por 2+ faltas injustificadas
       const perdioDerecho = faltasInjustificadas >= 2;
 
       // Subtotales de notas del parcial
@@ -1860,7 +1813,7 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
           gap: 1.25rem;
         }
 
-        /* Banner de Notificaci�n de Prueba en Vivo */
+        /* Banner de Notificación de Prueba en Vivo */
         .sp-live-alert {
           background: linear-gradient(135deg, #fff1f2 0%, #fee2e2 100%);
           border: 2px solid #f87171;
@@ -1923,7 +1876,7 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
           gap: 0.35rem;
         }
 
-        /* Grid de Tarjetas de M�tricas */
+        /* Grid de Tarjetas de Métricas */
         .sp-metrics-grid {
           display: grid;
           grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
@@ -1956,7 +1909,7 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
           line-height: 1.2;
         }
 
-        /* Barra de Pesta�as Moderna (Segmented Control) */
+        /* Barra de Pestañas Moderna (Segmented Control) */
         .sp-tabs-nav {
           display: flex;
           gap: 0.5rem;
@@ -2013,20 +1966,20 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
           scrollbar-width: none;
         }
 
-        /* Auto-altura para respuestas multil�nea en m�vil y escritorio */
+        /* Auto-altura para respuestas multilínea en móvil y escritorio */
         .sp-quiz-textarea {
           font-family: inherit;
           line-height: 1.45;
           resize: vertical;
           min-height: 56px;
         }
-        /* Bloqueo de impresi�n y capturas por CSS */
+        /* Bloqueo de impresión y capturas por CSS */
         @media print {
           body * {
             display: none !important;
           }
           body::after {
-            content: "EVALUACI�N PROTEGIDA - CAPTURA O IMPRESI�N PROHIBIDA";
+            content: "EVALUACIÓN PROTEGIDA - CAPTURA O IMPRESIÓN PROHIBIDA";
             display: block !important;
             font-size: 24pt !important;
             font-weight: 900 !important;
@@ -2034,36 +1987,6 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
             text-align: center !important;
             margin-top: 40vh !important;
           }
-        }
-        /* Sistema DRM de Protecci�n Anti-Capturas y Blackout Inmediato */
-        body.anticheat-blackout-on {
-          background: #000000 !important;
-          overflow: hidden !important;
-        }
-        body.anticheat-blackout-on .sp-quiz-take-card {
-          opacity: 0 !important;
-          filter: brightness(0) !important;
-        }
-        #anti-cheat-blackout-curtain {
-          display: none;
-          position: fixed !important;
-          inset: 0 !important;
-          width: 100vw !important;
-          height: 100vh !important;
-          z-index: 9999990 !important;
-          background: #000000 !important;
-          color: #ffffff;
-          align-items: center;
-          justify-content: center;
-          flex-direction: column;
-          gap: 1.25rem;
-          pointer-events: auto !important;
-          cursor: pointer;
-        }
-        body.anticheat-blackout-on #anti-cheat-blackout-curtain {
-          display: flex !important;
-          opacity: 1 !important;
-          visibility: visible !important;
         }
         .sp-violation-modal-overlay {
           position: fixed !important;
@@ -2113,7 +2036,7 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
           box-shadow: 0 2px 8px rgba(0, 0, 0, 0.02);
         }
 
-        /* AJUSTES RESPONSIVOS PARA M�VIL (< 768px): COMPACTO, PROPORCIONAL Y ESTILO ESCRITORIO */
+        /* AJUSTES RESPONSIVOS PARA MÓVIL (< 768px): COMPACTO, PROPORCIONAL Y ESTILO ESCRITORIO */
         @media (max-width: 768px) {
           .sp-portal-container {
             gap: 0.65rem !important;
@@ -2166,7 +2089,7 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
             border-radius: 0.35rem !important;
           }
 
-          /* 3 M�tricas en fila horizontal proporcional, igual que en pantalla grande */
+          /* 3 Métricas en fila horizontal proporcional, igual que en pantalla grande */
           .sp-metrics-grid {
             grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
             gap: 0.35rem !important;
@@ -2226,7 +2149,7 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
             white-space: nowrap !important;
           }
 
-          /* Barra de Navegaci�n Segmentada compacta que NUNCA se sale de la pantalla */
+          /* Barra de Navegación Segmentada compacta que NUNCA se sale de la pantalla */
           .sp-tabs-nav {
             border-bottom: 1px solid #e2e8f0 !important;
             padding: 0.2rem !important;
@@ -2283,7 +2206,7 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
             gap: 0.15rem !important;
           }
 
-          /* Paneles de pesta�as */
+          /* Paneles de pestañas */
           .sp-tab-content-container {
             gap: 0.65rem !important;
           }
@@ -2301,7 +2224,7 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
             -webkit-overflow-scrolling: touch !important;
           }
 
-          /* Ex�menes Parciales en 3 columnas proporcionales */
+          /* Exámenes Parciales en 3 columnas proporcionales */
           .sp-exams-grid {
             grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
             gap: 0.35rem !important;
@@ -2356,7 +2279,7 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
             font-size: 0.8rem !important;
           }
 
-          /* Control de Asistencia en cuadr�cula compacta de 3 columnas */
+          /* Control de Asistencia en cuadrícula compacta de 3 columnas */
           .sp-asistencia-grid {
             grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
             gap: 0.35rem !important;
@@ -2383,7 +2306,7 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
             gap: 0.45rem !important;
           }
 
-          /* M�dulo de Pruebas Semanales */
+          /* Módulo de Pruebas Semanales */
           .sp-quizzes-grid {
             grid-template-columns: 1fr !important;
             gap: 0.65rem !important;
@@ -2400,7 +2323,7 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
             font-size: 0.76rem !important;
           }
 
-          /* Interfaz de Examen Activo en M�vil */
+          /* Interfaz de Examen Activo en Móvil */
           .sp-quiz-take-card {
             padding: 0.85rem !important;
             border-radius: 0.75rem !important;
@@ -2432,7 +2355,7 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
       <div className="sp-portal-container">
         {!activeQuizToTake ? (
           <>
-            {/* Banner de Notificaci�n de Prueba en Vivo Habilitada */}
+            {/* Banner de Notificación de Prueba en Vivo Habilitada */}
             {anyLiveQuiz && (
               <div className="sp-live-alert student-portal__live">
                 <div style={{ display: "flex", alignItems: "center", gap: "1rem" }}>
@@ -2465,14 +2388,14 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
                           letterSpacing: "0.5px"
                         }}
                       >
-                        ?? PRUEBA EN VIVO HABILITADA
+                        🔴 PRUEBA EN VIVO HABILITADA
                       </span>
                       <strong style={{ fontSize: "1.05rem", color: "#991b1b", fontWeight: 900 }}>
                         {anyLiveQuiz.titulo || `Prueba Semanal ${anyLiveQuiz.numero_semana}`} (Semana {anyLiveQuiz.numero_semana})
                       </strong>
                     </div>
                     <p style={{ margin: "0.25rem 0 0", fontSize: "0.86rem", color: "#7f1d1d", fontWeight: 600 }}>
-                      El instructor titular de tu secci�n ha activado la sesi�n en vivo para tu secci�n. Ingresa ahora para realizar tu prueba sincronizado con la clase.
+                      El instructor titular de tu sección ha activado la sesión en vivo para tu sección. Ingresa ahora para realizar tu prueba sincronizado con la clase.
                     </p>
                   </div>
                 </div>
@@ -2498,16 +2421,16 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
                   }}
                 >
                   <PlayCircle size={18} />
-                  <span>Ingresar a la Prueba en Vivo </span>
+                  <span>Ingresar a la Prueba en Vivo →</span>
                 </button>
               </div>
             )}
 
             <header className="student-portal__header">
               <div className="student-portal__identity"><span className="student-portal__avatar"><GraduationCap size={26} /></span>
-                <div><p className="student-portal__eyebrow">PORTAL DE ESTUDIANTES � HISTOLAB</p><h2>{effectiveStudent?.nombre_completo || "Tu espacio de aprendizaje"}</h2><p>Cuenta {effectiveStudent?.numero_cuenta} <span aria-hidden="true">�</span> {carreraKey}</p></div>
+                <div><p className="student-portal__eyebrow">PORTAL DE ESTUDIANTES · HISTOLAB</p><h2>{effectiveStudent?.nombre_completo || "Tu espacio de aprendizaje"}</h2><p>Cuenta {effectiveStudent?.numero_cuenta} <span aria-hidden="true">·</span> {carreraKey}</p></div>
               </div>
-              <div className="student-portal__header-actions"><button type="button" className="student-portal__button" disabled={loadingAcademic} onClick={() => setAcademicReload(value => value + 1)}><RefreshCw size={16} className={loadingAcademic ? "animate-spin" : ""} />{loadingAcademic ? "Actualizando." : "Actualizar datos"}</button><button type="button" className="student-portal__button" onClick={() => navigatePortal("seguridad")}><KeyRound size={16} />Mi cuenta</button></div>
+              <div className="student-portal__header-actions"><button type="button" className="student-portal__button" disabled={loadingAcademic} onClick={() => setAcademicReload(value => value + 1)}><RefreshCw size={16} className={loadingAcademic ? "animate-spin" : ""} />{loadingAcademic ? "Actualizando…" : "Actualizar datos"}</button><button type="button" className="student-portal__button" onClick={() => navigatePortal("seguridad")}><KeyRound size={16} />Mi cuenta</button></div>
             </header>
 
             {/* AVISO DESTACADO DE PRUEBA EN VIVO TIPO KAHOOT */}
@@ -2557,17 +2480,17 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
                           letterSpacing: "0.5px"
                         }}
                       >
-                        ?? EN DIRECTO
+                        🔴 EN DIRECTO
                       </span>
                       <span style={{ fontSize: "0.85rem", fontWeight: 800, opacity: 0.95 }}>
                         Semana {activeLiveBannerSession.numero_semana}
                       </span>
                     </div>
                     <h3 style={{ margin: "0.25rem 0 0", fontSize: "1.2rem", fontWeight: 900, letterSpacing: "-0.01em" }}>
-                      �Prueba en vivo activa! Sala de espera abierta
+                      ¡Prueba en vivo activa! Sala de espera abierta
                     </h3>
                     <p style={{ margin: "0.2rem 0 0", fontSize: "0.85rem", opacity: 0.95 }}>
-                      El instructor titular de tu secci�n habilit� la evaluaci�n en directo. Entra ahora para sincronizarte antes de la Pregunta 1.
+                      El instructor titular de tu sección habilitó la evaluación en directo. Entra ahora para sincronizarte antes de la Pregunta 1.
                     </p>
                   </div>
                 </div>
@@ -2617,7 +2540,7 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
               </div>
             )}
 
-            <nav className="student-portal__nav" aria-label="Navegaci�n del portal de estudiantes">
+            <nav className="student-portal__nav" aria-label="Navegación del portal de estudiantes">
               {[
                 { id: "inicio", label: "Inicio", short: "Inicio", Icon: House },
                 { id: "calificaciones", label: "Mis calificaciones", short: "Notas", Icon: Award },
@@ -2628,15 +2551,15 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
             </nav>
 
             {!activeQuizToTake && makeupAssignments.filter(item => item.estado === "asignada").map(item => <div className="student-makeup-notice" key={item.id}>
-              <CalendarCheck size={21} aria-hidden="true" /><div><strong>Reposici�n asignada � Semana {item.semana}</strong><p>Secci�n {item.seccion} � {new Intl.DateTimeFormat("es-HN", { dateStyle: "medium", timeStyle: "short", timeZone: "America/Tegucigalpa" }).format(new Date(item.practica_at))}. Tu matr�cula y las notas se conservan en tu secci�n original.</p></div><button type="button" className="student-portal__button" onClick={() => navigatePortal("pruebas")}>Ver prueba</button>
+              <CalendarCheck size={21} aria-hidden="true" /><div><strong>Reposición asignada · Semana {item.semana}</strong><p>Sección {item.seccion} · {new Intl.DateTimeFormat("es-HN", { dateStyle: "medium", timeStyle: "short", timeZone: "America/Tegucigalpa" }).format(new Date(item.practica_at))}. Tu matrícula y las notas se conservan en tu sección original.</p></div><button type="button" className="student-portal__button" onClick={() => navigatePortal("pruebas")}>Ver prueba</button>
             </div>)}
 
             {academicError && ["inicio", "calificaciones", "asistencia"].includes(activeTab) && <div className="student-portal__error" role="alert"><AlertCircle size={22} /><p>{academicError}</p><button type="button" className="student-portal__button" onClick={() => setAcademicReload(value => value + 1)}>Reintentar carga</button></div>}
-            {loadingAcademic && ["calificaciones", "asistencia"].includes(activeTab) && <div className="student-dashboard__loading" role="status"><RefreshCw size={24} className="animate-spin" /><p>Cargando tu informaci�n acad�mica.</p></div>}
+            {loadingAcademic && ["calificaciones", "asistencia"].includes(activeTab) && <div className="student-dashboard__loading" role="status"><RefreshCw size={24} className="animate-spin" /><p>Cargando tu información académica…</p></div>}
             {activeTab === "inicio" && <StudentDashboard summary={academicSummary} attendance={attendanceStats} examStatus={derechoExamenesStatus} section={seccion} loading={loadingAcademic} error={academicError} onNavigate={navigatePortal} />}
 
         {/* =================================================================== */}
-        {/* PESTA�A A: MIS CALIFICACIONES - ORGANIZADO POR PARCIALES            */}
+        {/* PESTAÑA A: MIS CALIFICACIONES - ORGANIZADO POR PARCIALES            */}
         {/* =================================================================== */}
         {activeTab === "calificaciones" && !loadingAcademic && !academicError && (
           <StudentGradesView summary={academicSummary} parciales={parcialesData} submissions={existingSubmissions}
@@ -2651,19 +2574,19 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
         )}
 
         {/* =================================================================== */}
-        {/* PESTA�A B: CONTROL DE ASISTENCIA                                    */}
+        {/* PESTAÑA B: CONTROL DE ASISTENCIA                                    */}
         {/* =================================================================== */}
         {activeTab === "asistencia" && !loadingAcademic && !academicError && (
           <StudentAttendanceView parciales={parcialesData} examStatus={derechoExamenesStatus} />
         )}
 
         {/* =================================================================== */}
-        {/* PESTA�A C: PRUEBAS SEMANALES EN L�NEA                               */}
+        {/* PESTAÑA C: PRUEBAS SEMANALES EN LÍNEA                               */}
         {/* =================================================================== */}
         {activeTab === "pruebas" && (
           <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
             {reviewingSubmission ? (
-              /* CASO 2: REVISI�N DE COMPROBANTE Y RESPUESTAS ENTREGADAS */
+              /* CASO 2: REVISIÓN DE COMPROBANTE Y RESPUESTAS ENTREGADAS */
               <div
                 className="student-quiz-receipt"
                 style={{
@@ -2699,7 +2622,7 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
                     </button>
                     <div>
                       <span style={{ fontSize: "0.76rem", fontWeight: 800, color: "#16a34a", textTransform: "uppercase" }}>
-                        Comprobante de Entrega  Semana {reviewingSubmission.quiz.numero_semana}
+                        Comprobante de Entrega • Semana {reviewingSubmission.quiz.numero_semana}
                       </span>
                       <h3 style={{ margin: "0.15rem 0 0", fontSize: "1.25rem", fontWeight: 900, color: "#0f172a" }}>
                         {reviewingSubmission.quiz.titulo || `Prueba semanal ${reviewingSubmission.quiz.numero_semana}`}
@@ -2721,14 +2644,14 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
                     {reviewingSubmission.submission.estado === "calificado"
                       ? (reviewingSubmission.submission.nota_obtenida !== null && reviewingSubmission.submission.nota_obtenida !== undefined && Number.isFinite(Number(reviewingSubmission.submission.nota_obtenida))
                           ? `Nota oficial: ${Number(reviewingSubmission.submission.nota_obtenida).toFixed(3)} / 5.000 pts`
-                          : "Calificada � nota por sincronizar")
-                      : "Entregada � en revisi�n"}
+                          : "Calificada · nota por sincronizar")
+                      : "Entregada · en revisión"}
                   </div>
                 </div>
 
                 {reviewingSubmission.submission.comentarios && (
                   <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", padding: "0.85rem 1.1rem", borderRadius: "0.65rem", fontSize: "0.85rem", color: "#166534" }}>
-                    ?? <strong>Comentarios del instructor titular de la secci�n:</strong> {reviewingSubmission.submission.comentarios}
+                    💬 <strong>Comentarios del instructor titular de la sección:</strong> {reviewingSubmission.submission.comentarios}
                   </div>
                 )}
 
@@ -2752,7 +2675,7 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
                           flexDirection: "column"
                         }}
                       >
-                        {/* Barra de T�tulo / Identificador Superior de la Pregunta */}
+                        {/* Barra de Título / Identificador Superior de la Pregunta */}
                         <div
                           style={{
                             padding: "0.8rem 1.25rem",
@@ -2783,7 +2706,7 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
                                   : "0 2px 6px rgba(2, 132, 199, 0.3)"
                               }}
                             >
-                              {isBonus ? "? PREGUNTA BONUS" : `PREGUNTA ${pregunta.numero || qIdx + 1}`}
+                              {isBonus ? "⭐ PREGUNTA BONUS" : `PREGUNTA ${pregunta.numero || qIdx + 1}`}
                             </span>
 
                             <span style={{ fontSize: "0.82rem", fontWeight: 800, color: isBonus ? "#92400e" : "#475569" }}>
@@ -2822,7 +2745,7 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
                         <div style={{ textAlign: "center" }}>
                           <img
                             src={pregunta.imagen_url}
-                            alt="Micrograf�a"
+                            alt="Micrografía"
                             style={{ maxHeight: "200px", borderRadius: "0.5rem", border: "1px solid #cbd5e1" }}
                           />
                         </div>
@@ -2895,7 +2818,7 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
                                       flexShrink: 0
                                     }}
                                   >
-                                    ??
+                                    ✍️
                                   </span>
                                   <span
                                     style={{
@@ -2909,7 +2832,7 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
                                   </span>
                                 </div>
 
-                                {/* Retroalimentaci�n individual */}
+                                {/* Retroalimentación individual */}
                                 {isGraded && (
                                   <div>
                                     {evalItem ? (
@@ -2950,7 +2873,7 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
                                           </>
                                         ) : evalItem.estado === "regular" ? (
                                           <>
-                                            <span>� Regular (+{Number(evalItem.puntos_obtenidos || 0).toFixed(3)} pts)</span>
+                                            <span>½ Regular (+{Number(evalItem.puntos_obtenidos || 0).toFixed(3)} pts)</span>
                                           </>
                                         ) : (
                                           <>
@@ -2983,10 +2906,10 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
                             const defaultItemPts = Math.round((Number(pregunta.puntos || 1.0) / (pregunta.items.length || 1)) * 1000) / 1000;
                             const itemMaxPts = item.puntos !== undefined && !isNaN(Number(item.puntos)) ? Number(item.puntos) : defaultItemPts;
 
-                            // Evaluaci�n directa de todo el apartado (modo texto corto o retrocompatibilidad)
+                            // Evaluación directa de todo el apartado (modo texto corto o retrocompatibilidad)
                             const evalItem = evaluaciones[`${pregunta.id}___${item.id}`];
 
-                            // Sumar puntos obtenidos si se evalu� casilla por casilla
+                            // Sumar puntos obtenidos si se evaluó casilla por casilla
                             let earnedInSlots = 0;
                             let hasSlotEvaluations = false;
                             if (isList) {
@@ -3030,11 +2953,11 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
                                         border: "1px solid #bae6fd"
                                       }}
                                     >
-                                      {itemMaxPts.toFixed(3)} pt(s) {isList ? `(${cantSlots} casillas  puntaje distribuido entre casillas)` : ""}
+                                      {itemMaxPts.toFixed(3)} pt(s) {isList ? `(${cantSlots} casillas • puntaje distribuido entre casillas)` : ""}
                                     </span>
                                   </div>
 
-                                  {/* Resumen de Calificaci�n del Apartado */}
+                                  {/* Resumen de Calificación del Apartado */}
                                   {isGraded && (
                                     <>
                                       {isList && hasSlotEvaluations ? (
@@ -3064,10 +2987,10 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
                                           }}
                                         >
                                           {evalItem.estado === "buena"
-                                            ? `V Correcta (+${Number(evalItem.puntos_obtenidos || 0).toFixed(3)} pts)`
+                                            ? `✓ Correcta (+${Number(evalItem.puntos_obtenidos || 0).toFixed(3)} pts)`
                                             : evalItem.estado === "regular"
-                                            ? `� Regular (+${Number(evalItem.puntos_obtenidos || 0).toFixed(3)} pts)`
-                                            : "? Incorrecta (0 pts)"}
+                                            ? `½ Regular (+${Number(evalItem.puntos_obtenidos || 0).toFixed(3)} pts)`
+                                            : "✗ Incorrecta (0 pts)"}
                                         </span>
                                       ) : null}
                                     </>
@@ -3076,7 +2999,7 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
 
                                 {/* Contenido de Respuestas */}
                                 {!isList ? (
-                                  /* Apartado Texto Corto - RETROALIMENTACI�N INDIVIDUAL */
+                                  /* Apartado Texto Corto - RETROALIMENTACIÓN INDIVIDUAL */
                                   <div
                                     style={{
                                       display: "flex",
@@ -3122,7 +3045,7 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
                                           flexShrink: 0
                                         }}
                                       >
-                                        ??
+                                        ✍️
                                       </span>
                                       <span
                                         style={{
@@ -3136,7 +3059,7 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
                                       </span>
                                     </div>
 
-                                    {/* Retroalimentaci�n individual de texto corto */}
+                                    {/* Retroalimentación individual de texto corto */}
                                     {isGraded && (
                                       <div>
                                         {evalItem ? (
@@ -3177,7 +3100,7 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
                                               </>
                                             ) : evalItem.estado === "regular" ? (
                                               <>
-                                                <span>� Regular (+{Number(evalItem.puntos_obtenidos || 0).toFixed(3)} pts)</span>
+                                                <span>½ Regular (+{Number(evalItem.puntos_obtenidos || 0).toFixed(3)} pts)</span>
                                               </>
                                             ) : (
                                               <>
@@ -3195,7 +3118,7 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
                                     )}
                                   </div>
                                 ) : (
-                                  /* Apartado Listado con M�ltiples Casillas - RETROALIMENTACI�N INDIVIDUAL */
+                                  /* Apartado Listado con Múltiples Casillas - RETROALIMENTACIÓN INDIVIDUAL */
                                   <div style={{ display: "flex", flexDirection: "column", gap: "0.45rem", marginTop: "0.2rem" }}>
                                     {Array.from({ length: cantSlots }).map((_, rIdx) => {
                                       const rowVal = Array.isArray(userAns)
@@ -3261,11 +3184,11 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
                                                 fontStyle: rowVal && String(rowVal).trim() ? "normal" : "italic"
                                               }}
                                             >
-                                              {item.tipo === "terminos_pareados" && <strong>{quizSlotLabel(item,rIdx)}  </strong>}{rowVal && String(rowVal).trim() ? rowVal : "Sin respuesta enviada"}
+                                              {item.tipo === "terminos_pareados" && <strong>{quizSlotLabel(item,rIdx)} → </strong>}{rowVal && String(rowVal).trim() ? rowVal : "Sin respuesta enviada"}
                                             </span>
                                           </div>
 
-                                          {/* Retroalimentaci�n individual de la casilla */}
+                                          {/* Retroalimentación individual de la casilla */}
                                           {isGraded && (
                                             <div>
                                               {slotEval ? (
@@ -3306,7 +3229,7 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
                                                     </>
                                                   ) : slotEval.estado === "regular" ? (
                                                     <>
-                                                      <span>� Regular (+{Number(slotEval.puntos_obtenidos || 0).toFixed(3)} pts)</span>
+                                                      <span>½ Regular (+{Number(slotEval.puntos_obtenidos || 0).toFixed(3)} pts)</span>
                                                     </>
                                                   ) : (
                                                     <>
@@ -3355,11 +3278,11 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
             onExit={requestQuizExit}
             onChange={handleAnswerChange} onBlur={handleAnswerBlur}
             onConfirm={index => {
-              if (!hasQuizFullscreen(document) || isExamSealedOffline || isSubmittingRef.current || autoSubmitTriggeredRef.current || violationModal || confirmExitModalOpen || confirmSubmitModalOpen) return;
+              if (!integrityControllerRef.current?.canRespond() || !hasQuizFullscreen(document) || isExamSealedOffline || isSubmittingRef.current || autoSubmitTriggeredRef.current || violationModal || confirmExitModalOpen || confirmSubmitModalOpen) return;
               setAnsweredQuestionsMap(previous => ({ ...previous, [index]: true }));
             }}
             onSubmit={() => handleSubmitQuiz()}
-            onPasteBlocked={() => notify("No est� permitido pegar texto durante la prueba.", "warning")} />
+            onPasteBlocked={() => notify("No está permitido pegar texto durante la prueba.", "warning")} />
         )}
 
 
@@ -3367,62 +3290,7 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
           <QuizFullscreenGate error={fullscreenError} onResume={resumeQuizFullscreen} onExit={requestQuizExit} />
         )}
 
-        {/* Ocultamiento temporal al dejar de estar visible la evaluaci�n. */}
-        <div
-          id="anti-cheat-blackout-curtain"
-          onClick={() => deactivateDrmBlackout()}
-          onTouchStart={() => deactivateDrmBlackout()}
-          style={{
-            position: "fixed",
-            top: 0,
-            left: 0,
-            width: "100vw",
-            height: "100vh",
-            zIndex: 9999990,
-            background: "#000000",
-            color: "#ffffff",
-            flexDirection: "column",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: "1.25rem",
-            pointerEvents: isScreenBlackedOut ? "auto" : "none",
-            display: isScreenBlackedOut ? "flex" : "none",
-            cursor: "pointer"
-          }}
-        >
-          <ShieldAlert size={52} color="#ef4444" className="animate-pulse" />
-          <div style={{ textAlign: "center", padding: "0 1.5rem", maxWidth: "480px" }}>
-            <div style={{ fontSize: "1.2rem", fontWeight: 900, color: "#ffffff", letterSpacing: "0.5px" }}>
-              EVALUACI�N EN PAUSA
-            </div>
-            <div style={{ fontSize: "0.88rem", color: "#94a3b8", marginTop: "0.45rem", lineHeight: 1.5 }}>
-              La evaluaci�n dej� de estar visible. Vuelve a la prueba para continuar; tus respuestas se conservan.
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              deactivateDrmBlackout();
-            }}
-            style={{
-              marginTop: "0.5rem",
-              padding: "0.75rem 1.75rem",
-              borderRadius: "9999px",
-              background: "linear-gradient(135deg, #0284c7 0%, #0369a1 100%)",
-              color: "#ffffff",
-              border: "1px solid #38bdf8",
-              fontSize: "0.9rem",
-              fontWeight: 900,
-              cursor: "pointer",
-              boxShadow: "0 0 20px rgba(2, 132, 199, 0.5)"
-            }}
-          >
-            Tocar aqu� para continuar evaluaci�n
-          </button>
-        </div>
-
-        {/* MODAL DE ADVERTENCIA / INFRACCI�N DE SEGURIDAD ANTITRAMPAS */}
+        {/* MODAL DE ADVERTENCIA / INFRACCIÓN DE SEGURIDAD ANTITRAMPAS */}
         {violationModal && !confirmExitModalOpen && !confirmSubmitModalOpen && !isExamSealedOffline && (
           <div
             className="sp-violation-modal-overlay"
@@ -3481,10 +3349,10 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
                     color: violationModal.strike >= 3 ? "#dc2626" : "#d97706"
                   }}
                 >
-                  {violationModal.strike >= 3 ? "Cierre seg�n las normas" : "Incidencia de Integridad Registrada"}
+                  {violationModal.strike >= 3 ? "Cierre según las normas" : "Incidencia de Integridad Registrada"}
                 </span>
                 <h3 style={{ margin: "0.3rem 0 0", fontSize: "1.35rem", fontWeight: 900, color: "#0f172a" }}>
-                  {violationModal.strike >= 3 ? "Evaluaci�n Bloqueada" : `Advertencia ${violationModal.strike} de 3`}
+                  {violationModal.strike >= 3 ? "Evaluación Bloqueada" : `Advertencia ${violationModal.strike} de 3`}
                 </h3>
               </div>
 
@@ -3516,7 +3384,7 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
                   }}
                 >
                   <Maximize2 size={18} />
-                  <span>Entendido  Continuar Evaluaci�n</span>
+                  <span>Entendido • Continuar Evaluación</span>
                 </button>
               ) : (
                 <div
@@ -3534,7 +3402,7 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
                   }}
                 >
                   <RefreshCw size={18} className="animate-spin" />
-                  <span>Cerrando y enviando prueba autom�ticamente al servidor...</span>
+                  <span>Cerrando y enviando prueba automáticamente al servidor...</span>
                 </div>
               )}
             </div>
@@ -3542,13 +3410,13 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
         )}
 
         {/* =================================================================== */}
-        {/* PESTA�A D: SEGURIDAD Y ACTUALIZAR CONTRASE�A                        */}
+        {/* PESTAÑA D: SEGURIDAD Y ACTUALIZAR CONTRASEÑA                        */}
         {/* =================================================================== */}
         {activeTab === "seguridad" && (
           <StudentAccountView student={effectiveStudent} career={carreraKey} account={cuentaKey} notify={notify} />
         )}
 
-        {/* MODAL IN-APP DE CONFIRMACI�N DE ENTREGA (NO DESENFOCA NI DISPARA FALSOS POSITIVOS DE SEGURIDAD) */}
+        {/* MODAL IN-APP DE CONFIRMACIÓN DE ENTREGA (NO DESENFOCA NI DISPARA FALSOS POSITIVOS DE SEGURIDAD) */}
         {confirmSubmitModalOpen && activeQuizToTake && (
           <div
             className="quiz-player-dialog"
@@ -3607,13 +3475,13 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
                     color: "#0284c7"
                   }}
                 >
-                  Confirmaci�n de Entrega
+                  Confirmación de Entrega
                 </span>
                 <h3 style={{ margin: "0.3rem 0 0", fontSize: "1.35rem", fontWeight: 900, color: "#0f172a" }}>
-                  �Finalizar y Entregar Prueba?
+                  ¿Finalizar y Entregar Prueba?
                 </h3>
                 <p style={{ margin: "0.35rem 0 0", fontSize: "0.88rem", color: "#64748b", fontWeight: 600 }}>
-                  Semana {activeQuizToTake.numero_semana}  {activeQuizToTake.titulo || `Prueba Semanal ${activeQuizToTake.numero_semana}`}
+                  Semana {activeQuizToTake.numero_semana} • {activeQuizToTake.titulo || `Prueba Semanal ${activeQuizToTake.numero_semana}`}
                 </p>
               </div>
 
@@ -3650,7 +3518,7 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
               </div>
 
               <p style={{ margin: 0, fontSize: "0.86rem", color: "#475569", lineHeight: 1.5 }}>
-                Una vez enviada, tus respuestas quedar�n selladas definitivamente y no podr�s modificarlas. Tu examen ser� registrado en el sistema y enviado para revisi�n del instructor titular de la secci�n.
+                Una vez enviada, tus respuestas quedarán selladas definitivamente y no podrás modificarlas. Tu examen será registrado en el sistema y enviado para revisión del instructor titular de la sección.
               </p>
 
               <div
@@ -3685,7 +3553,6 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
                   onClick={() => {
                     setConfirmSubmitModalOpen(false);
                     isConfirmingRef.current = false;
-                    outStartTimeRef.current = null;
                     executeSubmitQuiz();
                   }}
                   disabled={submittingQuiz}
@@ -3707,14 +3574,14 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
                   }}
                 >
                   {submittingQuiz ? <RefreshCw size={17} className="animate-spin" /> : <Send size={17} />}
-                  <span>{submittingQuiz ? "Enviando..." : "S�, Entregar Ahora"}</span>
+                  <span>{submittingQuiz ? "Enviando..." : "Sí, Entregar Ahora"}</span>
                 </button>
               </div>
             </div>
           </div>
         )}
 
-        {/* MODAL IN-APP DE CONFIRMACI�N PARA SALIR DE LA PRUEBA */}
+        {/* MODAL IN-APP DE CONFIRMACIÓN PARA SALIR DE LA PRUEBA */}
         {confirmExitModalOpen && (
           <div
             className="quiz-player-dialog"
@@ -3776,15 +3643,15 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
                     color: "#0284c7"
                   }}
                 >
-                  Finalizar Evaluaci�n
+                  Finalizar Evaluación
                 </span>
                 <h3 style={{ margin: "0.3rem 0 0", fontSize: "1.35rem", fontWeight: 900, color: "#0f172a" }}>
-                  �Deseas concluir y salir de la prueba?
+                  ¿Deseas concluir y salir de la prueba?
                 </h3>
               </div>
 
               <p style={{ margin: 0, fontSize: "0.9rem", color: "#475569", lineHeight: 1.55 }}>
-                Al presionar salir, se tomar� como que deseas terminar tu evaluaci�n. Se enviar�n y registrar�n todas las respuestas que hayas completado hasta este momento.
+                Al presionar salir, se tomará como que deseas terminar tu evaluación. Se enviarán y registrarán todas las respuestas que hayas completado hasta este momento.
               </p>
               {violationModal && <p role="alert">{violationModal.mensaje}</p>}
               {fullscreenError && <p role="alert">{fullscreenError}</p>}
@@ -3821,7 +3688,6 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
                   onClick={() => {
                     setConfirmExitModalOpen(false);
                     isConfirmingRef.current = false;
-                    outStartTimeRef.current = null;
                     executeSubmitQuiz({ motivo: "entrega_anticipada_por_salida" });
                   }}
                   style={{
@@ -3901,15 +3767,15 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
                     letterSpacing: "1px"
                   }}
                 >
-                  Integridad Acad�mica Resguardada
+                  Integridad Académica Resguardada
                 </div>
                 <h3 style={{ margin: "0.3rem 0 0", fontSize: "1.4rem", fontWeight: 900, color: "#0f172a" }}>
-                  Evaluaci�n Finalizada y Sellada
+                  Evaluación Finalizada y Sellada
                 </h3>
               </div>
 
               <p style={{ margin: 0, fontSize: "0.92rem", color: "#475569", lineHeight: 1.55 }}>
-                Tu evaluaci�n de la <strong>Semana {activeQuizToTake?.numero_semana}</strong> ha concluido. Todas tus respuestas han sido congeladas y selladas de forma <strong>inmutable</strong> en la memoria de este dispositivo.
+                Tu evaluación de la <strong>Semana {activeQuizToTake?.numero_semana}</strong> ha concluido. Todas tus respuestas han sido congeladas y selladas de forma <strong>inmutable</strong> en la memoria de este dispositivo.
               </p>
 
               <div
@@ -3930,8 +3796,8 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
                 <Clock size={22} style={{ flexShrink: 0 }} />
                 <span>
                   {isOnline
-                    ? "Se�al de internet detectada. Listo para sincronizar con la base de datos de Histolab."
-                    : "Sin conexi�n a internet. Conecta tu tel�fono o computadora a Wi-Fi o datos m�viles para completar la sincronizaci�n."}
+                    ? "Señal de internet detectada. Listo para sincronizar con la base de datos de Histolab."
+                    : "Sin conexión a internet. Conecta tu teléfono o computadora a Wi-Fi o datos móviles para completar la sincronización."}
                 </span>
               </div>
 
@@ -3957,7 +3823,7 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
                 }}
               >
                 {syncingOfflineSubmission ? <RefreshCw size={18} className="animate-spin" /> : <Send size={18} />}
-                <span>{syncingOfflineSubmission ? "Sincronizando con Servidor..." : "Reintentar Sincronizaci�n Ahora"}</span>
+                <span>{syncingOfflineSubmission ? "Sincronizando con Servidor..." : "Reintentar Sincronización Ahora"}</span>
               </button>
             </div>
           </div>
