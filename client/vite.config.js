@@ -1,8 +1,16 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import { execFileSync } from "node:child_process";
+
+let updateNumber = "desarrollo";
+try {
+  updateNumber = execFileSync("git", ["rev-list", "--count", "HEAD"], { encoding: "utf8" }).trim();
+} catch { /* Una copia sin historial se identifica como desarrollo. */ }
+const siteUpdate = { number: updateNumber, updatedAt: new Date().toISOString() };
 
 // https://vitejs.dev/config/
 export default defineConfig({
+  define: { __SITE_UPDATE__: JSON.stringify(siteUpdate) },
   plugins: [react(), {
     name: "public-information-pages",
     configureServer(server) {
