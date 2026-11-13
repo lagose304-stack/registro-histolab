@@ -1333,9 +1333,14 @@ export default function StudentPortalView({ student, notify = () => {}, onExitGu
   }, [activeQuizToTake, isExamSealedOffline]);
 
   const resumeQuizFullscreen = async () => {
-    if (requiresFullscreen && !(await requestQuizFullscreen())) return;
+    integrityControllerRef.current?.beginRecovery();
+    if (requiresFullscreen && !(await requestQuizFullscreen())) {
+      integrityControllerRef.current?.cancelRecovery();
+      return;
+    }
     if (autoSubmitTriggeredRef.current || isSubmittingRef.current || isExamSealedOffline) return;
     if (!integrityControllerRef.current?.resume()) {
+      integrityControllerRef.current?.cancelRecovery();
       setFullscreenError("Vuelve a la ventana de la prueba para continuar.");
       return;
     }

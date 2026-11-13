@@ -34,6 +34,7 @@ export function observeQuizIntegrity({ document: doc, window: win, isActive, isS
   onDeparture, onReturn = () => {}, onBlocked, onFullscreen = () => {}, now = () => performance.now() }) {
   let focused = doc.hasFocus?.() ?? true;
   let fullscreen = hasQuizFullscreen(doc);
+  let disposed = false;
   const enabled = () => isActive() && !isSuppressed();
   const session = createQuizIntegritySession({
     readEnvironment: () => ({ visible: !doc.hidden, focused, fullscreen: !requireFullscreen || hasQuizFullscreen(doc) }),
@@ -43,11 +44,13 @@ export function observeQuizIntegrity({ document: doc, window: win, isActive, isS
       else doc.documentElement?.removeAttribute?.('data-quiz-blocked');
     }
   });
+  let recoveryPending = false;
   const visibility = () => {
     focused = doc.hasFocus?.() ?? focused;
+    if (recoveryPending) return;
     session.signal('salida_de_pantalla');
   };
-  const blur = () => { focused = false; session.signal('perdida_de_foco'); };
+  const blur = () => { focused = false; if (!recoveryPending) session.signal('perdida_de_foco'); };
   const focus = () => { focused = true; }; // Never dismiss a warning implicitly.
   const fullscreenChange = () => {
     const current = hasQuizFullscreen(doc);
@@ -78,14 +81,22 @@ export function observeQuizIntegrity({ document: doc, window: win, isActive, isS
   // the recovery control, so it is safe to refresh the cached focus state
   // before asking the state machine to reopen the attempt.
   const resume = () => {
+    if (disposed || !enabled()) return false;
     focused = true;
-    return session.resume();
+    const result = session.resume();
+    recoveryPending = false;
+    return result;
   };
+  const beginRecovery = () => { if (!disposed && enabled()) recoveryPending = true; };
+  const cancelRecovery = () => { recoveryPending = false; };
   const dispose = () => {
+    disposed = true;
     listeners.forEach(([target, event, handler]) => target.removeEventListener(event, handler, true));
     session.dispose();
   };
   dispose.resume = resume;
+  dispose.beginRecovery = beginRecovery;
+  dispose.cancelRecovery = cancelRecovery;
   dispose.canRespond = session.canRespond;
   return dispose;
 }

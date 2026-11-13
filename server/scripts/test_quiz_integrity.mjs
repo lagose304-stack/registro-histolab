@@ -77,6 +77,24 @@ dispose(); blur(); hidden();
 assert.equal(departures.length, 3);
 assert([...doc.listeners.values(), ...win.listeners.values()].every(list => list.size === 0));
 
+// A browser may emit blur/visibility while a user-initiated fullscreen request is pending.
+{
+  const recoveryDoc = new Surface(), recoveryWin = new Surface();
+  let recoveryWarnings = 0;
+  const recovery = observeQuizIntegrity({ document: recoveryDoc, window: recoveryWin,
+    isActive: () => true, isSuppressed: () => false, onDeparture: () => recoveryWarnings++ });
+  recoveryDoc.fullscreenElement = null; recoveryDoc.emit('fullscreenchange');
+  assert.equal(recoveryWarnings, 1);
+  recovery.beginRecovery();
+  recoveryDoc.focused = false; recoveryWin.emit('blur'); recoveryDoc.hidden = true; recoveryDoc.emit('visibilitychange');
+  recoveryDoc.fullscreenElement = {}; recoveryDoc.hidden = false; recoveryDoc.focused = true;
+  recoveryDoc.emit('fullscreenchange'); recoveryWin.emit('focus');
+  assert.equal(recoveryWarnings, 1, 'Fullscreen recovery transition events do not create another incident');
+  assert.equal(recovery.resume(), true);
+  assert.equal(recovery.canRespond(), true);
+  recovery();
+}
+
 assert.equal(await enterQuizFullscreen({ documentElement: {} }), false);
 assert.equal(await enterQuizFullscreen({ documentElement: { requestFullscreen: async () => { throw Error('denied'); } } }), false);
 assert.equal(await enterQuizFullscreen({ documentElement: { requestFullscreen: async () => {} } }), false);
