@@ -38,7 +38,7 @@ export default function StudentQuizPlayer({ quiz, liveState, answers, seconds, o
     {sealed && <p className="quiz-player__warning" role="status">La prueba está sellada. La entrega se enviará al recuperar la conexión.</p>}
     {activity && <div className="quiz-activity" data-limit={activity.attempt.faltas >= 3} role={activity.attempt.faltas ? "alert" : "status"}>
       <strong>{activity.attempt.faltas ? `Falta ${activity.attempt.faltas} de 3` : "0 de 3 faltas"}</strong>
-      <p>{activity.attempt.faltas >= 3 ? "Prueba finalizada. Se envían las respuestas existentes." : "Cada salida detectada suma una falta. La tercera finaliza y envía la prueba."}</p>
+      <p>{activity.attempt.faltas >= 3 ? "Prueba finalizada. Se envían las respuestas existentes." : "Cada salida suma una falta y abre un aviso de 10 segundos. Confirma el regreso para evitar una falta grave. La tercera falta finaliza la prueba."}</p>
       {activity.attempt.eventos.filter(event => event.tipo === "salida").slice(-1).map(event => <small key={event.id}>{event.senales.map(signal => QUIZ_ACTIVITY_SIGNALS[signal]).join(" · ")}. Pregunta {event.pregunta_indice + 1}.</small>)}
       <small>{activityError || (activity.pending.length ? "Guardando registro…" : "Registro sincronizado")}</small>
     </div>}

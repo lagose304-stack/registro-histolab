@@ -20,6 +20,7 @@ export default function QuizActivityReview({ section, week, account, fallback })
   const attempts = rows || (fallback ? [{ id: fallback.intento_id, politica: fallback.politica, aceptado_at: fallback.aceptado_at, faltas: fallback.faltas, eventos: fallback.eventos }] : []);
   return <section className="quiz-activity-review" aria-label="Registro de salidas de la prueba">
     <h3>Registro de salidas</h3>
+    {fallback?.falta_grave && <p role="alert"><strong>Falta grave: venció el plazo de 10 segundos para confirmar el regreso. La prueba se envió con las respuestas existentes.</strong></p>}
     <p>Señales declaradas por el navegador; no identifican otra aplicación ni demuestran copia. Horas mostradas en Honduras. La hora del dispositivo y la duración pueden ser inexactas.</p>
     {rows === null && !error && <p role="status">Consultando registro…</p>}
     {error && <p role="alert">No se pudo consultar la bitácora independiente. {fallback && "Se muestra la copia guardada con la entrega."} <button type="button" onClick={() => setVersion(value => value + 1)}>Reintentar</button></p>}

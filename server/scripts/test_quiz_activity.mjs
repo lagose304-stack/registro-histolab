@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { PGlite } from "@electric-sql/pglite";
-import { appendLocalActivity } from "../../shared/quizActivity.mjs";
+import { appendLocalActivity, quizReturnDeadline } from "../../shared/quizActivity.mjs";
 import { observeQuizActivity } from "../../client/src/utils/quizActivityObserver.mjs";
 const id = n => `00000000-0000-4000-8000-${String(n).padStart(12,"0")}`;
 const event = (n, episode, tipo = "salida") => ({ id:id(n), episodio_id:id(episode), tipo, hora_cliente:new Date(1700000000000+n*1000).toISOString(), senales:tipo === "salida" ? ["ventana_sin_foco"] : [], pregunta_id:"q1", pregunta_indice:0 });
@@ -26,6 +26,16 @@ state={faltas:0,episodio_abierto:null,eventos:[]};active=true;doc.visibilityStat
 const hiddenCleanup=observeQuizActivity({window:win,document:doc,getState:()=>state,isActive:()=>active,makeId:()=>id(sequence++),onEvent:source=>{state=appendLocalActivity(state,[{...source,pregunta_indice:0}]);}});
 assert.equal(state.faltas,1,"Un inicio que termina en segundo plano registra la salida");hiddenCleanup();
 console.log("PASS observador: ráfaga deduplicada, regreso real, recarga, tercera falta y limpieza sin bloquear acciones.");
+state={faltas:0,episodio_abierto:null,eventos:[]};doc.visibilityState="visible";focused=true;active=true;
+const explicitCleanup=observeQuizActivity({window:win,document:doc,explicitReturn:true,getState:()=>state,isActive:()=>active,makeId:()=>id(sequence++),onEvent:source=>{state=appendLocalActivity(state,[{...source,pregunta_indice:0}]);}});
+win.dispatchEvent(new Event("blur"));
+const deadline=quizReturnDeadline(state);
+win.dispatchEvent(new Event("focus"));doc.dispatchEvent(new Event("visibilitychange"));
+await new Promise(r=>setTimeout(r,180));
+assert(state.episodio_abierto,"El foco no confirma el regreso automáticamente");assert.equal(quizReturnDeadline(state),deadline);
+state=appendLocalActivity(state,[{id:id(sequence++),episodio_id:state.episodio_abierto,tipo:"regreso",hora_cliente:new Date().toISOString(),senales:[],pregunta_indice:0}]);
+assert.equal(state.faltas,1);assert.equal(quizReturnDeadline(state),null);explicitCleanup();
+console.log("PASS regreso explícito: foco no detiene ni reinicia el plazo; confirmar conserva una sola falta.");
 
 const db=new PGlite();
 try {

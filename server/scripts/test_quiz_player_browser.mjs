@@ -79,7 +79,7 @@ async function setup({ size = { width: 390, height: 844 }, phase = 'en_pregunta'
 }
 const playable=async page=>{await page.getByRole('textbox').waitFor();await page.waitForFunction(()=>!document.querySelector('textarea').disabled);};
 async function leave(page){await page.evaluate(()=>{window.dispatchEvent(new Event('blur'));Object.defineProperty(document,'visibilityState',{configurable:true,get:()=> 'hidden'});document.dispatchEvent(new Event('visibilitychange'));window.dispatchEvent(new Event('blur'));});}
-async function back(page){await page.evaluate(()=>{Object.defineProperty(document,'visibilityState',{configurable:true,get:()=> 'visible'});document.dispatchEvent(new Event('visibilitychange'));window.dispatchEvent(new Event('focus'));});await page.waitForFunction(()=>!window.fixture.activity?.episodio_abierto);}
+async function back(page){await page.evaluate(()=>{Object.defineProperty(document,'visibilityState',{configurable:true,get:()=> 'visible'});document.dispatchEvent(new Event('visibilitychange'));window.dispatchEvent(new Event('focus'));});await page.getByRole('button',{name:'Regresar a la prueba',exact:true}).click();await page.waitForFunction(()=>!window.fixture.activity?.episodio_abierto);}
 try{
  await mkdir('artifacts/quiz-activity',{recursive:true});
  for(const size of [{width:320,height:640},{width:640,height:360},{width:768,height:1024},{width:1024,height:768}]){
@@ -87,13 +87,21 @@ try{
   await fixture.start();await playable(page);
   assert.equal(await page.evaluate(()=>window.fixture.fullscreenRequests),0);
   await page.getByRole('textbox').fill('Respuestas al llegar a tres faltas');
-  await leave(page);await page.getByText('Falta 1 de 3',{exact:true}).waitFor();
-  assert.equal(await page.getByRole('textbox').isEnabled(),true);
-  assert.equal(await page.getByRole('dialog').count(),0);
+  await leave(page);await page.getByRole('alertdialog').getByText('Falta 1 de 3',{exact:true}).waitFor();
+  assert.equal(await page.getByRole('textbox').isEnabled(),false);
+  await page.getByRole('alertdialog').waitFor();
+  const bounds=await page.getByRole('alertdialog').boundingBox();
+  const viewport=await page.evaluate(()=>({width:document.documentElement.clientWidth,height:innerHeight}));
+  assert.equal(bounds.x,0);assert.equal(bounds.y,0);assert.equal(bounds.width,viewport.width);assert.equal(bounds.height,viewport.height);
+  const returnBounds=await page.getByRole('button',{name:'Regresar a la prueba',exact:true}).boundingBox();
+  assert(returnBounds.y>=0 && returnBounds.y+returnBounds.height<=size.height,'El botón de regreso está visible sin desplazar');
+  await page.screenshot({path:`artifacts/quiz-activity/aviso-${size.width}x${size.height}.png`,fullPage:false});
   await back(page);
+  assert.equal(await page.getByText('Falta 2 de 3',{exact:true}).count(),0);
+  assert.equal(await page.getByRole('textbox').isEnabled(),true);
   assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
   await page.screenshot({path:`artifacts/quiz-activity/${size.width}x${size.height}.png`,fullPage:true});
-  await leave(page);await page.getByText('Falta 2 de 3',{exact:true}).waitFor();await back(page);
+  await leave(page);await page.getByRole('alertdialog').getByText('Falta 2 de 3',{exact:true}).waitFor();await back(page);
   await page.evaluate(()=>{window.fixture.delaySubmit=true;});
   await leave(page);
   await page.waitForFunction(()=>window.fixture.sent.length===1&&!document.querySelector('.quiz-player'));
@@ -105,7 +113,7 @@ try{
  // Una ráfaga no duplica, recargar conserva contador y respuestas.
  let fixture=await setup();let {page}=fixture;await fixture.start();await playable(page);
  await page.getByRole('textbox').fill('Borrador conservado');await leave(page);await back(page);
- await page.reload();await playable(page);assert.equal(await page.getByRole('textbox').inputValue(),'Borrador conservado');
+ await page.reload();await page.getByRole('alertdialog').waitFor();assert.equal(await page.getByRole('textbox',{includeHidden:true}).inputValue(),'Borrador conservado');
  await page.waitForFunction(()=>window.fixture.activity?.faltas===2);
  await back(page);
  assert.equal(await page.getByRole('dialog').count(),0);
@@ -117,6 +125,24 @@ try{
  await page.reload();
  await page.waitForFunction(()=>Boolean(window.fixture.submission));
  assert.equal(await page.evaluate(()=>window.fixture.submission.respuestas.q.a),'Borrador conservado');
+ assert.deepEqual(fixture.errors,[]);await fixture.context.close();
+ // Vencimiento real de diez segundos y restauración sin reiniciar el plazo.
+ fixture=await setup();page=fixture.page;await fixture.start();await playable(page);
+ await page.getByRole('textbox').fill('Respuesta antes de falta grave');
+ await leave(page);await page.getByRole('alertdialog').waitFor();
+ await page.waitForFunction(()=>window.fixture.sent.length===1,{},{timeout:15000});
+ assert.equal(await page.evaluate(()=>window.fixture.sent[0].auditoria.motivo_finalizacion),'falta_grave_tiempo');
+ assert.equal(await page.evaluate(()=>window.fixture.sent[0].respuestas.q.a),'Respuesta antes de falta grave');
+ assert.deepEqual(fixture.errors,[]);await fixture.context.close();
+ // Volver a la ventana no cancela: solo el botón. Recargar conserva la hora original.
+ fixture=await setup();page=fixture.page;await fixture.start();await playable(page);await leave(page);
+ const original=await page.evaluate(()=>window.fixture.activity.eventos[0].hora_cliente);
+ await page.evaluate(()=>{Object.defineProperty(document,'visibilityState',{configurable:true,get:()=> 'visible'});document.dispatchEvent(new Event('visibilitychange'));window.dispatchEvent(new Event('focus'));});
+ await page.getByRole('alertdialog').waitFor();
+ await page.reload();await page.getByRole('alertdialog').waitFor();
+ assert.equal(await page.evaluate(()=>window.fixture.activity.eventos[0].hora_cliente),original);
+ await page.getByRole('button',{name:'Regresar a la prueba',exact:true}).click();await playable(page);
+ assert.equal(await page.getByText('Falta 2 de 3',{exact:true}).count(),0);
  assert.deepEqual(fixture.errors,[]);await fixture.context.close();
  // Confirmación voluntaria y fin docente continúan funcionando.
  fixture=await setup();page=fixture.page;await fixture.start();await playable(page);
@@ -135,7 +161,7 @@ try{
  // Salir por el cierre de sesión suma una salida, sin interceptar la acción.
  fixture=await setup();page=fixture.page;await fixture.start();await playable(page);
  await page.evaluate(()=>window.fixture.leavePortal());
- await page.getByText('Falta 1 de 3',{exact:true}).waitFor();
+ await page.getByRole('alertdialog').getByText('Falta 1 de 3',{exact:true}).waitFor();
  assert.equal(await page.evaluate(()=>window.fixture.sent.length),0);
  assert.deepEqual(fixture.errors,[]);await fixture.context.close();
  for(const size of [{width:320,height:640},{width:768,height:1024}]){
@@ -146,5 +172,5 @@ try{
   await page.screenshot({path:`artifacts/quiz-activity/revision-${size.width}x${size.height}.png`,fullPage:true});
   assert.deepEqual(fixture.errors,[]);await fixture.context.close();
  }
- console.log('PASS navegador: aceptación, falta visible sin bloqueo, tres episodios/envío único, respuestas exactas, recarga, cierre offline/reintento, docente y lobby en móvil/tablet.');
+ console.log('PASS navegador: aceptación, aviso completo de 10 segundos, regreso explícito sin faltas extra, falta grave, tres episodios/envío único, respuestas exactas, recarga, cierre offline/reintento, docente y lobby en móvil/tablet.');
 }finally{await browser.close();}

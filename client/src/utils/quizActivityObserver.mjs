@@ -1,7 +1,7 @@
 import { QUIZ_ACTIVITY_LIMIT } from "../../../shared/quizActivity.mjs";
 
 // Observa señales del navegador. No intercepta teclas, navegación ni permisos.
-export function observeQuizActivity({ window, document, getState, onEvent, isActive, makeId = () => crypto.randomUUID(), now = () => new Date().toISOString() }) {
+export function observeQuizActivity({ window, document, getState, onEvent, isActive, explicitReturn = false, makeId = () => crypto.randomUUID(), now = () => new Date().toISOString() }) {
   let returnTimer;
   const here = () => document.visibilityState !== "hidden" && document.hasFocus();
   const departure = signal => {
@@ -11,6 +11,7 @@ export function observeQuizActivity({ window, document, getState, onEvent, isAct
     onEvent({ id: makeId(), episodio_id: makeId(), tipo: "salida", hora_cliente: now(), senales: [signal] });
   };
   const returned = () => {
+    if (explicitReturn) return;
     clearTimeout(returnTimer);
     if (!here()) return;
     // Agrupar la transición focus/visibility del regreso, sin rearmar entre eventos.

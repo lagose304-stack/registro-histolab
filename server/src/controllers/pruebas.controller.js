@@ -4,7 +4,7 @@ import { syncMakeupSubmission } from "../services/studentMakeups.js";
 import { sanitizeClientAudit } from "../middlewares/quizPrivacy.mjs";
 import fs from "node:fs";
 import { beginQuizActivity, recordQuizActivity, finishQuizActivity, listQuizActivity } from "../services/quizActivity.js";
-import { QUIZ_ACTIVITY_POLICY } from "../../../shared/quizActivity.mjs";
+import { QUIZ_ACTIVITY_POLICY, quizReturnDeadline } from "../../../shared/quizActivity.mjs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import crypto from "node:crypto";
@@ -537,13 +537,17 @@ export const submitPruebaEstudiante = async (req,res) => {
       activity = await recordQuizActivity(seccion_id, numSemana, req.student, req.body.actividad_intento_id, req.body.actividad_eventos_pendientes || []);
       if (String(activity.quiz_id) !== String(quiz.id)) return res.status(409).json({ success:false, message:"El intento pertenece a otra prueba." });
       if (activity.faltas >= 3) clientAudit.motivo_finalizacion = "limite_tres_faltas";
+      else if (clientAudit.motivo_finalizacion === "falta_grave_tiempo") {
+        const deadline = quizReturnDeadline(activity);
+        if (!deadline || Date.now() < deadline) return res.status(409).json({ success:false, message:"El registro aún no confirma el vencimiento del plazo de regreso." });
+      }
       else if (clientAudit.motivo_finalizacion === "limite_tres_faltas") return res.status(409).json({ success: false, message: "El contador del servidor aún no confirma tres faltas." });
     }
     if (req.student && req.body.quiz_id && String(req.body.quiz_id) !== String(quiz.id)) return res.status(409).json({success:false,message:"La prueba asignada cambió. Actualiza el catálogo antes de continuar."});
     if (req.student) {
       if (!(quiz.publicada === true || String(quiz.publicada) === "true" || quiz.estado === "publicada")) return res.status(403).json({success:false,message:"Esta prueba no está publicada."});
       const live = await getLiveQuizEvidence(seccion_id,numSemana);
-      const canEndLobbyAttempt = live.estado === "lobby" && live.habilitada && (clientAudit?.motivo_finalizacion === "entrega_anticipada_por_salida" || activity?.faltas >= 3);
+      const canEndLobbyAttempt = live.estado === "lobby" && live.habilitada && (clientAudit?.motivo_finalizacion === "entrega_anticipada_por_salida" || clientAudit?.motivo_finalizacion === "falta_grave_tiempo" || activity?.faltas >= 3);
       if (!["en_pregunta","esperando_siguiente","finalizada"].includes(live.estado) && !canEndLobbyAttempt) return res.status(409).json({success:false,message:"La prueba aún no se ha iniciado para esta sección."});
     }
     const assessment=buildAutomaticQuizAssessment(quiz.preguntas,answers);
@@ -552,6 +556,7 @@ export const submitPruebaEstudiante = async (req,res) => {
     for (const key of ["calificacion_automatica","evaluaciones_incisos","nota_real","nota_con_bonus"]) delete trustedAudit[key];
     trustedAudit.hora_recepcion_servidor=new Date().toISOString();
     if (activity) trustedAudit.actividad = { intento_id: activity.id, politica: activity.politica, faltas: activity.faltas, aceptado_at: activity.aceptado_at, eventos: activity.eventos, origen: "senales_declaradas_por_navegador" };
+    if (activity && clientAudit.motivo_finalizacion === "falta_grave_tiempo") trustedAudit.actividad.falta_grave = { motivo: "plazo_regreso_agotado", episodio_id: activity.episodio_abierto, plazo_segundos: 10, declarado_cliente: true, confirmado_at: trustedAudit.hora_recepcion_servidor };
     if (result.automaticCount) Object.assign(trustedAudit,{calificacion_automatica:assessment,evaluaciones_incisos:result.evaluations,puntos_automaticos:result.automaticScore,apartados_pendientes:result.pending,...(result.complete?{nota_real:result.raw,nota_con_bonus:result.raw}:{})});
     const submission={id:existing?.id || crypto.randomUUID(),quiz_id:quiz.id,seccion_id,carrera:quiz.carrera || carrera || "Medicina",numero_semana:numSemana,numero_cuenta:String(numero_cuenta),nombre_completo:nombre_completo || existing?.nombre_completo || "",respuestas:answers,estado:result.complete?"calificado":"enviado",nota_obtenida:result.complete?result.official:null,comentarios:"",auditoria:trustedAudit,fecha_envio:new Date().toISOString(),updated_at:new Date().toISOString(),...(result.complete?{nota_real:result.raw,nota_con_bonus:result.raw,calificado_por:"Sistema · Calificación automática"}:{})};
     if (isSupabaseConfigured && supabase) {

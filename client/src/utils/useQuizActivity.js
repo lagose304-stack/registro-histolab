@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { safeStorage } from "./safeStorage";
 import { observeQuizActivity } from "./quizActivityObserver.mjs";
-import { appendLocalActivity, QUIZ_ACTIVITY_POLICY } from "../../../shared/quizActivity.mjs";
+import { appendLocalActivity, QUIZ_ACTIVITY_POLICY, quizReturnDeadline } from "../../../shared/quizActivity.mjs";
 
 export function useQuizActivity({ quiz, student, api, active, getQuestion, onLimit }) {
   const [state, setState] = useState(null);
   const [error, setError] = useState("");
+  const [secondsLeft, setSecondsLeft] = useState(10);
   const current = useRef(null);
   const syncing = useRef(false);
   const callbacks = useRef({});
@@ -69,6 +70,27 @@ export function useQuizActivity({ quiz, student, api, active, getQuestion, onLim
       recordEvent({ id: crypto.randomUUID(), episodio_id: crypto.randomUUID(), tipo: "salida", hora_cliente: new Date().toISOString(), senales: ["salida_del_portal"] });
     }
   }, [recordEvent]);
+  const returnToQuiz = useCallback(() => {
+    const attempt = current.current?.attempt;
+    if (!attempt?.episodio_abierto || !callbacks.current.active()) return;
+    if (Date.now() >= quizReturnDeadline(attempt)) { callbacks.current.onLimit("falta_grave_tiempo"); return; }
+    if (document.visibilityState === "hidden" || !document.hasFocus()) return;
+    recordEvent({ id: crypto.randomUUID(), episodio_id: attempt.episodio_abierto, tipo: "regreso", hora_cliente: new Date().toISOString(), senales: [] });
+  }, [recordEvent]);
+  const deadline = ready ? quizReturnDeadline(state.attempt) : null;
+  useEffect(() => {
+    if (!deadline) return;
+    const tick = () => {
+      const remaining = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+      setSecondsLeft(remaining);
+      if (!remaining && callbacks.current.active()) callbacks.current.onLimit("falta_grave_tiempo");
+    };
+    tick();
+    const timer = window.setInterval(tick, 100);
+    window.addEventListener("focus", tick);
+    document.addEventListener("visibilitychange", tick);
+    return () => { clearInterval(timer); window.removeEventListener("focus", tick); document.removeEventListener("visibilitychange", tick); };
+  }, [deadline]);
   useEffect(() => {
     if (ready) initialize(quiz).catch(() => setError("No se pudo verificar el contador del servidor. Se reintentará al sincronizar."));
   }, [quiz?.id, ready]);
@@ -82,6 +104,7 @@ export function useQuizActivity({ quiz, student, api, active, getQuestion, onLim
   useEffect(() => {
     if (!ready) return;
     return observeQuizActivity({ window, document,
+      explicitReturn: true,
       isActive: () => callbacks.current.active(),
       getState: () => current.current.attempt,
       onEvent: recordEvent
@@ -89,5 +112,5 @@ export function useQuizActivity({ quiz, student, api, active, getQuestion, onLim
   }, [ready, recordEvent]);
   // También se aplica al restaurar un intento que ya alcanzó el límite.
   useEffect(() => { if (ready && state.attempt.faltas >= 3 && callbacks.current.active()) callbacks.current.onLimit(); }, [ready, state?.attempt.faltas]);
-  return { ready, state, error, initialize, leave, payload: () => ({ actividad_intento_id: current.current?.attempt.id, actividad_eventos_pendientes: current.current?.pending || [] }) };
+  return { ready, state, error, initialize, leave, returnToQuiz, secondsLeft, warning: Boolean(ready && state.attempt.episodio_abierto && state.attempt.faltas < 3), payload: () => ({ actividad_intento_id: current.current?.attempt.id, actividad_eventos_pendientes: current.current?.pending || [] }) };
 }

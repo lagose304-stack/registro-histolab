@@ -120,3 +120,11 @@ result=await submit('third',1,{q:{respuesta:'No reemplazar'}});assert.equal(resu
 assert.equal((await submit('missing-acceptance',1,{}, {},{actividad_intento_id:undefined})).status,428);
 live={estado:'en_pregunta'};failActivity=true;assert.equal((await submit('journal-failure',1)).status,500);assert(!rows.some(row=>row.numero_cuenta==='journal-failure'));
 console.log('PASS: tercera falta en lobby envía respuestas exactas, conserva bitácora, rechaza ausencia de aceptación y no confirma éxito si falla el registro.');
+
+failActivity=false;live={estado:'lobby',habilitada:true};
+const graveEvent={...departure(301,401),hora_cliente:new Date(Date.now()-11000).toISOString()};
+result=await submit('grave',1,{q:{respuesta:'Respuesta de la falta grave'}},{motivo_finalizacion:'falta_grave_tiempo'},{actividad_eventos_pendientes:[graveEvent]});
+assert.equal(result.status,200);assert.equal(result.payload.data.respuestas.q.respuesta,'Respuesta de la falta grave');assert.equal(result.payload.data.auditoria.actividad.falta_grave.plazo_segundos,10);assert.equal(result.payload.data.auditoria.actividad.faltas,1);
+assert.equal((await submit('grave-premature',1,{}, {motivo_finalizacion:'falta_grave_tiempo'},{actividad_eventos_pendientes:[departure(302,402)]})).status,409);
+assert.equal((await submit('grave-missing',1,{}, {motivo_finalizacion:'falta_grave_tiempo'})).status,409);
+console.log('PASS: falta grave tras diez segundos entrega desde lobby con respuestas exactas; no acepta un vencimiento prematuro o sin salida.');

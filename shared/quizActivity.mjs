@@ -1,5 +1,10 @@
 export const QUIZ_ACTIVITY_POLICY = "salidas-tres-faltas-v1";
 export const QUIZ_ACTIVITY_LIMIT = 3;
+export const QUIZ_RETURN_SECONDS = 10;
+export function quizReturnDeadline(attempt) {
+  const departure = attempt?.eventos?.find(event => event.tipo === "salida" && event.episodio_id === attempt.episodio_abierto);
+  return departure ? new Date(departure.hora_cliente).getTime() + QUIZ_RETURN_SECONDS * 1000 : null;
+}
 export const QUIZ_ACTIVITY_SIGNALS = {
   pagina_oculta: "La página dejó de estar visible",
   ventana_sin_foco: "La ventana perdió el foco",

@@ -1,4 +1,5 @@
 import QuizActivityConsent from "./QuizActivityConsent";
+import QuizActivityWarning from "./QuizActivityWarning";
 import { useQuizActivity } from "../utils/useQuizActivity";
 import StudentQuizPlayer from "./StudentQuizPlayer";
 import StudentQuizzesView from "./StudentQuizzesView";
@@ -217,7 +218,7 @@ export default function StudentPortalView({ student, notify = () => {}, onActivi
       const index = activeLiveStateRef.current?.pregunta_actual_idx ?? 0;
       return { pregunta_id: activeQuizToTake?.preguntas?.[index]?.id || "", pregunta_indice: index };
     },
-    onLimit: () => activitySubmitRef.current?.()
+    onLimit: reason => activitySubmitRef.current?.(reason)
   });
 
   useEffect(() => {
@@ -606,7 +607,9 @@ export default function StudentPortalView({ student, notify = () => {}, onActivi
       const quizSem = targetQuiz?.numero_semana || submittedData?.numero_semana;
       autoSubmitTriggeredRef.current = true;
 
-      if (forcedReason?.motivo === "limite_tres_faltas") {
+      if (forcedReason?.motivo === "falta_grave_tiempo") {
+        notify("Falta grave: vencieron los 10 segundos para regresar. Se enviaron tus respuestas existentes.", "warning");
+      } else if (forcedReason?.motivo === "limite_tres_faltas") {
         notify("Falta 3 de 3. La prueba se finalizó y se enviaron las respuestas existentes.", "warning");
       } else if (forcedReason?.motivo === "tiempo_agotado") {
         notify("Tiempo concluido. Tu prueba ha sido enviada exitosamente.", "info");
@@ -762,10 +765,10 @@ export default function StudentPortalView({ student, notify = () => {}, onActivi
     }
   };
 
-  activitySubmitRef.current = () => {
+  activitySubmitRef.current = (reason = "limite_tres_faltas") => {
     setConfirmSubmitModalOpen(false);
     setConfirmExitModalOpen(false);
-    executeSubmitQuiz({ motivo: "limite_tres_faltas" });
+    executeSubmitQuiz({ motivo: reason });
   };
 
   // Confirmación de entrega
@@ -1140,7 +1143,7 @@ export default function StudentPortalView({ student, notify = () => {}, onActivi
 
   // Manejar cambio en casilla de respuesta con auto-guardado persistente
   const handleAnswerChange = (preguntaId, itemId, indexOrText, textIfList = null) => {
-    if (isExamSealedOffline || autoSubmitTriggeredRef.current || isSubmittingRef.current || confirmExitModalOpen || confirmSubmitModalOpen) return;
+    if (isExamSealedOffline || activity.warning || autoSubmitTriggeredRef.current || isSubmittingRef.current || confirmExitModalOpen || confirmSubmitModalOpen) return;
     setQuizAnswers((prev) => {
       const prevVal = prev[preguntaId];
       const currentQ = (prevVal && typeof prevVal === "object" && !Array.isArray(prevVal)) ? { ...prevVal } : {};
@@ -3071,12 +3074,12 @@ export default function StudentPortalView({ student, notify = () => {}, onActivi
           <StudentQuizPlayer quiz={activeQuizToTake} liveState={activeLiveState} answers={quizAnswers}
             seconds={timeRemainingSeconds} online={isOnline} connection={liveConnection}
             sealed={isExamSealedOffline} submitting={submittingQuiz} confirmed={answeredQuestionsMap}
-            locked={!activity.ready || confirmExitModalOpen || confirmSubmitModalOpen}
+            locked={!activity.ready || activity.warning || confirmExitModalOpen || confirmSubmitModalOpen}
             activity={activity.state} activityError={activity.error}
             onExit={requestQuizExit}
             onChange={handleAnswerChange} onBlur={handleAnswerBlur}
             onConfirm={index => {
-              if (isExamSealedOffline || isSubmittingRef.current || autoSubmitTriggeredRef.current || confirmExitModalOpen || confirmSubmitModalOpen) return;
+              if (isExamSealedOffline || activity.warning || isSubmittingRef.current || autoSubmitTriggeredRef.current || confirmExitModalOpen || confirmSubmitModalOpen) return;
               setAnsweredQuestionsMap(previous => ({ ...previous, [index]: true }));
             }}
             onSubmit={() => handleSubmitQuiz()} />
@@ -3095,6 +3098,9 @@ export default function StudentPortalView({ student, notify = () => {}, onActivi
             onCancel={activeQuizToTake ? undefined : () => setActivityConsent(null)} />
         )}
 
+        {activity.warning && !isExamSealedOffline && !submittingQuiz && !autoSubmitTriggeredRef.current && (
+          <QuizActivityWarning strike={activity.state.attempt.faltas} seconds={activity.secondsLeft} onReturn={activity.returnToQuiz} />
+        )}
         {/* MODAL IN-APP DE CONFIRMACIÓN DE ENTREGA */}
         {confirmSubmitModalOpen && activeQuizToTake && (
           <div
