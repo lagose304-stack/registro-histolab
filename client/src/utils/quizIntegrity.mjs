@@ -53,8 +53,17 @@ export function observeQuizIntegrity({ document: doc, window: win, isActive, isS
     if (suppressRecoveryEvent()) return;
     session.signal('salida_de_pantalla');
   };
-  const blur = () => { focused = false; if (!suppressRecoveryEvent()) session.signal('perdida_de_foco'); };
-  const focus = () => { focused = true; }; // Never dismiss a warning implicitly.
+  // Capture listeners on window also receive focus changes from its controls.
+  // In particular, unmounting the recovery button can blur it after resume.
+  // Only a window event represents leaving/returning to the browser window.
+  const blur = event => {
+    if (event.target !== win) return;
+    focused = false;
+    if (!suppressRecoveryEvent()) session.signal('perdida_de_foco');
+  };
+  const focus = event => {
+    if (event.target === win) focused = true;
+  }; // Never dismiss a warning implicitly.
   const fullscreenChange = () => {
     const current = hasQuizFullscreen(doc);
     const previous = fullscreen;
