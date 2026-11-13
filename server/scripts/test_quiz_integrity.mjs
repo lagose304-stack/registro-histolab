@@ -31,7 +31,7 @@ class Surface {
   hasFocus() { return this.focused; }
   addEventListener(type, callback) { if (!this.listeners.has(type)) this.listeners.set(type, new Set()); this.listeners.get(type).add(callback); }
   removeEventListener(type, callback) { this.listeners.get(type)?.delete(callback); }
-  emit(type, event = {}) { this.listeners.get(type)?.forEach(callback => callback(event)); }
+  emit(type, event = {}) { this.listeners.get(type)?.forEach(callback => callback({ target: this, ...event })); }
 }
 let clock = 0, active = true, submitting = false, departures = [], returns = [], blocked = [], submissions = 0;
 const doc = new Surface(), win = new Surface();
@@ -57,6 +57,7 @@ assert.equal(returns.length, 0, 'Returning does not acknowledge an open warning'
 blur(); focus(); fullscreen(false); fullscreen(true);
 assert.equal(departures.length, 1, 'An open warning cannot accumulate strikes');
 assert.equal(dispose.resume(), true); assert.equal(returns.length, 1);
+await new Promise(resolve => setTimeout(resolve, 0));
 hidden(); assert.equal(departures.length, 2, 'Immediate warning, without waiting for return');
 clock += 4000; visible(); assert.equal(dispose.canRespond(), false); assert.equal(dispose.resume(), true); assert.deepEqual(returns, [1, 4]);
 for (const type of ['resize', 'touchstart', 'touchcancel', 'orientationchange', 'keydown']) win.emit(type, {});
@@ -76,6 +77,53 @@ doc.emit('copy', { ...event, target: { closest: () => false } }); assert.equal(b
 dispose(); blur(); hidden();
 assert.equal(departures.length, 3);
 assert([...doc.listeners.values(), ...win.listeners.values()].every(list => list.size === 0));
+
+// A browser may emit blur/visibility while a user-initiated fullscreen request is pending.
+{
+  const recoveryDoc = new Surface(), recoveryWin = new Surface();
+  let recoveryWarnings = 0;
+  const recovery = observeQuizIntegrity({ document: recoveryDoc, window: recoveryWin,
+    isActive: () => true, isSuppressed: () => false, onDeparture: () => recoveryWarnings++ });
+  recoveryDoc.fullscreenElement = null; recoveryDoc.emit('fullscreenchange');
+  assert.equal(recoveryWarnings, 1);
+  recovery.beginRecovery();
+  recoveryDoc.focused = false; recoveryWin.emit('blur'); recoveryDoc.hidden = true; recoveryDoc.emit('visibilitychange');
+  recoveryDoc.fullscreenElement = {}; recoveryDoc.hidden = false; recoveryDoc.focused = true;
+  recoveryDoc.emit('fullscreenchange'); recoveryWin.emit('focus');
+  assert.equal(recoveryWarnings, 1, 'Fullscreen recovery transition events do not create another incident');
+  assert.equal(recovery.resume(), true);
+  assert.equal(recovery.canRespond(), true);
+  recoveryDoc.focused = false; recoveryWin.emit('blur'); recoveryDoc.hidden = true; recoveryDoc.emit('visibilitychange');
+  assert.equal(recoveryWarnings, 1, 'Trailing recovery events do not create a second incident');
+  recovery();
+}
+
+// Window capture listeners also receive blur/focus from DOM controls. Removing
+// the recovery button or moving to an answer must not look like leaving the tab.
+{
+  const localDoc = new Surface(), localWin = new Surface();
+  let warnings = 0;
+  const observer = observeQuizIntegrity({ document: localDoc, window: localWin,
+    isActive: () => true, isSuppressed: () => false, onDeparture: () => warnings++ });
+  localDoc.fullscreenElement = null; localDoc.emit('fullscreenchange');
+  assert.equal(warnings, 1);
+  observer.beginRecovery();
+  localDoc.fullscreenElement = {}; localDoc.emit('fullscreenchange');
+  assert(observer.resume());
+  await new Promise(resolve => setTimeout(resolve, 0));
+  for (let index = 0; index < 5; index++) {
+    localWin.emit('blur', { target: { tagName: 'BUTTON' } });
+    localWin.emit('focus', { target: { tagName: 'INPUT' } });
+    assert.equal(warnings, 1, 'Focus changes inside the test cannot create another warning');
+    assert(observer.canRespond(), 'Answers remain enabled after moving focus within the page');
+  }
+  localDoc.focused = false; localWin.emit('blur', { target: localWin });
+  assert.equal(warnings, 2, 'A real window departure still counts immediately');
+  localWin.emit('focus', { target: { tagName: 'BUTTON' } });
+  // Element focus must not overwrite the cached window focus either.
+  assert.equal(observer.canRespond(), false);
+  observer();
+}
 
 assert.equal(await enterQuizFullscreen({ documentElement: {} }), false);
 assert.equal(await enterQuizFullscreen({ documentElement: { requestFullscreen: async () => { throw Error('denied'); } } }), false);

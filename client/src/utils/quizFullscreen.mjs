@@ -1,5 +1,9 @@
 export const hasQuizFullscreen = doc => Boolean(doc.fullscreenElement || doc.webkitFullscreenElement);
 
+export const canQuizFullscreen = doc => Boolean(
+  doc?.documentElement?.requestFullscreen || doc?.documentElement?.webkitRequestFullscreen
+);
+
 export async function enterQuizFullscreen(doc) {
   if (hasQuizFullscreen(doc)) return true;
   const element = doc.documentElement;

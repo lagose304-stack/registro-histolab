@@ -22,7 +22,7 @@ class Surface {
   listeners = new Map(); hidden = false; focused = true; fullscreenElement = {};
   addEventListener(type, fn) { if (!this.listeners.has(type)) this.listeners.set(type, new Set()); this.listeners.get(type).add(fn); }
   removeEventListener(type, fn) { this.listeners.get(type)?.delete(fn); }
-  emit(type, event = {}) { this.listeners.get(type)?.forEach(fn => fn(event)); }
+  emit(type, event = {}) { this.listeners.get(type)?.forEach(fn => fn({ target: this, ...event })); }
   hasFocus() { return this.focused; }
 }
 async function scenario({ phase = 'en_pregunta', offline = false, restore = true, fullscreen = restore } = {}) {
@@ -60,7 +60,12 @@ async function scenario({ phase = 'en_pregunta', offline = false, restore = true
       submit: async (section, payload) => { sent.push(structuredClone(payload)); if (offline) throw Error('isolated offline'); submission = { ...payload, id: 'delivery', estado: 'enviado' }; return { success: true, data: submission }; } }
   };
   const module = { exports: {} };
-  vm.runInNewContext(compiled.outputFiles[0].text, { module, exports: module.exports, hooks, fixtureAPI, storage, window: win, document: doc, navigator: { onLine: true }, console, performance, setTimeout: () => 1, clearTimeout() {}, setInterval: () => 1, clearInterval() {} });
+  const timers = new Map(); let timerId = 0;
+  const runRecoveryTimers = () => {
+    for (const [id, timer] of [...timers]) if (timer.delay === 0) { timers.delete(id); timer.fn(); }
+  };
+  vm.runInNewContext(compiled.outputFiles[0].text, { module, exports: module.exports, hooks, fixtureAPI, storage, window: win, document: doc, navigator: { onLine: true }, console, performance,
+    setTimeout: (fn, delay = 0) => { timers.set(++timerId, { fn, delay }); return timerId; }, clearTimeout: id => timers.delete(id), setInterval: () => 1, clearInterval() {} });
   const props = { student, notify: message => notices.push(message), onExitGuardChange: handler => { exitGuard = handler; } };
   async function flush() {
     for (let count = 0; count < 35; count++) {
@@ -75,7 +80,7 @@ async function scenario({ phase = 'en_pregunta', offline = false, restore = true
   const text = node => (Array.isArray(node) ? node.map(text).join('') : typeof node === 'object' && node ? text(node.props?.children) : String(node ?? ''));
   const button = label => { const found = nodes().find(node => node.type === 'button' && text(node).includes(label)); assert(found, `Button: ${label}`); return found; };
   await flush();
-  return { doc, win, sent, notices, map, flush, player, button, nodes, quiz, live, setDenied: value => { denied = value; }, exitGuard: () => exitGuard?.() };
+  return { doc, win, sent, notices, map, flush, player, button, nodes, quiz, live, runRecoveryTimers, setDenied: value => { denied = value; }, exitGuard: () => exitGuard?.() };
 }
 
 // Entry denied: no active attempt, no persisted draft.
@@ -116,31 +121,33 @@ fixture.doc.focused = true; fixture.win.emit('focus');
 fixture.setDenied(true); await fixture.doc.exitFullscreen(); await fixture.flush();
 
 assert(!fixture.nodes().some(node => node.type === 'button' && node.props.children?.includes?.('Salir y Enviar Respuestas')), 'Fullscreen departure shows a violation instead of exit confirmation');
-await fixture.button('Continuar Evaluación').props.onClick(); await fixture.flush();
+await fixture.button('Volver a pantalla completa').props.onClick(); await fixture.flush();
 assert.equal(fixture.player().props.locked, true, 'Denied fullscreen cannot dismiss warning');
-fixture.setDenied(false); await fixture.button('Continuar Evaluación').props.onClick(); await fixture.flush();
+fixture.setDenied(false); await fixture.button('Volver a pantalla completa').props.onClick(); await fixture.flush();
 assert.equal(fixture.player().props.locked, false);
+fixture.runRecoveryTimers();
+fixture.win.emit('blur', { target: { tagName: 'BUTTON' } }); await fixture.flush();
+fixture.win.emit('focus', { target: { tagName: 'INPUT' } }); await fixture.flush();
+assert.equal(fixture.player().props.strikes, 1, 'Removing the recovery control cannot add a strike');
+assert.equal(fixture.player().props.locked, false, 'Internal focus changes leave the test usable');
 fixture.player().props.onChange('q', 'a', 'Respuesta conservada'); await fixture.flush();
 fixture.exitGuard(); await fixture.flush();
 fixture.doc.focused = false; fixture.win.emit('blur'); await fixture.flush();
 assert.equal(fixture.player().props.strikes, 2, 'Exit dialog must not suppress warnings');
 fixture.doc.focused = true; fixture.win.emit('focus');
-await fixture.button('Continuar Evaluación').props.onClick(); await fixture.flush();
+await fixture.button('Volver a pantalla completa').props.onClick(); await fixture.flush();
+fixture.runRecoveryTimers();
 fixture.win.emit('blur'); fixture.doc.hidden = true; fixture.doc.emit('visibilitychange'); await fixture.doc.exitFullscreen(); await fixture.flush();
-assert.equal(fixture.sent.length, 1); assert.equal(fixture.sent[0].auditoria.strikes, 3);
-assert.equal(fixture.sent[0].respuestas.q.a, 'Respuesta conservada');
-assert.equal(fixture.sent[0].auditoria.motivo_finalizacion, 'expulsion_infracciones');
-assert.equal(fixture.player(), undefined);
+assert.equal(fixture.sent.length, 0, 'A departure never sends answers automatically');
+assert.equal(fixture.player().props.locked, true, 'The attempt stays locked while the security countdown runs');
 
-// Lobby warnings and automatic failed submission preserve a sealed payload.
+// Lobby warnings use the same explicit recovery policy and never send answers.
 fixture = await scenario({ phase: 'lobby', offline: true });
 for (let index = 1; index <= 3; index++) {
   fixture.doc.focused = false; fixture.win.emit('blur'); await fixture.flush();
-  if (index < 3) { assert.equal(fixture.player().props.strikes, index); fixture.doc.focused = true; fixture.win.emit('focus'); await fixture.button('Continuar Evaluación').props.onClick(); await fixture.flush(); }
+  if (index < 3) { assert.equal(fixture.player().props.strikes, index); fixture.doc.focused = true; fixture.win.emit('focus'); await fixture.button('Volver a pantalla completa').props.onClick(); await fixture.flush(); fixture.runRecoveryTimers(); }
 }
-assert.equal(fixture.sent.length, 1);
-const sealed = JSON.parse(fixture.map.get('histolab_sealed_quiz_fixture_sem_1'));
-assert.equal(sealed.auditoria.strikes, 3); assert.equal(sealed.respuestas.q.a, 'Respuesta original');
+assert.equal(fixture.sent.length, 0);
 fixture.player().props.onChange('q', 'a', 'Changed'); await fixture.flush();
-assert.equal(JSON.parse(fixture.map.get('histolab_sealed_quiz_fixture_sem_1')).respuestas.q.a, 'Respuesta original');
-console.log('PASS portal handlers: denied entry, Back confirmation, required fullscreen on cancel, dialogs do not suppress warnings, third-warning single send with current answers, lobby/offline seal and logout guard.');
+assert.equal(fixture.player().props.answers.q.a, 'Respuesta original');
+console.log('PASS portal handlers: denied entry, Back confirmation, required fullscreen recovery, no automatic answer delivery after departures, and lobby protection.');

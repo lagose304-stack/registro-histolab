@@ -79,12 +79,12 @@ try {
   await page.evaluate(() => document.exitFullscreen());
   await waitWarnings(page, 1);
   assert.equal(await page.getByRole('textbox', { includeHidden: true }).isDisabled(), true);
-  await page.getByRole('button', { name: /Continuar Evaluación/ }).click();
+  await page.getByRole('button', { name: 'Volver a pantalla completa' }).click();
   assert.equal(await fullscreen(page), true);
   await page.evaluate(() => { window.dispatchEvent(new Event('blur')); window.dispatchEvent(new Event('blur')); });
   await waitWarnings(page, 2);
   await page.evaluate(() => window.dispatchEvent(new Event('focus')));
-  await page.getByRole('button', { name: /Continuar Evaluación/ }).click();
+  await page.getByRole('button', { name: 'Volver a pantalla completa' }).click();
   await page.evaluate(() => { window.fixture.delaySubmit = true; window.dispatchEvent(new Event('blur')); window.dispatchEvent(new Event('blur')); });
   await page.waitForFunction(() => window.fixture.sent.length === 1);
   await page.waitForFunction(() => !document.querySelector('.quiz-player'));
@@ -124,10 +124,10 @@ try {
   await page.evaluate(() => { window.fixture.failSubmit = true; window.dispatchEvent(new Event('blur')); });
   await waitWarnings(page, 1);
   await page.evaluate(() => window.dispatchEvent(new Event('focus')));
-  await page.getByRole('button', { name: /Continuar Evaluación/ }).click();
+  await page.getByRole('button', { name: 'Volver a pantalla completa' }).click();
   await page.evaluate(() => window.dispatchEvent(new Event('blur'))); await waitWarnings(page, 2);
   await page.evaluate(() => window.dispatchEvent(new Event('focus')));
-  await page.getByRole('button', { name: /Continuar Evaluación/ }).click();
+  await page.getByRole('button', { name: 'Volver a pantalla completa' }).click();
   await page.evaluate(() => window.dispatchEvent(new Event('blur')));
   await page.waitForFunction(() => Boolean(localStorage.getItem('histolab_sealed_quiz_fixture_sem_1')));
   assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('histolab_sealed_quiz_fixture_sem_1')).auditoria.strikes), 3);

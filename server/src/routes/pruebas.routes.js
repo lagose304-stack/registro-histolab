@@ -5,6 +5,7 @@ import {
   getPruebasPorSeccion,
   savePruebaSemanal,
   submitPruebaEstudiante,
+  cancelPruebaForIntegrity,
   getEntregasPorSemana,
   getAllEntregasPorSeccion,
   getMiEntregaSemanal,
@@ -38,6 +39,7 @@ router.get("/seccion/:seccion_id/semana/:semana/estudiante/:numero_cuenta", quiz
 // Acciones de guardado, entrega, calificación y eliminación
 router.post("/seccion/:seccion_id", quizAccess({ permission: "create" }), savePruebaSemanal);
 router.post("/seccion/:seccion_id/entregar", quizAccess({ student: true, kind: "submission" }), submitPruebaEstudiante);
+router.post("/seccion/:seccion_id/anular", quizAccess({ student: true, kind: "submission" }), cancelPruebaForIntegrity);
 router.put("/entregas/:entrega_id/calificar", quizAccess({ permission: "review", submission: true }), calificarEntrega);
 router.delete("/entregas/:entrega_id", quizAccess({ permission: "review", submission: true }), deleteEntregaEstudiante);
 router.delete("/seccion/:seccion_id/semana/:semana/estudiante/:numero_cuenta", quizAccess({ permission: "review" }), deleteEntregaEstudiante);

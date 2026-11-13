@@ -13,7 +13,7 @@ function QuizImage({ src, number, watermark }) {
   </figure>;
 }
 
-export default function StudentQuizPlayer({ quiz, liveState, answers, seconds, strikes, online, connection, sealed, submitting, locked = false, confirmed, studentName, account, onExit, onChange, onBlur, onConfirm, onSubmit, onPasteBlocked }) {
+export default function StudentQuizPlayer({ quiz, liveState, answers, seconds, strikes, online, connection, sealed, submitting, locked = false, fullscreenRequired = true, confirmed, studentName, account, onExit, onChange, onBlur, onConfirm, onSubmit, onPasteBlocked }) {
   const phase = liveState?.estado || "lobby";
   const index = liveState?.pregunta_actual_idx ?? 0;
   const questions = quiz.preguntas || [];
@@ -24,7 +24,7 @@ export default function StudentQuizPlayer({ quiz, liveState, answers, seconds, s
   const answer = question ? answers?.[question.id] : null;
   const bonus = index === 5;
   const times = questions.map(q => Number(q.tiempo_segundos || quiz.tiempo_por_pregunta_segundos || 90));
-  return <section className="quiz-player sp-quiz-take-card" inert={locked || submitting || sealed} aria-label="Prueba en curso" onContextMenu={event => event.preventDefault()} onCopy={event => event.preventDefault()}>
+  return <section className="quiz-player sp-quiz-take-card" data-fullscreen-required={fullscreenRequired} inert={locked || submitting || sealed} aria-label="Prueba en curso" onContextMenu={event => event.preventDefault()} onCopy={event => event.preventDefault()}>
     <div className="quiz-player__watermark" style={watermark} aria-hidden="true" />
     <div className="quiz-player__top">
       <button type="button" className="quiz-player__back" aria-label="Salir de la prueba" onClick={onExit}><ArrowLeft size={20} /></button>

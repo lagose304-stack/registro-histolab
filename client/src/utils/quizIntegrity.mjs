@@ -30,31 +30,46 @@ export function createQuizIntegritySession({ readEnvironment, enabled, onLock, o
 }
 
 // Browser adapter: no polling, screen-size heuristics, debugger traps or timers.
-export function observeQuizIntegrity({ document: doc, window: win, isActive, isSuppressed,
+export function observeQuizIntegrity({ document: doc, window: win, isActive, isSuppressed, requireFullscreen = true,
   onDeparture, onReturn = () => {}, onBlocked, onFullscreen = () => {}, now = () => performance.now() }) {
   let focused = doc.hasFocus?.() ?? true;
   let fullscreen = hasQuizFullscreen(doc);
+  let disposed = false;
   const enabled = () => isActive() && !isSuppressed();
   const session = createQuizIntegritySession({
-    readEnvironment: () => ({ visible: !doc.hidden, focused, fullscreen: hasQuizFullscreen(doc) }),
+    readEnvironment: () => ({ visible: !doc.hidden, focused, fullscreen: !requireFullscreen || hasQuizFullscreen(doc) }),
     enabled, now, onDeparture, onReturn,
     onLock: locked => {
       if (locked) doc.documentElement?.setAttribute?.('data-quiz-blocked', 'true');
       else doc.documentElement?.removeAttribute?.('data-quiz-blocked');
     }
   });
+  let recoveryPending = false;
+  let recoverySettling = false;
+  let recoverySettlingTimer = null;
+  const suppressRecoveryEvent = () => recoveryPending || recoverySettling;
   const visibility = () => {
     focused = doc.hasFocus?.() ?? focused;
+    if (suppressRecoveryEvent()) return;
     session.signal('salida_de_pantalla');
   };
-  const blur = () => { focused = false; session.signal('perdida_de_foco'); };
-  const focus = () => { focused = true; }; // Never dismiss a warning implicitly.
+  // Capture listeners on window also receive focus changes from its controls.
+  // In particular, unmounting the recovery button can blur it after resume.
+  // Only a window event represents leaving/returning to the browser window.
+  const blur = event => {
+    if (event.target !== win) return;
+    focused = false;
+    if (!suppressRecoveryEvent()) session.signal('perdida_de_foco');
+  };
+  const focus = event => {
+    if (event.target === win) focused = true;
+  }; // Never dismiss a warning implicitly.
   const fullscreenChange = () => {
     const current = hasQuizFullscreen(doc);
     const previous = fullscreen;
     fullscreen = current;
     if (current !== previous) onFullscreen(current, previous);
-    if (!current && previous) session.signal('salida_pantalla_completa');
+    if (requireFullscreen && !current && previous) session.signal('salida_pantalla_completa');
   };
   const blockedAt = new Map();
   const block = (event, type) => {
@@ -73,11 +88,35 @@ export function observeQuizIntegrity({ document: doc, window: win, isActive, isS
     ...Object.entries({ copy: 'copiar_texto', paste: 'pegar_texto', cut: 'cortar_texto', contextmenu: 'menu_contextual', dragstart: 'arrastrar_contenido' })
       .map(([event, type]) => [doc, event, e => block(e, type)]), [doc, 'keydown', key]];
   listeners.forEach(([target, event, handler]) => target.addEventListener(event, handler, true));
+  // `fullscreenchange` does not reliably emit a window `focus` event in every
+  // browser. Reaching this method requires the student's explicit click on
+  // the recovery control, so it is safe to refresh the cached focus state
+  // before asking the state machine to reopen the attempt.
+  const resume = () => {
+    if (disposed || !enabled()) return false;
+    focused = true;
+    const result = session.resume();
+    recoveryPending = false;
+    // Some browsers dispatch a final blur/visibility event just after the
+    // fullscreen promise resolves. It belongs to the recovery gesture, not
+    // to a new departure, so keep that gesture suppressed through one turn.
+    if (result) {
+      recoverySettling = true;
+      recoverySettlingTimer = setTimeout(() => { recoverySettling = false; recoverySettlingTimer = null; }, 0);
+    }
+    return result;
+  };
+  const beginRecovery = () => { if (!disposed && enabled()) recoveryPending = true; };
+  const cancelRecovery = () => { recoveryPending = false; };
   const dispose = () => {
+    disposed = true;
+    if (recoverySettlingTimer !== null) clearTimeout(recoverySettlingTimer);
     listeners.forEach(([target, event, handler]) => target.removeEventListener(event, handler, true));
     session.dispose();
   };
-  dispose.resume = session.resume;
+  dispose.resume = resume;
+  dispose.beginRecovery = beginRecovery;
+  dispose.cancelRecovery = cancelRecovery;
   dispose.canRespond = session.canRespond;
   return dispose;
 }
