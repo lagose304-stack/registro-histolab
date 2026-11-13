@@ -165,7 +165,7 @@ try {
   await control("habilitar");
   await request(tokens[0],quizUrl+"/entregar",{method:"POST",body:{numero_semana:1,respuestas:cases[0].answers,quiz_id:quiz.id},status:409});
   const pulse=(index,q,answers)=>request(tokens[index],liveUrl+"/heartbeat",{method:"POST",body:{numero_cuenta:students[index].numero_cuenta,
-    pregunta_vista:q,ha_respondido:true,respuestas_parciales:answers,integridad:{strikes:0}}});
+    pregunta_vista:q,ha_respondido:true,respuestas_parciales:answers}});
   await Promise.all(tokens.map((_,index)=>pulse(index,-1,{})));
   assert.equal((await request(teacherToken,liveUrl)).data.total_conectados,25);
   check("falta injustificada bloqueada; entrega anticipada rechazada; 25 participantes conectados al lobby");

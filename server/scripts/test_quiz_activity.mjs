@@ -1,0 +1,63 @@
+// Sin red ni datos reales: navegador simulado y PostgreSQL embebido.
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { PGlite } from "@electric-sql/pglite";
+import { appendLocalActivity } from "../../shared/quizActivity.mjs";
+import { observeQuizActivity } from "../../client/src/utils/quizActivityObserver.mjs";
+const id = n => `00000000-0000-4000-8000-${String(n).padStart(12,"0")}`;
+const event = (n, episode, tipo = "salida") => ({ id:id(n), episodio_id:id(episode), tipo, hora_cliente:new Date(1700000000000+n*1000).toISOString(), senales:tipo === "salida" ? ["ventana_sin_foco"] : [], pregunta_id:"q1", pregunta_indice:0 });
+let state = { faltas:0, episodio_abierto:null, eventos:[] };
+const win = new EventTarget(); win.setTimeout = setTimeout;
+const doc = new EventTarget(); doc.visibilityState = "visible"; let focused = true; doc.hasFocus = () => focused;
+let active = true, sequence = 100;
+const cleanup = observeQuizActivity({ window:win, document:doc, getState:()=>state, isActive:()=>active, makeId:()=>id(sequence++), onEvent:source => { state=appendLocalActivity(state,[{...source,pregunta_indice:0}]); if(state.faltas===3)active=false; } });
+focused=false;win.dispatchEvent(new Event("blur"));
+for(let i=0;i<1000;i++){doc.visibilityState="hidden";doc.dispatchEvent(new Event("visibilitychange"));win.dispatchEvent(new Event("blur"));}
+assert.equal(state.faltas,1);
+win.dispatchEvent(new Event("focus"));await new Promise(r=>setTimeout(r,180));assert(state.episodio_abierto);
+doc.visibilityState="visible";focused=true;win.dispatchEvent(new Event("focus"));await new Promise(r=>setTimeout(r,180));assert.equal(state.episodio_abierto,null);
+for(const type of ["resize","keydown","paste"])win.dispatchEvent(new Event(type));assert.equal(state.faltas,1);
+win.dispatchEvent(new Event("pagehide"));assert.equal(state.faltas,2);
+win.dispatchEvent(new Event("pageshow"));await new Promise(r=>setTimeout(r,180));
+win.dispatchEvent(new Event("blur"));assert.equal(state.faltas,3);
+assert.equal(state.eventos.filter(e=>e.tipo==="salida").length,3);
+cleanup();win.dispatchEvent(new Event("blur"));assert.equal(state.faltas,3);
+state={faltas:0,episodio_abierto:null,eventos:[]};active=true;doc.visibilityState="hidden";
+const hiddenCleanup=observeQuizActivity({window:win,document:doc,getState:()=>state,isActive:()=>active,makeId:()=>id(sequence++),onEvent:source=>{state=appendLocalActivity(state,[{...source,pregunta_indice:0}]);}});
+assert.equal(state.faltas,1,"Un inicio que termina en segundo plano registra la salida");hiddenCleanup();
+console.log("PASS observador: ráfaga deduplicada, regreso real, recarga, tercera falta y limpieza sin bloquear acciones.");
+
+const db=new PGlite();
+try {
+ await db.exec("CREATE ROLE anon; CREATE ROLE authenticated; CREATE ROLE service_role BYPASSRLS;");
+ const sql=await readFile(new URL("../../supabase/migrations/20261113214049_quiz_activity_journal.sql",import.meta.url),"utf8");
+ await db.exec(sql);
+ const attempt=id(1);
+ await db.query("INSERT INTO quiz_activity_attempts(id,quiz_id,seccion_id,numero_semana,alumno_id,numero_cuenta,politica,aceptado_cliente_at) VALUES($1,'quiz','s',1,'student','DEMO','salidas-tres-faltas-v1',now())",[attempt]);
+ const append=async(events,student="student")=>db.query("SELECT append_quiz_activity($1,$2,$3)",[attempt,student,JSON.stringify(events)]);
+ await assert.rejects(append([event(10,20)],"other"));
+ await db.exec("SET ROLE anon");await assert.rejects(db.query("SELECT * FROM quiz_activity_events"),{code:"42501"});await assert.rejects(append([event(10,20)]),{code:"42501"});await db.exec("RESET ROLE");
+ await db.exec("SET ROLE service_role");
+ await Promise.all([append([event(10,20)]),append([event(10,20)])]);
+ await append([event(11,20,"regreso"),event(12,21),event(13,21,"regreso"),event(14,22)]);
+ await append([event(10,20),event(14,22)]);
+ const row=(await db.query("SELECT * FROM quiz_activity_attempts WHERE id=$1",[attempt])).rows[0];
+ assert.equal(row.faltas,3);
+ const records=(await db.query("SELECT * FROM quiz_activity_events ORDER BY secuencia")).rows;
+ assert.equal(records.length,5);assert(records.every(r=>r.recibido_at&&r.origen==="navegador_declarado"));
+ const expected=appendLocalActivity({faltas:0,episodio_abierto:null,eventos:[]},[event(10,20),event(11,20,"regreso"),event(12,21),event(13,21,"regreso"),event(14,22)]);
+ assert.equal(row.episodio_abierto,expected.episodio_abierto);
+ assert.deepEqual(records.map(r=>[r.id,r.falta]),expected.eventos.map(r=>[r.id,r.falta]));
+ await assert.rejects(db.query("DELETE FROM quiz_activity_events"),{code:"42501"});
+ await assert.rejects(db.query("UPDATE quiz_activity_events SET falta=1"),{code:"42501"});
+ await append([event(15,22,"regreso"),event(16,23)]);assert.equal((await db.query("SELECT count(*)::int n FROM quiz_activity_events")).rows[0].n,6);
+ await db.query("UPDATE quiz_activity_attempts SET finalizado_at=now() WHERE id=$1",[attempt]);
+ await append([event(17,24)]);assert.equal((await db.query("SELECT count(*)::int n FROM quiz_activity_events")).rows[0].n,6);
+ await assert.rejects(db.query("INSERT INTO quiz_activity_attempts(id,quiz_id,seccion_id,numero_semana,alumno_id,numero_cuenta,politica,aceptado_cliente_at) VALUES($1,'quiz','s',1,'student','DEMO','salidas-tres-faltas-v1',now())",[id(2)]),{code:"23505"});
+ await db.query("UPDATE quiz_activity_attempts SET reemplazado_at=now() WHERE id=$1",[attempt]);
+ await db.query("INSERT INTO quiz_activity_attempts(id,quiz_id,seccion_id,numero_semana,alumno_id,numero_cuenta,politica,aceptado_cliente_at) VALUES($1,'quiz','s',1,'student','DEMO','salidas-tres-faltas-v1',now())",[id(2)]);
+ await assert.rejects(db.query("SELECT append_quiz_activity($1,'student',$2)",[id(2),JSON.stringify([event(31,41),event(32,42,"regreso")])]));
+ assert.equal((await db.query("SELECT faltas FROM quiz_activity_attempts WHERE id=$1",[id(2)])).rows[0].faltas,0,"Un lote inválido se revierte completo");
+ assert.equal((await db.query("SELECT count(*)::int n FROM quiz_activity_events")).rows[0].n,6,"Reabrir no elimina la bitácora original");
+ console.log("PASS PostgreSQL: identidad, permisos, concurrencia, idempotencia, tres faltas, horas de recepción y eventos sin UPDATE/DELETE para la API.");
+} finally { await db.close(); }

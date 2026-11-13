@@ -22,13 +22,13 @@ import {
   User,
   GraduationCap,
   Trash2,
-  ShieldAlert,
   Zap,
   ChevronLeft,
   ChevronRight,
   Trophy
 } from "lucide-react";
 import { api } from "../services/api";
+import QuizActivityReview from "./QuizActivityReview";
 import "./ReviewQuizSubmissionsView.css";
 import { safeStorage } from "../utils/safeStorage";
 import {
@@ -1008,68 +1008,7 @@ export default function ReviewQuizSubmissionsView({
                     Cuenta: <span style={{ color: "#0284c7" }}>{entrega.numero_cuenta}</span>
                   </div>
 
-                  {/* Badge de Integridad Académica */}
-                  {entrega.auditoria && (
-                    <div style={{ marginTop: "0.55rem" }}>
-                      {entrega.auditoria.strikes >= 3 || entrega.auditoria.motivo_finalizacion === "expulsion_infracciones" ? (
-                        <span
-                          style={{
-                            display: "inline-flex",
-                            alignItems: "center",
-                            gap: "0.3rem",
-                            fontSize: "0.72rem",
-                            fontWeight: 800,
-                            padding: "0.2rem 0.5rem",
-                            borderRadius: "0.4rem",
-                            background: "#fef2f2",
-                            color: "#b91c1c",
-                            border: "1px solid #fecaca"
-                          }}
-                          title={`Auto-envío según la política de 3 salidas. ${entrega.auditoria.tiempo_fuera_segundos || 0}s fuera de pantalla`}
-                        >
-                          <ShieldAlert size={12} />
-                          <span>Cierre por salidas ({entrega.auditoria.strikes} salidas • {entrega.auditoria.tiempo_fuera_segundos || 0}s fuera)</span>
-                        </span>
-                      ) : entrega.auditoria.strikes > 0 ? (
-                        <span
-                          style={{
-                            display: "inline-flex",
-                            alignItems: "center",
-                            gap: "0.3rem",
-                            fontSize: "0.72rem",
-                            fontWeight: 800,
-                            padding: "0.2rem 0.5rem",
-                            borderRadius: "0.4rem",
-                            background: "#fffbeb",
-                            color: "#b45309",
-                            border: "1px solid #fde68a"
-                          }}
-                          title={`${entrega.auditoria.strikes} salida(s) de pantalla detectadas (${entrega.auditoria.tiempo_fuera_segundos || 0}s)`}
-                        >
-                          <AlertCircle size={12} />
-                          <span>{entrega.auditoria.strikes} salida(s) detectadas ({entrega.auditoria.tiempo_fuera_segundos || 0}s fuera)</span>
-                        </span>
-                      ) : (
-                        <span
-                          style={{
-                            display: "inline-flex",
-                            alignItems: "center",
-                            gap: "0.3rem",
-                            fontSize: "0.72rem",
-                            fontWeight: 800,
-                            padding: "0.2rem 0.5rem",
-                            borderRadius: "0.4rem",
-                            background: "#f0fdf4",
-                            color: "#16a34a",
-                            border: "1px solid #bbf7d0"
-                          }}
-                          title="Sin salidas de pantalla ni infracciones detectadas"
-                        >
-                          <CheckCircle2 size={12} />
-                          <span>Sin salidas de pantalla</span>
-                        </span>
-                      )}
-
+                  <div style={{ marginTop: "0.55rem" }}>
                       {entrega.auditoria?.sincronizada_offline && (
                         <span
                           style={{
@@ -1089,8 +1028,7 @@ export default function ReviewQuizSubmissionsView({
                           📶 Sincronizada Offline
                         </span>
                       )}
-                    </div>
-                  )}
+                  </div>
 
                   {/* Nota Actual si ya fue calificada */}
                   <div
@@ -1373,81 +1311,11 @@ export default function ReviewQuizSubmissionsView({
                 </div>
               </div>
 
-              {/* Panel de Auditoría e Integridad Académica del Intento */}
+              <QuizActivityReview section={selectedEntrega.seccion_id || seccion.id} week={selectedEntrega.numero_semana || selectedSemana} account={selectedEntrega.numero_cuenta} fallback={selectedEntrega.auditoria?.actividad} />
+              {/* Datos de entrega y conectividad */}
               {selectedEntrega.auditoria && (
-                <div
-                  style={{
-                    background:
-                      selectedEntrega.auditoria.strikes >= 3 || selectedEntrega.auditoria.motivo_finalizacion === "expulsion_infracciones"
-                        ? "#fef2f2"
-                        : selectedEntrega.auditoria.strikes > 0
-                        ? "#fffbeb"
-                        : "#f0fdf4",
-                    border:
-                      selectedEntrega.auditoria.strikes >= 3 || selectedEntrega.auditoria.motivo_finalizacion === "expulsion_infracciones"
-                        ? "1.5px solid #fca5a5"
-                        : selectedEntrega.auditoria.strikes > 0
-                        ? "1.5px solid #fde68a"
-                        : "1.5px solid #bbf7d0",
-                    borderRadius: "0.75rem",
-                    padding: "0.9rem 1.1rem",
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: "0.6rem"
-                  }}
-                >
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "0.5rem" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: "0.45rem" }}>
-                      <ShieldAlert
-                        size={18}
-                        color={
-                          selectedEntrega.auditoria.strikes >= 3 || selectedEntrega.auditoria.motivo_finalizacion === "expulsion_infracciones"
-                            ? "#dc2626"
-                            : selectedEntrega.auditoria.strikes > 0
-                            ? "#d97706"
-                            : "#16a34a"
-                        }
-                      />
-                      <strong
-                        style={{
-                          fontSize: "0.88rem",
-                          color:
-                            selectedEntrega.auditoria.strikes >= 3 || selectedEntrega.auditoria.motivo_finalizacion === "expulsion_infracciones"
-                              ? "#991b1b"
-                              : selectedEntrega.auditoria.strikes > 0
-                              ? "#92400e"
-                              : "#166534"
-                        }}
-                      >
-                        Auditoría de Seguridad e Integridad del Intento
-                      </strong>
-                    </div>
-
-                    <span
-                      style={{
-                        fontSize: "0.76rem",
-                        fontWeight: 800,
-                        padding: "0.15rem 0.55rem",
-                        borderRadius: "0.4rem",
-                        background: "#ffffff",
-                        color:
-                          selectedEntrega.auditoria.strikes >= 3 || selectedEntrega.auditoria.motivo_finalizacion === "expulsion_infracciones"
-                            ? "#dc2626"
-                            : selectedEntrega.auditoria.strikes > 0
-                            ? "#b45309"
-                            : "#15803d"
-                      }}
-                    >
-                      {selectedEntrega.auditoria.motivo_finalizacion === "expulsion_infracciones"
-                        ? "Auto-envío según la política de 3 salidas"
-                        : selectedEntrega.auditoria.motivo_finalizacion === "tiempo_agotado"
-                        ? "⏳ Auto-envío por tiempo límite agotado"
-                        : "✅ Finalizada y enviada por el estudiante"}
-                    </span>
-                  </div>
-
-                  <p style={{ margin: 0, fontSize: "0.8rem", lineHeight: 1.65, color: "#576b80" }}>Las incidencias son señales reportadas por el navegador. Una salida o interrupción no demuestra por sí sola que hubo trampa; revisa el contexto antes de tomar una decisión.</p>
-
+                <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "0.75rem", padding: "0.9rem 1.1rem" }}>
+                  <strong>Datos de la entrega</strong>
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: "0.6rem", fontSize: "0.8rem" }}>
                     <div style={{ background: "#ffffff", padding: "0.45rem 0.7rem", borderRadius: "0.45rem", border: "1px solid rgba(0,0,0,0.06)" }}>
                       <span style={{ color: "#64748b" }}>Duración real:</span>{" "}
@@ -1455,17 +1323,6 @@ export default function ReviewQuizSubmissionsView({
                         {selectedEntrega.auditoria.duracion_total_segundos
                           ? `${Math.floor(selectedEntrega.auditoria.duracion_total_segundos / 60)}m ${selectedEntrega.auditoria.duracion_total_segundos % 60}s`
                           : "No registrado"}
-                      </strong>
-                    </div>
-
-                    <div style={{ background: "#ffffff", padding: "0.45rem 0.7rem", borderRadius: "0.45rem", border: "1px solid rgba(0,0,0,0.06)" }}>
-                      <span style={{ color: "#64748b" }}>Salidas de app:</span>{" "}
-                      <strong
-                        style={{
-                          color: selectedEntrega.auditoria.strikes > 0 ? "#dc2626" : "#16a34a"
-                        }}
-                      >
-                        {selectedEntrega.auditoria.strikes || 0} advertencias ({selectedEntrega.auditoria.tiempo_fuera_segundos || 0}s fuera)
                       </strong>
                     </div>
 
@@ -1494,18 +1351,6 @@ export default function ReviewQuizSubmissionsView({
                     )}
                   </div>
 
-                  {Array.isArray(selectedEntrega.auditoria.incidentes) && selectedEntrega.auditoria.incidentes.length > 0 && (
-                    <div style={{ marginTop: "0.2rem", fontSize: "0.76rem", color: "#475569" }}>
-                      <strong>Historial de incidencias:</strong>
-                      <ul style={{ margin: "0.25rem 0 0", paddingLeft: "1.2rem", lineHeight: 1.4 }}>
-                        {selectedEntrega.auditoria.incidentes.map((inc, iIdx) => (
-                          <li key={iIdx}>
-                            {inc.hora}: {inc.detalle || inc.tipo}{inc.segundosFuera ? ` (${inc.segundosFuera}s)` : ""}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
                 </div>
               )}
 

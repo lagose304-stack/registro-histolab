@@ -100,3 +100,7 @@ El acceso efectivo a pruebas se verifica en `quizAccess.middleware.js`: la creac
 Regresión tras la protección de Supabase: `test_instructor_auth_flow.mjs` verifica inicio de sesión, tokens y sesiones de Instructor/Coordinador/Creador con cuentas aisladas. `test_quiz_security.mjs` comprueba la misma autorización con almacenamiento Supabase simulado y local, la compatibilidad de asignaciones históricas y la clasificación completa para instructores de manuales/asistencia sin exponer respuestas. Un instructor de la sección sin pruebas asignadas recibe un catálogo vacío, no un error de carga.
 
 La revisión posterior a la migración, sus correcciones y límites están en [Verificación del panel de instructores](verificacion-instructores.md).
+
+## Registro de salidas en pruebas
+
+En la revisión de una entrega, `QuizActivityReview.jsx` consulta `/api/pruebas/seccion/:seccion_id/semana/:semana/actividad/estudiante/:numero_cuenta`. Reutiliza los permisos de revisión de la semana; muestra aceptación, faltas, señales, preguntas, las horas del dispositivo y del servidor y los regresos. La bitácora está separada de respuestas y notas y conserva los intentos anteriores cuando se autoriza una nueva rendición. Las señales del navegador no prueban copia ni identifican otra aplicación. Véase [Seguridad y funcionamiento de pruebas](seguridad-pruebas.md).

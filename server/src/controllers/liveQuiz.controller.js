@@ -171,11 +171,7 @@ async function persistStudentHeartbeat(session, account) {
     const previousVersion = new Date(data.updated_at).getTime();
     const { data: saved, error: writeError } = await supabase.from("sesiones_pruebas_en_vivo")
       .update({
-        alumnos_conectados: { ...data.alumnos_conectados, [account]: { ...presence, integridad: {
-          ...(presence.integridad || {}),
-          strikes: Math.max(previous?.integridad?.strikes || 0,presence.integridad?.strikes || 0),
-          tiempo_fuera_segundos: Math.max(previous?.integridad?.tiempo_fuera_segundos || 0,presence.integridad?.tiempo_fuera_segundos || 0)
-        } } },
+        alumnos_conectados: { ...data.alumnos_conectados, [account]: presence },
         respuestas_globales: { ...data.respuestas_globales, ...(answers ? { [account]: { ...data.respuestas_globales?.[account], ...answers } } : {}) },
         updated_at: new Date(Math.max(Date.now(), previousVersion + 1)).toISOString()
       }).eq("seccion_id", session.seccion_id).eq("numero_semana", session.numero_semana)
@@ -474,13 +470,7 @@ export const heartbeatLiveQuiz = async (req, res) => {
       nombre_completo: nombre_completo || session.alumnos_conectados[cleanAccount]?.nombre_completo || "Estudiante",
       ultimo_ping: now,
       pregunta_vista: typeof pregunta_vista === "number" ? pregunta_vista : -1,
-      ha_respondido: Boolean(ha_respondido),
-      ip: req.headers["x-forwarded-for"] || req.socket?.remoteAddress || "127.0.0.1",
-      integridad: {
-        strikes: Math.max(session.alumnos_conectados[cleanAccount]?.integridad?.strikes || 0, Math.min(3, Math.max(0, Number(req.body.integridad?.strikes) || 0))),
-        tiempo_fuera_segundos: Math.max(session.alumnos_conectados[cleanAccount]?.integridad?.tiempo_fuera_segundos || 0, Math.min(86400, Math.max(0, Number(req.body.integridad?.tiempo_fuera_segundos) || 0))),
-        origen: "cliente_no_verificado"
-      }
+      ha_respondido: Boolean(ha_respondido)
     };
 
     // Respaldar respuestas parciales si se enviaron
@@ -541,8 +531,7 @@ export const heartbeatLiveQuiz = async (req, res) => {
         total_conectados: activeStudentsList.length,
         respuestas_recibidas_count: respondieronCount,
         todos_respondieron: activeStudentsList.length > 0 && respondieronCount >= activeStudentsList.length,
-        server_time: now,
-        integridad: session.alumnos_conectados[cleanAccount].integridad
+        server_time: now
       }
     });
   } catch (err) {

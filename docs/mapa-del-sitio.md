@@ -36,7 +36,7 @@ Los mapas describen el acceso que presenta la interfaz. Para confirmar la autori
 
 Usa la llamada correspondiente de `client/src/services/api.js` para rastrear la URL, los parámetros y el encabezado de sesión. Comprueba la vista que escribe y la vista que vuelve a leer. Para fórmulas y formatos, consulta `server/scripts/test_academic_integrity.js`. Para entender escenarios de prueba y persistencia, lee `server/scripts/test_pruebas_workflow.js` y `server/scripts/test_persistence_audit.js` antes de ejecutarlos, ya que escriben y pueden borrar datos.
 
-La autenticación, proyección de datos y política de integridad de las evaluaciones se detallan en [Seguridad e integridad de pruebas](seguridad-pruebas.md), junto con las pruebas aisladas y los requisitos de producción.
+La autenticación, proyección de datos y registro de salidas y política de tres faltas de las evaluaciones se detallan en [Seguridad y funcionamiento de pruebas](seguridad-pruebas.md), junto con las pruebas aisladas y los requisitos de producción.
 
 
 ## Dirección pública gratuita

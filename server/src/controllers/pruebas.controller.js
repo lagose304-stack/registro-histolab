@@ -3,6 +3,8 @@ import { getLiveQuizEvidence } from "./liveQuiz.controller.js";
 import { syncMakeupSubmission } from "../services/studentMakeups.js";
 import { sanitizeClientAudit } from "../middlewares/quizPrivacy.mjs";
 import fs from "node:fs";
+import { beginQuizActivity, recordQuizActivity, finishQuizActivity, listQuizActivity } from "../services/quizActivity.js";
+import { QUIZ_ACTIVITY_POLICY } from "../../../shared/quizActivity.mjs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import crypto from "node:crypto";
@@ -465,6 +467,43 @@ async function lockLocalSubmission(key) {
 }
 
 // 4. Sellar respuestas y evaluar apartados objetivos con la clave guardada en el servidor.
+export const startQuizActivity = async (req, res) => {
+  try {
+    if (!req.student) return res.status(403).json({ success: false, message: "Esta acción corresponde al estudiante." });
+    const { seccion_id, semana } = req.params;
+    if (req.body.politica !== QUIZ_ACTIVITY_POLICY) return res.status(400).json({ success: false, message: "Debes aceptar las reglas de las tres faltas." });
+    const quiz = await loadQuizForAssessment(seccion_id, Number(semana));
+    // Solo una eliminación docente de la entrega permite otro intento; la bitácora anterior permanece.
+    let previous;
+    if (isSupabaseConfigured && supabase) {
+      const check = await supabase.from("entregas_pruebas").select("id").eq("seccion_id", seccion_id).eq("numero_semana", Number(semana)).eq("numero_cuenta", String(req.student.numero_cuenta)).maybeSingle();
+      if (check.error) throw check.error;
+      previous = check.data;
+    } else previous = cachePruebas.entregas.find(row => String(row.seccion_id) === String(seccion_id) && Number(row.numero_semana) === Number(semana) && String(row.numero_cuenta) === String(req.student.numero_cuenta));
+    if (previous) return res.status(409).json({ success: false, message: "Esta prueba ya tiene una entrega registrada." });
+    const live = await getLiveQuizEvidence(seccion_id, Number(semana));
+    if (!(quiz.publicada === true || String(quiz.publicada) === "true" || quiz.estado === "publicada") || String(quiz.id) !== String(req.body.quiz_id) || !["lobby", "en_pregunta", "esperando_siguiente"].includes(live.estado)) return res.status(409).json({ success: false, message: "La prueba no está disponible para iniciar." });
+    const attempt = await beginQuizActivity(seccion_id, semana, req.student, quiz, req.body.hora_cliente);
+    return res.json({ success: true, data: attempt });
+  } catch (error) { console.error("Inicio de actividad:", error.message); return res.status(503).json({ success: false, message: "No se pudo registrar el inicio. Reintenta sin cerrar esta pantalla." }); }
+};
+
+export const saveQuizActivity = async (req, res) => {
+  try {
+    if (!req.student) return res.status(403).json({ success: false, message: "Esta acción corresponde al estudiante." });
+    const data = await recordQuizActivity(req.params.seccion_id, req.params.semana, req.student, req.params.intento_id, req.body.eventos);
+    return res.json({ success: true, data });
+  } catch (error) { console.error("Registro de actividad:", error.message); return res.status(503).json({ success: false, message: "No se pudo confirmar el registro de actividad. Se reintentará." }); }
+};
+
+export const reviewQuizActivity = async (req, res) => {
+  try {
+    if (req.student) return res.status(403).json({ success: false, message: "La revisión corresponde al docente autorizado." });
+    const data = await listQuizActivity(req.params.seccion_id, req.params.semana, req.params.numero_cuenta);
+    return res.json({ success: true, data });
+  } catch (error) { console.error("Consulta de actividad:", error.message); return res.status(503).json({ success: false, message: "No se pudo consultar el registro de actividad." }); }
+};
+
 export const submitPruebaEstudiante = async (req,res) => {
   let releaseLocalLock;
   try {
@@ -482,37 +521,37 @@ export const submitPruebaEstudiante = async (req,res) => {
       if (error) throw error;
       existing=data;
     } else existing=cachePruebas.entregas.find(row=>String(row.seccion_id)===String(seccion_id) && Number(row.numero_semana)===numSemana && String(row.numero_cuenta)===String(numero_cuenta));
-    if (existing && ["enviado","calificado"].includes(existing.estado)) {
+    if (existing && existing.estado !== "borrador") {
       // Confirm every sealed delivery, including manual and historical quizzes.
       // Retries never replace answers and must not trap the student in offline mode.
       if (!(isSupabaseConfigured && supabase)) savePersistentPruebas(cachePruebas,true);
       if (existing.auditoria?.calificacion_automatica?.version===1) await syncAutomaticStudentGrade(existing);
+      if (req.student && existing.auditoria?.actividad?.intento_id) await finishQuizActivity(seccion_id, numSemana, req.student, existing.auditoria.actividad.intento_id);
       return res.json({success:true,message:"La entrega ya está registrada. Sus respuestas originales se conservan.",data:publicSubmission(existing)});
     }
-    if (existing?.estado === "anulada_seguridad") {
-      return res.status(409).json({success:false,message:"Esta prueba fue anulada por seguridad y no puede enviarse."});
-    }
     const quiz=await loadQuizForAssessment(seccion_id,numSemana);
+    let activity;
+    if (req.student && !req.body.actividad_intento_id) return res.status(428).json({ success: false, message: "Debes registrar la aceptación de las reglas antes de entregar." });
+    if (req.body.actividad_intento_id) {
+      if (!req.student) return res.status(403).json({ success:false, message:"El registro de actividad requiere la sesión estudiantil." });
+      activity = await recordQuizActivity(seccion_id, numSemana, req.student, req.body.actividad_intento_id, req.body.actividad_eventos_pendientes || []);
+      if (String(activity.quiz_id) !== String(quiz.id)) return res.status(409).json({ success:false, message:"El intento pertenece a otra prueba." });
+      if (activity.faltas >= 3) clientAudit.motivo_finalizacion = "limite_tres_faltas";
+      else if (clientAudit.motivo_finalizacion === "limite_tres_faltas") return res.status(409).json({ success: false, message: "El contador del servidor aún no confirma tres faltas." });
+    }
     if (req.student && req.body.quiz_id && String(req.body.quiz_id) !== String(quiz.id)) return res.status(409).json({success:false,message:"La prueba asignada cambió. Actualiza el catálogo antes de continuar."});
-    let integrityEvidence;
     if (req.student) {
       if (!(quiz.publicada === true || String(quiz.publicada) === "true" || quiz.estado === "publicada")) return res.status(403).json({success:false,message:"Esta prueba no está publicada."});
       const live = await getLiveQuizEvidence(seccion_id,numSemana);
-      integrityEvidence = live.alumnos_conectados?.[String(numero_cuenta)]?.integridad;
-      // Entering the lobby already starts the fullscreen/integrity commitment.
-      // Explicit exit and the third warning must be sealable before question 1.
-      const earlyTermination = ["entrega_anticipada_por_salida", "expulsion_infracciones"].includes(clientAudit?.motivo_finalizacion);
-      const canEndLobbyAttempt = live.estado === "lobby" && live.habilitada && earlyTermination;
+      const canEndLobbyAttempt = live.estado === "lobby" && live.habilitada && (clientAudit?.motivo_finalizacion === "entrega_anticipada_por_salida" || activity?.faltas >= 3);
       if (!["en_pregunta","esperando_siguiente","finalizada"].includes(live.estado) && !canEndLobbyAttempt) return res.status(409).json({success:false,message:"La prueba aún no se ha iniciado para esta sección."});
     }
     const assessment=buildAutomaticQuizAssessment(quiz.preguntas,answers);
     const result=resolveQuizAssessment(assessment);
     const trustedAudit=sanitizeClientAudit(clientAudit);
-    trustedAudit.strikes = Math.max(trustedAudit.strikes,integrityEvidence?.strikes || 0);
-    trustedAudit.tiempo_fuera_segundos = Math.max(trustedAudit.tiempo_fuera_segundos,integrityEvidence?.tiempo_fuera_segundos || 0);
-    if (integrityEvidence) trustedAudit.contadores_respaldados_en_sesion = true;
     for (const key of ["calificacion_automatica","evaluaciones_incisos","nota_real","nota_con_bonus"]) delete trustedAudit[key];
     trustedAudit.hora_recepcion_servidor=new Date().toISOString();
+    if (activity) trustedAudit.actividad = { intento_id: activity.id, politica: activity.politica, faltas: activity.faltas, aceptado_at: activity.aceptado_at, eventos: activity.eventos, origen: "senales_declaradas_por_navegador" };
     if (result.automaticCount) Object.assign(trustedAudit,{calificacion_automatica:assessment,evaluaciones_incisos:result.evaluations,puntos_automaticos:result.automaticScore,apartados_pendientes:result.pending,...(result.complete?{nota_real:result.raw,nota_con_bonus:result.raw}:{})});
     const submission={id:existing?.id || crypto.randomUUID(),quiz_id:quiz.id,seccion_id,carrera:quiz.carrera || carrera || "Medicina",numero_semana:numSemana,numero_cuenta:String(numero_cuenta),nombre_completo:nombre_completo || existing?.nombre_completo || "",respuestas:answers,estado:result.complete?"calificado":"enviado",nota_obtenida:result.complete?result.official:null,comentarios:"",auditoria:trustedAudit,fecha_envio:new Date().toISOString(),updated_at:new Date().toISOString(),...(result.complete?{nota_real:result.raw,nota_con_bonus:result.raw,calificado_por:"Sistema · Calificación automática"}:{})};
     if (isSupabaseConfigured && supabase) {
@@ -521,14 +560,13 @@ export const submitPruebaEstudiante = async (req,res) => {
       if (error?.code === "23505") {
         const {data:sealed,error:readError}=await supabase.from("entregas_pruebas").select("*").eq("seccion_id",seccion_id).eq("numero_semana",numSemana).eq("numero_cuenta",String(numero_cuenta)).maybeSingle();
         if (readError || !sealed) throw readError || error;
-        if (sealed.estado === "anulada_seguridad") {
-          return res.status(409).json({success:false,message:"Esta prueba fue anulada por seguridad y no puede enviarse."});
-        }
         if (sealed.auditoria?.calificacion_automatica?.version===1) await syncAutomaticStudentGrade(sealed);
+        if (req.student && sealed.auditoria?.actividad?.intento_id) await finishQuizActivity(seccion_id, numSemana, req.student, sealed.auditoria.actividad.intento_id);
         return res.json({success:true,message:"La entrega ya está registrada. Sus respuestas originales se conservan.",data:publicSubmission(sealed)});
       }
       if (error) throw error;
     }
+    if (activity) await finishQuizActivity(seccion_id, numSemana, req.student, activity.id);
     const index=cachePruebas.entregas.findIndex(row=>String(row.id)===String(submission.id));
     if (index===-1) cachePruebas.entregas.push(submission); else cachePruebas.entregas[index]=submission;
     savePersistentPruebas(cachePruebas, !(isSupabaseConfigured && supabase));
@@ -538,54 +576,6 @@ export const submitPruebaEstudiante = async (req,res) => {
     console.error("Error en submitPruebaEstudiante:",error.message);
     return res.status(500).json({success:false,message:"No pudimos completar el registro y la calificación de la entrega. Reintenta para confirmar el guardado.",error:error.message});
   } finally { releaseLocalLock?.(); }
-};
-
-// Records a security cancellation without ever receiving or storing answers.
-export const cancelPruebaForIntegrity = async (req,res) => {
-  try {
-    const { seccion_id } = req.params;
-    const { numero_semana, numero_cuenta, nombre_completo, carrera, quiz_id, auditoria = {} } = req.body;
-    if (!numero_cuenta || !Number.isInteger(Number(numero_semana)) || Number(numero_semana) < 1) {
-      return res.status(400).json({ success: false, message: "Número de cuenta y semana son obligatorios para anular la prueba." });
-    }
-    const numSemana = Number(numero_semana);
-    const account = String(numero_cuenta);
-    let existing;
-    if (isSupabaseConfigured && supabase) {
-      const { data, error } = await supabase.from("entregas_pruebas").select("*")
-        .eq("seccion_id", seccion_id).eq("numero_semana", numSemana).eq("numero_cuenta", account).maybeSingle();
-      if (error) throw error;
-      existing = data;
-    } else {
-      existing = cachePruebas.entregas.find(row => String(row.seccion_id) === String(seccion_id) && Number(row.numero_semana) === numSemana && String(row.numero_cuenta) === account);
-    }
-    if (existing && existing.estado !== "anulada_seguridad") {
-      return res.status(409).json({ success: false, message: "No se puede anular una prueba que ya fue entregada." });
-    }
-    const quiz = await loadQuizForAssessment(seccion_id, numSemana);
-    if (quiz_id && String(quiz_id) !== String(quiz.id)) return res.status(409).json({ success: false, message: "La prueba asignada cambió. Actualiza el catálogo antes de continuar." });
-    const trustedAudit = sanitizeClientAudit(typeof auditoria === "string" ? JSON.parse(auditoria) : auditoria);
-    trustedAudit.motivo_finalizacion = "anulada_por_salida";
-    trustedAudit.hora_recepcion_servidor = new Date().toISOString();
-    trustedAudit.respuestas_descartadas = true;
-    const cancellation = {
-      id: existing?.id || crypto.randomUUID(), quiz_id: quiz.id, seccion_id, carrera: quiz.carrera || carrera || "Medicina",
-      numero_semana: numSemana, numero_cuenta: account, nombre_completo: nombre_completo || "", respuestas: {},
-      estado: "anulada_seguridad", nota_obtenida: null, comentarios: "Prueba anulada por no regresar a la evaluación dentro del tiempo de seguridad.",
-      auditoria: trustedAudit, fecha_envio: new Date().toISOString(), updated_at: new Date().toISOString()
-    };
-    if (isSupabaseConfigured && supabase) {
-      const { error } = await supabase.from("entregas_pruebas").upsert(cancellation, { onConflict: "seccion_id,numero_semana,numero_cuenta" });
-      if (error) throw error;
-    }
-    const index = cachePruebas.entregas.findIndex(row => String(row.seccion_id) === String(seccion_id) && Number(row.numero_semana) === numSemana && String(row.numero_cuenta) === account);
-    if (index === -1) cachePruebas.entregas.push(cancellation); else cachePruebas.entregas[index] = cancellation;
-    savePersistentPruebas(cachePruebas, !(isSupabaseConfigured && supabase));
-    return res.json({ success: true, message: "Prueba anulada sin enviar respuestas.", data: publicSubmission(cancellation) });
-  } catch (error) {
-    console.error("Error en cancelPruebaForIntegrity:", error.message);
-    return res.status(500).json({ success: false, message: "No pudimos registrar la anulación de la prueba.", error: error.message });
-  }
 };
 
 // 5. Obtener entregas de estudiantes para una prueba semanal (Docente)

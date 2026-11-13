@@ -793,17 +793,20 @@ export const api = {
       return await handleResponse(res);
     },
 
-    async sendLiveHeartbeat(seccionId, semana, payload) {
-      const res = await fetch(`${API_BASE}/pruebas/live/${seccionId}/${semana}/heartbeat`, {
-        method: "POST",
-        headers: getAuthHeaders(),
-        body: JSON.stringify(payload)
-      });
+    async startActivity(seccionId, semana, payload) {
+      const res = await fetch(`${API_BASE}/pruebas/seccion/${seccionId}/semana/${semana}/actividad/iniciar`, { method: "POST", headers: getAuthHeaders(), body: JSON.stringify(payload) });
       return await handleResponse(res);
     },
-
-    async cancelForIntegrity(seccionId, payload) {
-      const res = await fetch(`${API_BASE}/pruebas/seccion/${seccionId}/anular`, {
+    async saveActivity(seccionId, semana, intentoId, eventos) {
+      const res = await fetch(`${API_BASE}/pruebas/seccion/${seccionId}/semana/${semana}/actividad/${intentoId}`, { method: "POST", headers: getAuthHeaders(), body: JSON.stringify({ eventos }), keepalive: true });
+      return await handleResponse(res);
+    },
+    async getActivity(seccionId, semana, cuenta) {
+      const res = await fetch(`${API_BASE}/pruebas/seccion/${seccionId}/semana/${semana}/actividad/estudiante/${encodeURIComponent(cuenta)}`, { headers: getAuthHeaders() });
+      return await handleResponse(res);
+    },
+    async sendLiveHeartbeat(seccionId, semana, payload) {
+      const res = await fetch(`${API_BASE}/pruebas/live/${seccionId}/${semana}/heartbeat`, {
         method: "POST",
         headers: getAuthHeaders(),
         body: JSON.stringify(payload)

@@ -1,4 +1,4 @@
-# Seguridad e integridad de pruebas
+# Seguridad y funcionamiento de pruebas
 
 La implementación se verificó con datos aislados y se publicó en Cloudflare el 7 de noviembre de 2026. La migración de permisos se aplicó y verificó en el proyecto correcto mediante su panel de Supabase. La conexión de Supabase de Codex sigue mostrando otra organización; el acceso al proyecto se realizó desde la sesión abierta del propietario. No se modificaron respuestas ni calificaciones.
 
@@ -7,47 +7,53 @@ La implementación se verificó con datos aislados y se publicó en Cloudflare e
 - `quizAccess.middleware.js` autentica todas las rutas de pruebas y verifica cuenta, sección, semana y función asignada. La identidad enviada en el cuerpo no decide quién entrega. Calificar o eliminar una entrega verifica su registro real. El servidor aplica la ventana de programación; únicamente el rol global Creador de la cuenta autenticada puede habilitar y dirigir pruebas fuera de fecha y horario. Coordinador y titular no reciben esa excepción.
 - `quizPrivacy.mjs` entrega al estudiante una proyección sin claves, modelos ni respuestas esperadas. Los términos pareados conservan términos y un banco de definiciones independiente, sin revelar la asociación correcta. Las consultas en vivo no entregan nombres, IP ni respuestas de compañeros. Los borradores permanecen fuera del catálogo estudiantil.
 - La corrección usa la clave guardada en el servidor. La entrega exige una prueba publicada y una sesión iniciada. Los reintentos de entregas selladas son idempotentes, incluso para pruebas manuales; las respuestas originales prevalecen. La restricción única de la base y un bloqueo local por entrega evitan duplicados concurrentes.
-- Una falla al verificar la sesión central produce un error recuperable en lugar de reactivar una sesión vieja del proceso. Los contadores declarados de integridad se respaldan en los latidos existentes, sin nuevos sondeos, y no pueden disminuir mediante un latido posterior de la misma sesión.
+- Una falla al verificar la sesión central produce un error recuperable en lugar de reactivar una sesión vieja del proceso.
 
-## Pantalla completa, navegación y advertencias (11 de noviembre de 2026)
+## Registro de salidas y tres faltas (13 de noviembre de 2026)
 
-La política `integridad-estados-v5` exige pantalla completa real cuando el navegador ofrece la API estándar o WebKit. `quizFullscreen.mjs` comprueba la API y verifica el resultado; si está disponible pero se rechaza, no se inicia. En navegadores móviles que no exponen esa capacidad, la prueba usa la misma política de visibilidad y foco, sin ocultar el contenido ni impedir el inicio. Un intento restaurado en un navegador con pantalla completa disponible queda bloqueado por `QuizFullscreenGate.jsx` hasta recuperarla. Los campos quedan deshabilitados mientras se muestra una advertencia o confirmación, durante el envío y después del sellado.
+La política `salidas-tres-faltas-v1` observa pérdida de foco de la ventana, página oculta, abandono/recarga del documento y cierre voluntario de sesión desde el portal. Una salida abre un episodio y cuenta una sola falta aunque produzca varios eventos. El regreso se registra cuando la página vuelve a estar visible y enfocada, con 150 ms de estabilización para no contar dos veces la misma transición. Rotación, teclado, tamaño de ventana, selección, copiar/pegar e impresión no generan faltas por sí mismos. No se exige pantalla completa, no se vigila el portapapeles ni se tapa el contenido al salir. La primera y segunda faltas presentan un aviso dentro de la prueba. La tercera cierra la edición y envía las respuestas existentes, incluso en la sala de espera.
 
-`quizIntegrity.mjs` usa una máquina de estados por intento (`ready`, `blocked`, `closed`) y un adaptador de eventos del navegador. El bloqueo oculta el contenido de forma síncrona con un atributo del documento, antes del renderizado de React; los manejadores de respuesta consultan también la máquina. Observa `blur`, visibilidad y salida de pantalla completa. Cada episodio muestra una cuenta regresiva de diez segundos; solo se rearma al pulsar el control de regreso y comprobar que la página está visible, enfocada y en pantalla completa. Si vence el plazo, `StudentPortalView.jsx` descarta las respuestas locales y solicita `POST /api/pruebas/seccion/:seccion_id/anular`, que registra `anulada_seguridad` con auditoría pero sin respuestas. El servidor impide enviar posteriormente una prueba anulada. Un mismo episodio cuenta una vez aunque emita los tres eventos.
+`QuizActivityConsent.jsx` explica y registra la aceptación antes de crear el intento. `useQuizActivity.js` conserva el identificador asignado por el servidor, el contador y los eventos pendientes. `quizActivityObserver.mjs` solo observa señales del navegador. El contador se recupera del servidor al restaurar y no vuelve a cero por recargar o aceptar nuevamente. Los borradores anteriores a esta política requieren aceptación antes de continuar.
 
-`quizNavigation.mjs` mantiene el intento al pulsar Atrás en el historial del mismo documento. El botón interno usa la misma confirmación: salir finaliza y envía; cancelar exige volver a pantalla completa. La pérdida de pantalla completa muestra directamente la advertencia de integridad y cuenta una falta; no abre la confirmación de entrega. La advertencia sustituye cualquier confirmación abierta y solo permite continuar tras recuperar pantalla completa. Los diálogos no suspenden la detección de salidas. Solo el envío/sellado/finalización suspende nuevas advertencias. El cierre o recarga completa conserva el aviso nativo `beforeunload`, sujeto al navegador; no permite reemplazarlo por el diálogo de la aplicación.
+Antes de solicitar la entrega se guarda una copia exacta de respuestas y eventos pendientes. Una falla de red mantiene esa entrega cerrada para edición y reintenta al recuperar conexión, al recargar y cada cinco segundos mientras esté pendiente. Las solicitudes son idempotentes. El servidor confirma los eventos antes de guardar la entrega; su contador decide el motivo `limite_tres_faltas`. No se descartan respuestas ni se registra una anulación. Se conservan preguntas, tipos de respuesta, orden, programación, tiempos, sincronización docente, notas y corrección automática.
 
-`App.jsx` registra el guardián de salida de `StudentPortalView.jsx`: el cierre de sesión voluntario de la barra superior abre la misma confirmación mientras hay un intento activo. La caducidad o revocación efectiva de una sesión conserva su manejo de autenticación.
+## Registro independiente y permisos
 
-Cambiar de tamaño, rotar, abrir el teclado o usar gestos no genera advertencias si no provoca alguno de los eventos vigilados. Si un selector o una interrupción del sistema produce una pérdida real de foco, la regla estricta también cuenta ese evento. Copiar/pegar y atajos restringidos continúan bloqueados sin leer contenido privado del portapapeles. No se restaura el sondeo con `debugger`, la huella digital ni la medición de cadencia. La marca visible se conserva.
+`server/src/services/quizActivity.js` usa Supabase cuando está configurado y un archivo local con escritura atómica en desarrollo. Un error de Supabase no se sustituye silenciosamente con el archivo local. La migración `supabase/migrations/20261113214049_quiz_activity_journal.sql` crea `quiz_activity_attempts`, `quiz_activity_events` y la función transaccional `append_quiz_activity`. Debe aplicarse al proyecto de HistoLab antes de publicar este código. La conexión MCP disponible corresponde a otro proyecto: no se aplicó allí.
 
-Las incidencias del navegador se etiquetan como información declarada, no como evidencia infalible. Una llamada o interrupción del sistema puede ocultar realmente la página: el navegador no puede establecer su intención. La revisión muestra esta limitación y no atribuye automáticamente una captura o uso de IA. Tampoco puede impedir una cámara externa, otro dispositivo o un navegador manipulado. El catálogo conserva los enunciados para restaurar la evaluación; no hay una garantía de embargo de preguntas futuras. No se añadió cámara, micrófono, vigilancia remota ni dependencias.
+Cada registro contiene intento, matrícula, cuenta, sección, prueba, versión de reglas y aceptación; cada evento conserva identificador, episodio, señal, falta, pregunta, hora del dispositivo y hora de recepción del servidor. Los regresos se agregan como eventos separados y permiten estimar la duración declarada sin sobrescribir la salida. El orden de recepción se conserva mediante una secuencia de base de datos. La función bloquea el intento durante la transacción y deduplica identificadores y episodios, por lo que reintentos o solicitudes concurrentes no añaden faltas dobles.
 
-## Verificación reproducible sin datos reales
+Las tablas tienen RLS y no conceden acceso a `anon` ni `authenticated`. La API solo puede leer e insertar eventos, sin UPDATE/DELETE. Las rutas reutilizan `authenticateQuiz` y `quizAccess`: el alumno registra únicamente su intento y el docente necesita permiso de revisión de la semana para consultar otra cuenta. La consulta y el registro no exponen claves de corrección ni datos de compañeros.
 
-El contenido de `.quiz-player` permanece oculto y sin interacción por CSS salvo cuando la raíz del documento está en pantalla completa real (estándar o WebKit). Esto oculta también los enunciados durante la transición de salida, antes del siguiente renderizado de React. La confirmación de respuestas vuelve a consultar el estado real del navegador. El aviso nativo que explica cómo salir pertenece al navegador y el sitio no puede eliminarlo; tampoco puede impedir que el usuario o el sistema termine la pantalla completa. Los dispositivos sin soporte no pueden iniciar la prueba.
+Rutas:
+
+- `POST /api/pruebas/seccion/:seccion_id/semana/:semana/actividad/iniciar`: aceptación y recuperación del intento propio.
+- `POST /api/pruebas/seccion/:seccion_id/semana/:semana/actividad/:intento_id`: registro de eventos propios.
+- `GET /api/pruebas/seccion/:seccion_id/semana/:semana/actividad/estudiante/:numero_cuenta`: bitácora para el revisor autorizado.
+
+La entrega incluye una copia del registro en `auditoria.actividad`, junto con los metadatos y la calificación automática existentes. `QuizActivityReview.jsx` consulta además la bitácora independiente, con error y reintento explícitos. Una eliminación docente de la entrega permite un nuevo intento al ingresar nuevamente; el intento anterior se archiva sin borrar sus eventos. Las calificaciones y auditorías históricas se conservan.
+
+## Límites de interpretación
+
+Son señales declaradas por el navegador, no prueba concluyente de copia ni garantía de cumplimiento legal. `blur` puede producirse al tocar la barra de direcciones o por una interrupción del sistema. No se puede identificar otra aplicación, conocer su contenido, detectar otro dispositivo ni garantizar detección de pantalla dividida, capturas o toda multitarea. El cierre forzoso del proceso puede no emitir eventos; un evento pendiente requiere que el navegador vuelva a conectarse para llegar al servidor. Los datos locales pueden perderse si se borra el almacenamiento. Los relojes del dispositivo pueden ser incorrectos y los clientes manipulados pueden omitir o falsificar señales; la recepción del servidor identifica cuándo llegó el reporte, no certifica su causa. La interfaz docente muestra esas limitaciones y distingue las dos horas. No hay cámara, micrófono, huella digital ni inspección de aplicaciones.
+
+## Verificación aislada
 
 ```text
-node server/scripts/test_quiz_integrity.mjs
-node server/scripts/test_quiz_portal_integrity.mjs
-node server/scripts/test_quiz_creator_schedule.mjs
+node server/scripts/test_quiz_activity.mjs
 node server/scripts/test_quiz_auth.mjs
 node server/scripts/test_quiz_security.mjs
 node server/scripts/test_quiz_submission_security.mjs
 node server/scripts/test_live_quiz_concurrency.mjs
 node server/scripts/test_quiz_auto_grading.mjs
+node server/scripts/test_academic_integrity.js
+node server/scripts/test_quiz_player_browser.mjs
 npm run build
 ```
 
-La reconstrucción se comprueba con `test_quiz_integrity.mjs` (incluye confirmación explícita y ráfagas de eventos durante una advertencia) y `test_quiz_portal_integrity.mjs` (restauración, diálogos, entrega y sellado). Las verificaciones históricas de navegador correspondían a la política anterior y no certifican la política estricta. `test_quiz_integrity.mjs` comprueba eventos inmediatos, deduplicación, fallos de permisos de pantalla completa, envío único y Atrás repetido con datos aislados. `test_quiz_submission_security.mjs` incluye finalizaciones en lobby y conservación de las respuestas originales. `test_quiz_integrity_browser.mjs` contiene la verificación del portal con API simulada, pantalla completa, Atrás, restauración, sellado sin conexión y tamaños 320×640, 640×360, 768×1024 y 1024×768. Requiere Playwright y Chromium; acepta `HISTOLAB_PLAYWRIGHT_MODULE` y `HISTOLAB_CHROMIUM_PATH`. En esta revisión su ejecución quedó bloqueada por el cierre de Chromium al arrancar en el entorno restringido; no se da por aprobada la comprobación visual ni la de dispositivos físicos. La actualización del código no implica una publicación en producción.
+Se verificaron las transiciones del observador y la función SQL con PostgreSQL embebido: identidad, permisos, duplicados, concurrencia, rollback de lotes inválidos, conservación de registros y nuevos intentos. El navegador usa API simulada sin datos reales en 320×640, 640×360, 768×1024 y 1024×768. Comprueba aceptación, faltas visibles sin bloqueo, envío único con respuestas exactas, recarga, fallo de red, restauración de la entrega cerrada, fin docente y lobby. Las capturas están en `artifacts/quiz-activity/`. La compilación mantiene la advertencia previa de tamaño del panel docente y no añade dependencias. Esta verificación corresponde al código local; no implica publicación ni aplicación de la migración en producción.
 
-### Verificación de la reconstrucción por estados
-
-Pasaron las pruebas aisladas `test_quiz_integrity.mjs`, `test_quiz_portal_integrity.mjs`, `test_quiz_submission_security.mjs` y `test_quiz_auth.mjs`, además de `npm run build`. La máquina se prueba con mil eventos de foco durante una misma advertencia, confirmación rechazada sin condiciones seguras, confirmación repetida y cierre definitivo. El portal comprueba que no se puedan modificar respuestas antes de confirmar el regreso.
-
-La ejecución de `test_quiz_integrity_browser.mjs` en este entorno no arrancó: falta el módulo `playwright` (`MODULE_NOT_FOUND`). Por tanto, la reconstrucción todavía requiere verificación visual en navegador, móvil y tablet. No se publicó esta reconstrucción.
-
-## Estado de producción y cierre verificado
+## Historial de producción anterior a esta política
 
 La dirección pública gratuita es `https://registrohistolab.pages.dev`. Pages conecta la API mediante un enlace interno al Worker; los secretos permanecen únicamente en el servidor. Se verificaron HTTP 200 para la página, salud y configuración académica, y HTTP 401 para consultas de pruebas sin sesión desde el nuevo dominio.
 

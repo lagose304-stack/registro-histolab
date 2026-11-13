@@ -17,7 +17,7 @@ assert.deepEqual(new Set(quizMatchingOptions(clean.preguntas[0].items[1])),new S
 assert.equal(studentQuiz({...quiz,publicada:false}),null);
 assert(!('respuestas_globales' in studentLiveState({estado:'lobby',respuestas_globales:{other:'SECRET'},alumnos_conectados:{other:{ip:'PRIVATE'}}})));
 const audit=sanitizeClientAudit({strikes:999,calificacion_automatica:{},nota_real:999,incidentes:Array(150).fill({tipo:'event',detalle:'x'.repeat(1000),origen:'servidor'})});
-assert.equal(audit.strikes,3);assert.equal(audit.incidentes.length,100);assert.equal(audit.incidentes[0].detalle.length,500);assert.equal(audit.incidentes[0].origen,'cliente_no_verificado');assert(!audit.calificacion_automatica);
+for (const key of ['strikes','incidentes','origen_integridad','calificacion_automatica','nota_real']) assert(!(key in audit));
 const sections=[{id:'s1',coordinador:'Titular Test',instructores_asignados:['manual-only','attendance-only']},{id:'s2',coordinador:'Other'}];
 const assignments=[{seccion_id:'s1',tipo_asignacion:'Crear prueba semanal',referencia_id:'semana_1',instructor_id:'creator'},{seccion_id:'s1',tipo_asignacion:'Revisión de prueba semanal',referencia_id:'semana_2',instructor_id:'reviewer'}];
 const fixtureDatabase={from(table){const filters=[];let single=false;const query={select(){return query},eq(key,value){filters.push([key,value]);return query},in(key,values){filters.push([key,values]);return query},maybeSingle(){single=true;return query},async then(resolve){const source=table==='secciones'?sections:assignments;const data=source.filter(row=>filters.every(([key,value])=>(Array.isArray(value)?value.map(String).includes(String(row[key])):String(row[key])===String(value))));resolve({data:single?(data[0]||null):data,error:null});}};return query}};

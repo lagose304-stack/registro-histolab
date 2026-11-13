@@ -35,4 +35,5 @@ server/.gmail-client*.json
 
 # Copias locales privadas y caché de herramientas
 server/data/*_data.json
+server/data/*_data.json.tmp
 supabase/.temp/

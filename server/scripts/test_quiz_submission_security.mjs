@@ -1,3 +1,4 @@
+import { appendLocalActivity } from "../../shared/quizActivity.mjs";
 // Controller integration using isolated in-memory storage only.
 import assert from "node:assert/strict";
 import vm from "node:vm";
@@ -19,24 +20,32 @@ const database={rpc(name,args){
   };
   return request;
 },from(table){let operation='read',payload,single=false;const filters=[];const query={select(){return query},eq(key,value){filters.push([key,value]);return query},in(key,values){filters.push([key,values]);return query},maybeSingle(){single=true;return query},insert(value){operation='insert';payload=structuredClone(value);return query},update(value){operation='update';payload=structuredClone(value);return query},async then(resolve){const data=table==='pruebas_semanales'?quizzes:rows;if(operation==='update'){if(failSubmissionWrite)return resolve({error:{code:'WRITE_FAILED'}});const selected=data.filter(row=>filters.every(([key,value])=>(Array.isArray(value)?value.includes(row[key]):row[key]===value)));selected.forEach(row=>Object.assign(row,payload));return resolve({data:selected,error:null})}if(operation==='insert'){if(rows.some(row=>row.seccion_id===payload.seccion_id&&row.numero_semana===payload.numero_semana&&row.numero_cuenta===payload.numero_cuenta))return resolve({error:{code:'23505'}});rows.push(payload);return resolve({error:null})}const found=data.filter(row=>filters.every(([key,value])=>(Array.isArray(value)?value.includes(row[key]):row[key]===value)));return resolve({data:single?structuredClone(found[0]||null):structuredClone(found),error:null})}};return query}};
-const compiled=await build({entryPoints:[fileURLToPath(new URL('../src/controllers/pruebas.controller.js',import.meta.url))],platform:'node',format:'cjs',bundle:true,write:false,logLevel:'silent',plugins:[{name:'isolation',setup(b){b.onResolve({filter:/db\/supabase\.js$/},()=>({path:'db',namespace:'isolate'}));b.onResolve({filter:/estudiantes\.controller\.js$/},()=>({path:'grades',namespace:'isolate'}));b.onResolve({filter:/liveQuiz\.controller\.js$/},()=>({path:'live',namespace:'isolate'}));b.onResolve({filter:/^node:fs$/},()=>({path:'fs',namespace:'isolate'}));b.onLoad({filter:/.*/,namespace:'isolate'},args=>({contents:args.path==='db'?'export const isSupabaseConfigured=true,supabase=globalThis.database;':args.path==='grades'?'export const updateEstudianteGradeDirect=async(...args)=>globalThis.recordGrade(args);':args.path==='live'?'export const getLiveQuizEvidence=async()=>globalThis.getLive();':'export default {existsSync:()=>false,mkdirSync(){},writeFileSync(){}};',loader:'js'}))}}]});
-const module={exports:{}};vm.runInNewContext(compiled.outputFiles[0].text,{module,exports:module.exports,require,console,database,gradeUpdates,recordGrade:args=>{if(failGradeWrite)throw Error("GRADE_WRITE_FAILED");gradeUpdates.push(args);},getLive:()=>live,process:{cwd:()=>path.resolve('server')}});
+const activityRows=new Map();let failActivity=false;
+const recordActivity=async(section,week,student,id,events=[])=>{
+ if(failActivity)throw Error('ACTIVITY_WRITE_FAILED');
+ const account=student.numero_cuenta;
+ const row=activityRows.get(account)||{id,quiz_id:week===1?'manual':'auto',politica:'salidas-tres-faltas-v1',faltas:0,episodio_abierto:null,eventos:[],aceptado_at:new Date().toISOString()};
+ const next=appendLocalActivity(row,events);activityRows.set(account,next);return next;
+};
+const compiled=await build({entryPoints:[fileURLToPath(new URL('../src/controllers/pruebas.controller.js',import.meta.url))],platform:'node',format:'cjs',bundle:true,write:false,logLevel:'silent',plugins:[{name:'isolation',setup(b){b.onResolve({filter:/services\/quizActivity\.js$/},()=>({path:'activity',namespace:'isolate'}));b.onResolve({filter:/db\/supabase\.js$/},()=>({path:'db',namespace:'isolate'}));b.onResolve({filter:/estudiantes\.controller\.js$/},()=>({path:'grades',namespace:'isolate'}));b.onResolve({filter:/liveQuiz\.controller\.js$/},()=>({path:'live',namespace:'isolate'}));b.onResolve({filter:/^node:fs$/},()=>({path:'fs',namespace:'isolate'}));b.onLoad({filter:/.*/,namespace:'isolate'},args=>({contents:args.path==='activity'?'export const recordQuizActivity=(...args)=>globalThis.recordActivity(...args);export const finishQuizActivity=async()=>{};export const beginQuizActivity=async()=>{};export const listQuizActivity=async()=>[];':args.path==='db'?'export const isSupabaseConfigured=true,supabase=globalThis.database;':args.path==='grades'?'export const updateEstudianteGradeDirect=async(...args)=>globalThis.recordGrade(args);':args.path==='live'?'export const getLiveQuizEvidence=async()=>globalThis.getLive();':'export default {existsSync:()=>false,mkdirSync(){},writeFileSync(){}};',loader:'js'}))}}]});
+const module={exports:{}};vm.runInNewContext(compiled.outputFiles[0].text,{module,exports:module.exports,require,console,database,gradeUpdates,recordActivity,recordGrade:args=>{if(failGradeWrite)throw Error("GRADE_WRITE_FAILED");gradeUpdates.push(args);},getLive:()=>live,process:{cwd:()=>path.resolve('server')}});
 const {submitPruebaEstudiante}=module.exports;
-async function submit(account,week,answers={q:{respuesta:'Original'}},audit={}){let status=200,payload;const req={params:{seccion_id:'s'},student:{numero_cuenta:account},body:{numero_cuenta:account,numero_semana:week,respuestas:answers,auditoria:{nota_real:999,strikes:999,origen_integridad:'servidor',...audit}}};const res={status(value){status=value;return res},json(value){payload=value;return res}};await submitPruebaEstudiante(req,res);return {status,payload};}
-let result=await submit('manual',1);assert.equal(result.status,200);assert.equal(result.payload.data.estado,'enviado');assert.equal(result.payload.data.auditoria.strikes,3);assert.equal(result.payload.data.auditoria.origen_integridad,'declarado_por_cliente_no_prueba_de_fraude');
+async function submit(account,week,answers={q:{respuesta:'Original'}},audit={},extra={}){let status=200,payload;const req={params:{seccion_id:'s'},student:{numero_cuenta:account},body:{numero_cuenta:account,numero_semana:week,respuestas:answers,actividad_intento_id:'fixture-attempt',...extra,auditoria:{nota_real:999,strikes:999,origen_integridad:'servidor',...audit}}};const res={status(value){status=value;return res},json(value){payload=value;return res}};await submitPruebaEstudiante(req,res);return {status,payload};}
+let result=await submit('manual',1);assert.equal(result.status,200);assert.equal(result.payload.data.estado,'enviado');assert(!('strikes' in result.payload.data.auditoria));assert(!('origen_integridad' in result.payload.data.auditoria));
 result=await submit('manual',1,{q:{respuesta:'Changed'}});assert.equal(result.status,200);assert.equal(result.payload.data.respuestas.q.respuesta,'Original');
 const simultaneous=await Promise.all([submit('race',1,{q:{respuesta:'First'}}),submit('race',1,{q:{respuesta:'Second'}})]);assert(simultaneous.every(item=>item.status===200));assert.equal(rows.filter(row=>row.numero_cuenta==='race').length,1);assert.equal(simultaneous[0].payload.data.respuestas.q.respuesta,simultaneous[1].payload.data.respuestas.q.respuesta);
 result=await submit('auto',2,{q:{a:'Verdadero'}});assert.equal(result.payload.data.nota_obtenida,1);assert.equal(result.payload.data.auditoria.nota_real,1);
 live={estado:'lobby',alumnos_conectados:{early:{}}};assert.equal((await submit('early',1)).status,409);assert(!rows.some(row=>row.numero_cuenta==='early'));
 live.habilitada=true;
 assert.equal((await submit('early-normal',1)).status,409);
-for (const reason of ['entrega_anticipada_por_salida','expulsion_infracciones']) {
+for (const reason of ['entrega_anticipada_por_salida']) {
   const account=`lobby-${reason}`;
   const first=await submit(account,1,{}, {motivo_finalizacion:reason});
   assert.equal(first.status,200);assert.deepEqual(first.payload.data.respuestas,{});
   const retry=await submit(account,1,{q:{respuesta:'Changed'}},{motivo_finalizacion:reason});
   assert.equal(retry.status,200);assert.deepEqual(retry.payload.data.respuestas,{});
 }
+assert.equal((await submit('legacy-expulsion',1,{}, {motivo_finalizacion:'expulsion_infracciones'})).status,409);
 live.habilitada=false;
 assert.equal((await submit('lobby-disabled',1,{}, {motivo_finalizacion:'expulsion_infracciones'})).status,409);
 quizzes[0].publicada=false;live={estado:'en_pregunta'};assert.equal((await submit('draft',1)).status,403);
@@ -98,3 +107,16 @@ await module.exports.deleteEntregaEstudiante(deleteRequest, reply);
 assert.equal(reply.code, 200);
 assert.ok(!rows.includes(toDelete));
 console.log("PASS reintento con identidad docente verificada y eliminación sin confirmación falsa.");
+
+// La tercera falta se confirma con el registro del servidor, incluso desde el lobby.
+live={estado:'lobby',habilitada:true};quizzes[0].publicada=true;
+const uuid=n=>`00000000-0000-4000-8000-${String(n).padStart(12,'0')}`;
+const departure=(n,ep,tipo='salida')=>({id:uuid(n),episodio_id:uuid(ep),tipo,hora_cliente:new Date().toISOString(),senales:tipo==='salida'?['pagina_oculta']:[],pregunta_indice:0});
+const journal=[departure(101,201),departure(102,201,'regreso'),departure(103,202),departure(104,202,'regreso'),departure(105,203)];
+result=await submit('third',1,{q:{respuesta:'Exactamente esta respuesta'}},{motivo_finalizacion:'entrega_alumno'},{actividad_eventos_pendientes:journal});
+assert.equal(result.status,200);assert.equal(result.payload.data.respuestas.q.respuesta,'Exactamente esta respuesta');
+assert.equal(result.payload.data.auditoria.motivo_finalizacion,'limite_tres_faltas');assert.equal(result.payload.data.auditoria.actividad.faltas,3);assert.equal(result.payload.data.auditoria.actividad.eventos.length,5);
+result=await submit('third',1,{q:{respuesta:'No reemplazar'}});assert.equal(result.payload.data.respuestas.q.respuesta,'Exactamente esta respuesta');
+assert.equal((await submit('missing-acceptance',1,{}, {},{actividad_intento_id:undefined})).status,428);
+live={estado:'en_pregunta'};failActivity=true;assert.equal((await submit('journal-failure',1)).status,500);assert(!rows.some(row=>row.numero_cuenta==='journal-failure'));
+console.log('PASS: tercera falta en lobby envía respuestas exactas, conserva bitácora, rechaza ausencia de aceptación y no confirma éxito si falla el registro.');
