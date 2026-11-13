@@ -57,6 +57,7 @@ assert.equal(returns.length, 0, 'Returning does not acknowledge an open warning'
 blur(); focus(); fullscreen(false); fullscreen(true);
 assert.equal(departures.length, 1, 'An open warning cannot accumulate strikes');
 assert.equal(dispose.resume(), true); assert.equal(returns.length, 1);
+await new Promise(resolve => setTimeout(resolve, 0));
 hidden(); assert.equal(departures.length, 2, 'Immediate warning, without waiting for return');
 clock += 4000; visible(); assert.equal(dispose.canRespond(), false); assert.equal(dispose.resume(), true); assert.deepEqual(returns, [1, 4]);
 for (const type of ['resize', 'touchstart', 'touchcancel', 'orientationchange', 'keydown']) win.emit(type, {});
@@ -92,6 +93,8 @@ assert([...doc.listeners.values(), ...win.listeners.values()].every(list => list
   assert.equal(recoveryWarnings, 1, 'Fullscreen recovery transition events do not create another incident');
   assert.equal(recovery.resume(), true);
   assert.equal(recovery.canRespond(), true);
+  recoveryDoc.focused = false; recoveryWin.emit('blur'); recoveryDoc.hidden = true; recoveryDoc.emit('visibilitychange');
+  assert.equal(recoveryWarnings, 1, 'Trailing recovery events do not create a second incident');
   recovery();
 }
 

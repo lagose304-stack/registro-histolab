@@ -45,12 +45,15 @@ export function observeQuizIntegrity({ document: doc, window: win, isActive, isS
     }
   });
   let recoveryPending = false;
+  let recoverySettling = false;
+  let recoverySettlingTimer = null;
+  const suppressRecoveryEvent = () => recoveryPending || recoverySettling;
   const visibility = () => {
     focused = doc.hasFocus?.() ?? focused;
-    if (recoveryPending) return;
+    if (suppressRecoveryEvent()) return;
     session.signal('salida_de_pantalla');
   };
-  const blur = () => { focused = false; if (!recoveryPending) session.signal('perdida_de_foco'); };
+  const blur = () => { focused = false; if (!suppressRecoveryEvent()) session.signal('perdida_de_foco'); };
   const focus = () => { focused = true; }; // Never dismiss a warning implicitly.
   const fullscreenChange = () => {
     const current = hasQuizFullscreen(doc);
@@ -85,12 +88,20 @@ export function observeQuizIntegrity({ document: doc, window: win, isActive, isS
     focused = true;
     const result = session.resume();
     recoveryPending = false;
+    // Some browsers dispatch a final blur/visibility event just after the
+    // fullscreen promise resolves. It belongs to the recovery gesture, not
+    // to a new departure, so keep that gesture suppressed through one turn.
+    if (result) {
+      recoverySettling = true;
+      recoverySettlingTimer = setTimeout(() => { recoverySettling = false; recoverySettlingTimer = null; }, 0);
+    }
     return result;
   };
   const beginRecovery = () => { if (!disposed && enabled()) recoveryPending = true; };
   const cancelRecovery = () => { recoveryPending = false; };
   const dispose = () => {
     disposed = true;
+    if (recoverySettlingTimer !== null) clearTimeout(recoverySettlingTimer);
     listeners.forEach(([target, event, handler]) => target.removeEventListener(event, handler, true));
     session.dispose();
   };
