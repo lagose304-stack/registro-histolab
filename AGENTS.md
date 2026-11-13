@@ -23,7 +23,6 @@ Para cambios de permisos, revisa las condiciones de la vista, `client/src/utils/
 - `npm run dev` inicia Vite en el puerto 43173 y Express en el 43174. Usa `npm run dev:client` o `npm run dev:server` para iniciar cada parte por separado.
 - `npm run build` compila el cliente. `npm run start` inicia Express. `npm run deploy` compila y publica en Cloudflare.
 - `node server/scripts/test_academic_integrity.js` comprueba reglas de calificación y sanitización. Los otros scripts de `server/scripts` escriben datos mediante la API. Revísalos antes de ejecutarlos y usa datos aislados.
-- Cuando el usuario pida “actualizar los cambios”, se debe hacer `git add`, crear un commit y `git push` a GitHub, salvo que indique expresamente otro destino. La actualización debe ir acompañada de la ejecución de GitHub Actions; verifica su estado cuando esté disponible.
 
 Consulta el esquema y las migraciones pertinentes antes de cambiar formatos persistidos. Comprueba si el controlador usa Supabase o almacenamiento local y preserva la lectura de los datos existentes. Mantén fuera de la documentación las credenciales y los datos personales.
 
