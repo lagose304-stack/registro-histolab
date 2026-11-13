@@ -1,15 +1,13 @@
-name: Deploy HistoLab
+name: Validate and Deploy HistoLab
 
 on:
   push:
-    branches:
-      - main
   workflow_dispatch:
 
 jobs:
-  deploy:
+  validate:
     runs-on: ubuntu-latest
-    name: Build and Deploy
+    name: Validate
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -24,6 +22,23 @@ jobs:
 
       - name: Build client
         run: npm run build
+
+  deploy:
+    needs: validate
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    name: Deploy
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm install
 
       - name: Deploy HistoLab
         run: npm run deploy
