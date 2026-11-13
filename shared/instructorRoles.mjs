@@ -14,3 +14,8 @@ export function hasAdministrationAccess(role) {
   const normalized = normalizeInstructorRole(role);
   return normalized === "Creador" || normalized === "Coordinador";
 }
+
+// Administrative access and section ownership do not grant this exception.
+export function canBypassQuizSchedule(role) {
+  return normalizeInstructorRole(role) === "Creador";
+}

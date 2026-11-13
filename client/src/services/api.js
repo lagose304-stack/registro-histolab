@@ -800,6 +800,15 @@ export const api = {
         body: JSON.stringify(payload)
       });
       return await handleResponse(res);
+    },
+
+    async cancelForIntegrity(seccionId, payload) {
+      const res = await fetch(`${API_BASE}/pruebas/seccion/${seccionId}/anular`, {
+        method: "POST",
+        headers: getAuthHeaders(),
+        body: JSON.stringify(payload)
+      });
+      return await handleResponse(res);
     }
   }
 };

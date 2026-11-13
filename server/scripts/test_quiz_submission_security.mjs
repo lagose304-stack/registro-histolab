@@ -22,12 +22,23 @@ const database={rpc(name,args){
 const compiled=await build({entryPoints:[fileURLToPath(new URL('../src/controllers/pruebas.controller.js',import.meta.url))],platform:'node',format:'cjs',bundle:true,write:false,logLevel:'silent',plugins:[{name:'isolation',setup(b){b.onResolve({filter:/db\/supabase\.js$/},()=>({path:'db',namespace:'isolate'}));b.onResolve({filter:/estudiantes\.controller\.js$/},()=>({path:'grades',namespace:'isolate'}));b.onResolve({filter:/liveQuiz\.controller\.js$/},()=>({path:'live',namespace:'isolate'}));b.onResolve({filter:/^node:fs$/},()=>({path:'fs',namespace:'isolate'}));b.onLoad({filter:/.*/,namespace:'isolate'},args=>({contents:args.path==='db'?'export const isSupabaseConfigured=true,supabase=globalThis.database;':args.path==='grades'?'export const updateEstudianteGradeDirect=async(...args)=>globalThis.recordGrade(args);':args.path==='live'?'export const getLiveQuizEvidence=async()=>globalThis.getLive();':'export default {existsSync:()=>false,mkdirSync(){},writeFileSync(){}};',loader:'js'}))}}]});
 const module={exports:{}};vm.runInNewContext(compiled.outputFiles[0].text,{module,exports:module.exports,require,console,database,gradeUpdates,recordGrade:args=>{if(failGradeWrite)throw Error("GRADE_WRITE_FAILED");gradeUpdates.push(args);},getLive:()=>live,process:{cwd:()=>path.resolve('server')}});
 const {submitPruebaEstudiante}=module.exports;
-async function submit(account,week,answers={q:{respuesta:'Original'}}){let status=200,payload;const req={params:{seccion_id:'s'},student:{numero_cuenta:account},body:{numero_cuenta:account,numero_semana:week,respuestas:answers,auditoria:{nota_real:999,strikes:999,origen_integridad:'servidor'}}};const res={status(value){status=value;return res},json(value){payload=value;return res}};await submitPruebaEstudiante(req,res);return {status,payload};}
+async function submit(account,week,answers={q:{respuesta:'Original'}},audit={}){let status=200,payload;const req={params:{seccion_id:'s'},student:{numero_cuenta:account},body:{numero_cuenta:account,numero_semana:week,respuestas:answers,auditoria:{nota_real:999,strikes:999,origen_integridad:'servidor',...audit}}};const res={status(value){status=value;return res},json(value){payload=value;return res}};await submitPruebaEstudiante(req,res);return {status,payload};}
 let result=await submit('manual',1);assert.equal(result.status,200);assert.equal(result.payload.data.estado,'enviado');assert.equal(result.payload.data.auditoria.strikes,3);assert.equal(result.payload.data.auditoria.origen_integridad,'declarado_por_cliente_no_prueba_de_fraude');
 result=await submit('manual',1,{q:{respuesta:'Changed'}});assert.equal(result.status,200);assert.equal(result.payload.data.respuestas.q.respuesta,'Original');
 const simultaneous=await Promise.all([submit('race',1,{q:{respuesta:'First'}}),submit('race',1,{q:{respuesta:'Second'}})]);assert(simultaneous.every(item=>item.status===200));assert.equal(rows.filter(row=>row.numero_cuenta==='race').length,1);assert.equal(simultaneous[0].payload.data.respuestas.q.respuesta,simultaneous[1].payload.data.respuestas.q.respuesta);
 result=await submit('auto',2,{q:{a:'Verdadero'}});assert.equal(result.payload.data.nota_obtenida,1);assert.equal(result.payload.data.auditoria.nota_real,1);
 live={estado:'lobby',alumnos_conectados:{early:{}}};assert.equal((await submit('early',1)).status,409);assert(!rows.some(row=>row.numero_cuenta==='early'));
+live.habilitada=true;
+assert.equal((await submit('early-normal',1)).status,409);
+for (const reason of ['entrega_anticipada_por_salida','expulsion_infracciones']) {
+  const account=`lobby-${reason}`;
+  const first=await submit(account,1,{}, {motivo_finalizacion:reason});
+  assert.equal(first.status,200);assert.deepEqual(first.payload.data.respuestas,{});
+  const retry=await submit(account,1,{q:{respuesta:'Changed'}},{motivo_finalizacion:reason});
+  assert.equal(retry.status,200);assert.deepEqual(retry.payload.data.respuestas,{});
+}
+live.habilitada=false;
+assert.equal((await submit('lobby-disabled',1,{}, {motivo_finalizacion:'expulsion_infracciones'})).status,409);
 quizzes[0].publicada=false;live={estado:'en_pregunta'};assert.equal((await submit('draft',1)).status,403);
 console.log('PASS: entrega manual reintentable e inmutable, carrera concurrente, nota calculada en servidor y rechazo de borradores/entregas antes de iniciar.');
 

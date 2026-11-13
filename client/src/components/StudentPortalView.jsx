@@ -1,4 +1,7 @@
 import { observeQuizIntegrity } from "../utils/quizIntegrity.mjs";
+import { canQuizFullscreen, enterQuizFullscreen, hasQuizFullscreen } from "../utils/quizFullscreen.mjs";
+import { guardQuizNavigation } from "../utils/quizNavigation.mjs";
+import QuizFullscreenGate from "./QuizFullscreenGate";
 import StudentQuizPlayer from "./StudentQuizPlayer";
 import StudentQuizzesView from "./StudentQuizzesView";
 import StudentAccountView from "./StudentAccountView";
@@ -102,7 +105,7 @@ const CARRERA_THEMES = {
   }
 };
 
-export default function StudentPortalView({ student, notify = () => {} }) {
+export default function StudentPortalView({ student, notify = () => {}, onExitGuardChange }) {
   const cuentaKey = student?.numero_cuenta || "";
 
   // Recuperar sesión activa de evaluación persistida si hubo recarga
@@ -198,7 +201,11 @@ export default function StudentPortalView({ student, notify = () => {} }) {
   const [strikesCount, setStrikesCount] = useState(0);
   const [incidentsList, setIncidentsList] = useState([]);
   const [violationModal, setViolationModal] = useState(null); // { strike, isFinal, mensaje, segundosFuera }
-  const [isFullscreenActive, setIsFullscreenActive] = useState(false);
+  const [securityCountdown, setSecurityCountdown] = useState(null); // { deadline, type }
+  const [isFullscreenActive, setIsFullscreenActive] = useState(() => hasQuizFullscreen(document));
+  const [requiresFullscreen, setRequiresFullscreen] = useState(() => canQuizFullscreen(document));
+  const [fullscreenError, setFullscreenError] = useState("");
+  const quizStartingRef = useRef(false);
   const [isOnline, setIsOnline] = useState(typeof navigator !== "undefined" ? navigator.onLine : true);
   const [isExamSealedOffline, setIsExamSealedOffline] = useState(false);
   const [pendingSubmissionPayload, setPendingSubmissionPayload] = useState(null);
@@ -207,63 +214,19 @@ export default function StudentPortalView({ student, notify = () => {} }) {
   const [confirmExitModalOpen, setConfirmExitModalOpen] = useState(false);
   const [activeLiveBannerSession, setActiveLiveBannerSession] = useState(null);
   const [answeredQuestionsMap, setAnsweredQuestionsMap] = useState({});
-  const [isScreenBlackedOut, setIsScreenBlackedOut] = useState(false);
 
   const quizStartTimeRef = React.useRef(null);
   const quizEndTimeRef = React.useRef(null);
   const lastTickTimeRef = React.useRef(Date.now());
   const reloadAuditLoggedRef = React.useRef(false);
-  const outStartTimeRef = React.useRef(null);
   const totalTimeOutRef = React.useRef(0);
   const strikesCountRef = React.useRef(0);
   const incidentsListRef = React.useRef([]);
   const autoSubmitTriggeredRef = React.useRef(false);
   const isConfirmingRef = React.useRef(false);
   const isSubmittingRef = React.useRef(false);
-  const blackoutTimeoutRef = React.useRef(null);
-  const lastAlertTimestampRef = React.useRef(0);
-  const isFromTopBorderRef = React.useRef(false);
-  const violationModalRef = React.useRef(null);
   const pasteCountRef = React.useRef(0);
-
-  useEffect(() => {
-    violationModalRef.current = violationModal;
-  }, [violationModal]);
-
-  // Desactivación segura e inmediata del apagón de pantalla (con resguardo total anti-bloqueo)
-  const deactivateDrmBlackout = useCallback(() => {
-    if (blackoutTimeoutRef.current) {
-      clearTimeout(blackoutTimeoutRef.current);
-      blackoutTimeoutRef.current = null;
-    }
-    setIsScreenBlackedOut(false);
-    if (typeof document !== "undefined") {
-      if (document.body) {
-        document.body.classList.remove("anticheat-blackout-on");
-      }
-      const rawCurtain = document.getElementById("anti-cheat-blackout-curtain");
-      if (rawCurtain) rawCurtain.style.display = "none";
-    }
-  }, []);
-
-  // Activación con Watchdog de seguridad (la pantalla NUNCA se queda pegada en negro)
-  const activateDrmBlackout = useCallback((autoDismissMs = 1800) => {
-    setIsScreenBlackedOut(true);
-    if (typeof document !== "undefined") {
-      if (document.body) {
-        document.body.classList.add("anticheat-blackout-on");
-      }
-      const rawCurtain = document.getElementById("anti-cheat-blackout-curtain");
-      if (rawCurtain) rawCurtain.style.display = "flex";
-    }
-    // Watchdog automático que garantiza reactivación en máximo 1.8 segundos
-    if (blackoutTimeoutRef.current) {
-      clearTimeout(blackoutTimeoutRef.current);
-    }
-    blackoutTimeoutRef.current = setTimeout(() => {
-      deactivateDrmBlackout();
-    }, autoDismissMs);
-  }, [deactivateDrmBlackout]);
+  const integrityControllerRef = useRef(null);
 
   // Sincronizar si cambia el prop student desde el padre (aislamiento estricto por cuenta)
   useEffect(() => {
@@ -491,15 +454,16 @@ export default function StudentPortalView({ student, notify = () => {} }) {
   }, [onlineQuizzes, liveSessionsMap, existingSubmissions, quizLoadError, loadingQuizzes]);
 
   // Solicitar pantalla completa en dispositivo
-  const requestQuizFullscreen = () => {
-    try {
-      if (document.documentElement.requestFullscreen) {
-        document.documentElement.requestFullscreen().catch(() => {});
-      } else if (document.documentElement.webkitRequestFullscreen) {
-        document.documentElement.webkitRequestFullscreen().catch(() => {});
-      }
-      setIsFullscreenActive(true);
-    } catch (_) {}
+  const requestQuizFullscreen = async () => {
+    setFullscreenError("");
+    const entered = await enterQuizFullscreen(document);
+    setIsFullscreenActive(entered);
+    if (!entered) {
+      const message = "No se pudo activar la pantalla completa. Usa un navegador compatible y permite la solicitud para realizar la prueba.";
+      setFullscreenError(message);
+      notify(message, "warning");
+    }
+    return entered;
   };
 
   // Claves para persistencia y contingencia de evaluaciones
@@ -515,6 +479,14 @@ export default function StudentPortalView({ student, notify = () => {} }) {
     (sem) => {
       const cKey = cuentaKey || "estudiante";
       return `histolab_sealed_quiz_${cKey}_sem_${sem}`;
+    },
+    [cuentaKey]
+  );
+
+  const getCancelledAttemptStorageKey = useCallback(
+    (sem) => {
+      const cKey = cuentaKey || "estudiante";
+      return `histolab_cancelled_quiz_${cKey}_sem_${sem}`;
     },
     [cuentaKey]
   );
@@ -561,11 +533,22 @@ export default function StudentPortalView({ student, notify = () => {} }) {
   );
 
   // Iniciar la realización de una prueba semanal en vivo
-  const handleStartQuiz = (quiz, liveSess = null) => {
+  const handleStartQuiz = async (quiz, liveSess = null) => {
+    if (quizStartingRef.current || activeQuizToTake || existingSubmissions[quiz.numero_semana]) return;
+    if (safeStorage.getItem(getCancelledAttemptStorageKey(quiz.numero_semana))) {
+      notify("Esta prueba fue anulada por seguridad y no puede reiniciarse.", "error");
+      return;
+    }
     if (quiz.falta_injustificada) {
       window.alert(quiz.mensaje_asistencia);
       return;
     }
+    const requireFullscreen = canQuizFullscreen(document);
+    setRequiresFullscreen(requireFullscreen);
+    quizStartingRef.current = true;
+    const entered = requireFullscreen ? await requestQuizFullscreen() : true;
+    quizStartingRef.current = false;
+    if (!entered) return;
     // 1. Las preguntas se mantienen en orden secuencial estricto para sincronización global
     const originalQuestions = quiz.preguntas || [];
     setShuffledQuestions(originalQuestions);
@@ -625,7 +608,6 @@ export default function StudentPortalView({ student, notify = () => {} }) {
     strikesCountRef.current = 0;
     incidentsListRef.current = [];
     totalTimeOutRef.current = 0;
-    outStartTimeRef.current = null;
     autoSubmitTriggeredRef.current = false;
     reloadAuditLoggedRef.current = false;
 
@@ -643,8 +625,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
       );
     } catch (_) {}
 
-    // 5. Bloquear pantalla completa
-    requestQuizFullscreen();
+    // La pantalla completa se verificó antes de crear el intento.
   };
 
   // Procesar éxito de entrega de prueba
@@ -686,7 +667,6 @@ export default function StudentPortalView({ student, notify = () => {} }) {
         quiz: targetQuiz || { numero_semana: quizSem, titulo: `Semana ${quizSem}` },
         submission: finalData
       });
-      deactivateDrmBlackout();
       setActiveQuizToTake(null);
       setQuizAnswers({});
       setViolationModal(null);
@@ -694,7 +674,6 @@ export default function StudentPortalView({ student, notify = () => {} }) {
       setConfirmExitModalOpen(false);
       isConfirmingRef.current = false;
       isSubmittingRef.current = false;
-      outStartTimeRef.current = null;
       setIsExamSealedOffline(false);
       setPendingSubmissionPayload(null);
       loadStudentQuizzes();
@@ -704,7 +683,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
         else if (document.webkitExitFullscreen) document.webkitExitFullscreen().catch(() => {});
       } catch (_) {}
     },
-    [activeQuizToTake, clearActiveAttemptFromDisk, getPendingSubmissionStorageKey, loadStudentQuizzes, notify, deactivateDrmBlackout]
+    [activeQuizToTake, clearActiveAttemptFromDisk, getPendingSubmissionStorageKey, loadStudentQuizzes, notify]
   );
 
   // Estadísticas de preguntas respondidas para el diálogo de confirmación de entrega
@@ -750,21 +729,14 @@ export default function StudentPortalView({ student, notify = () => {} }) {
 
   // Ejecución del envío de la prueba semanal al servidor (sellado e inmutabilidad)
   const executeSubmitQuiz = async (forcedReason = null) => {
-    if (!activeQuizToTake || submittingQuiz) return;
-    let secId = effectiveStudent?.seccion_id || effectiveStudent?.seccion?.id;
-    if (!secId) {
-      secId = await resolveStudentSectionId();
-    }
-    if (!secId) {
-      notify("No se pudo identificar la sección del estudiante para registrar la entrega.", "error");
-      isSubmittingRef.current = false;
-      return;
-    }
-
+    if (!activeQuizToTake || isSubmittingRef.current || isExamSealedOffline) return;
+    // Lock synchronously before any await; fullscreen/focus events can arrive
+    // together and must never produce duplicate submissions or editable answers.
     isSubmittingRef.current = true;
-    isConfirmingRef.current = false;
-    outStartTimeRef.current = null;
+    autoSubmitTriggeredRef.current = true;
     setSubmittingQuiz(true);
+    let secId = effectiveStudent?.seccion_id || effectiveStudent?.seccion?.id;
+    isConfirmingRef.current = false;
 
     const now = Date.now();
     const startTime = quizStartTimeRef.current || now;
@@ -781,7 +753,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
       incidentes: incidentsListRef.current,
       pantalla_completa_solicitada: true,
       conexion_al_enviar: navigator.onLine ? "online" : "offline",
-      politica_integridad: "visibilidad-v2",
+      politica_integridad: "integridad-estados-v4",
       intentos_pegar_texto: pasteCountRef.current || 0,
 
     };
@@ -797,6 +769,8 @@ export default function StudentPortalView({ student, notify = () => {} }) {
     };
 
     try {
+      if (!secId) secId = await resolveStudentSectionId();
+      if (!secId) throw new Error("No se pudo identificar la sección del estudiante para registrar la entrega.");
       if (!navigator.onLine) {
         throw new Error("Conexión offline en dispositivo");
       }
@@ -834,7 +808,6 @@ export default function StudentPortalView({ student, notify = () => {} }) {
       executeSubmitQuiz(forcedReason);
     } else {
       isConfirmingRef.current = true;
-      outStartTimeRef.current = null;
       setConfirmSubmitModalOpen(true);
     }
   };
@@ -1047,28 +1020,86 @@ export default function StudentPortalView({ student, notify = () => {} }) {
   }, [activeQuizToTake, isExamSealedOffline]);
 
 
+  const cancelQuizForIntegrity = useCallback(async () => {
+    const quiz = activeQuizToTake;
+    if (!quiz || autoSubmitTriggeredRef.current || isSubmittingRef.current) return;
+    // This is not a delivery: no answers are included in the request or stored
+    // in the cancellation record. Lock locally before waiting for the network.
+    autoSubmitTriggeredRef.current = true;
+    isSubmittingRef.current = true;
+    const audit = {
+      strikes: strikesCountRef.current,
+      total_salidas: incidentsListRef.current.length,
+      tiempo_fuera_segundos: totalTimeOutRef.current,
+      motivo_finalizacion: "anulada_por_salida",
+      incidentes: incidentsListRef.current,
+      politica_integridad: "integridad-estados-v5",
+      hora_fin: new Date().toISOString()
+    };
+    clearActiveAttemptFromDisk(quiz.numero_semana);
+    try {
+      safeStorage.setItem(getCancelledAttemptStorageKey(quiz.numero_semana), JSON.stringify({ auditoria: audit, cancelledAt: Date.now() }));
+    } catch (_) {}
+    setQuizAnswers({});
+    setActiveQuizToTake(null);
+    setViolationModal(null);
+    setConfirmExitModalOpen(false);
+    setConfirmSubmitModalOpen(false);
+    setSecurityCountdown(null);
+    isConfirmingRef.current = false;
+    try {
+      let secId = effectiveStudent?.seccion_id || effectiveStudent?.seccion?.id;
+      if (!secId) secId = await resolveStudentSectionId();
+      if (!secId) throw new Error("No se pudo identificar la sección");
+      const result = await api.pruebas.cancelForIntegrity(secId, {
+        quiz_id: quiz.id, numero_semana: quiz.numero_semana, numero_cuenta: cuentaKey,
+        nombre_completo: effectiveStudent?.nombre_completo, carrera: carreraKey, auditoria: audit
+      });
+      if (!result?.success) throw new Error(result?.message || "No se pudo registrar la anulación");
+      setExistingSubmissions(previous => ({ ...previous, [quiz.numero_semana]: result.data }));
+      notify("La prueba fue anulada por no regresar a tiempo. Tus respuestas no fueron enviadas.", "error");
+    } catch (error) {
+      console.warn("Aviso al registrar anulación de seguridad:", error.message);
+      notify("La prueba fue anulada y las respuestas fueron descartadas. No se pudo sincronizar la anulación en este momento.", "error");
+    } finally {
+      isSubmittingRef.current = false;
+    }
+  }, [activeQuizToTake, clearActiveAttemptFromDisk, getCancelledAttemptStorageKey, cuentaKey, effectiveStudent, carreraKey, resolveStudentSectionId, notify]);
+
   // A departure is an observed policy event, not proof of cheating.
   const submitQuizRef = useRef(handleSubmitQuiz);
   submitQuizRef.current = handleSubmitQuiz;
   const registerViolation = (tipo, detalle, segundosFuera = 0) => {
-    if (!activeQuizToTake || autoSubmitTriggeredRef.current || isExamSealedOffline || isSubmittingRef.current || isConfirmingRef.current) return;
+    if (!activeQuizToTake || autoSubmitTriggeredRef.current || isExamSealedOffline || isSubmittingRef.current) return;
     const nextStrike = Math.min(3, strikesCountRef.current + 1);
+    setConfirmExitModalOpen(false);
+    setConfirmSubmitModalOpen(false);
     strikesCountRef.current = nextStrike;
     totalTimeOutRef.current += segundosFuera;
     setStrikesCount(nextStrike);
-    const incident = { tipo, detalle, strike: nextStrike, segundosFuera, hora: new Date().toISOString(), origen: "cliente", politica: "visibilidad-v2" };
+    const incident = { tipo, detalle, strike: nextStrike, segundosFuera, hora: new Date().toISOString(), origen: "cliente", politica: "integridad-estados-v4" };
     incidentsListRef.current = [...incidentsListRef.current.slice(-99), incident];
     setIncidentsList(incidentsListRef.current);
     saveActiveAttemptToDisk(activeQuizToTake, shuffledQuestions, quizAnswersRef.current, quizStartTimeRef.current, quizEndTimeRef.current, nextStrike, incidentsListRef.current, totalTimeOutRef.current);
-    deactivateDrmBlackout();
-    if (nextStrike >= 3) {
-      autoSubmitTriggeredRef.current = true;
-      setViolationModal({ strike: 3, isFinal: true, mensaje: "Se registraron tres salidas prolongadas de la evaluación durante preguntas activas. La prueba se cerrará según las normas y las incidencias quedarán disponibles para revisión del instructor. Esto no determina por sí solo que hubo trampa." });
-      submitQuizRef.current({ motivo: "expulsion_infracciones" });
-    } else {
-      setViolationModal({ strike: nextStrike, isFinal: false, segundosFuera, mensaje: `La evaluación dejó de estar visible durante ${segundosFuera} segundos. Advertencia ${nextStrike} de 3. Mantén esta pantalla abierta; la tercera salida prolongada cierra y envía la prueba para revisión del instructor.` });
-    }
+    const deadline = Date.now() + 10_000;
+    setSecurityCountdown({ deadline, type: tipo });
+    setViolationModal({ strike: nextStrike, isFinal: false, segundosFuera, secondsLeft: 10, mensaje: `${detalle} Regresa a pantalla completa antes de que termine la cuenta regresiva o la prueba será anulada sin enviar respuestas.` });
   };
+
+  useEffect(() => {
+    if (!securityCountdown || !activeQuizToTake) return;
+    const updateCountdown = () => {
+      const secondsLeft = Math.max(0, Math.ceil((securityCountdown.deadline - Date.now()) / 1000));
+      setViolationModal(previous => previous ? { ...previous, secondsLeft } : previous);
+      if (secondsLeft === 0) {
+        setSecurityCountdown(null);
+        cancelQuizForIntegrity();
+      }
+    };
+    updateCountdown();
+    const interval = setInterval(updateCountdown, 200);
+    return () => clearInterval(interval);
+  }, [securityCountdown, activeQuizToTake, cancelQuizForIntegrity]);
 
   const confirmedAnswersRef = useRef(answeredQuestionsMap);
   confirmedAnswersRef.current = answeredQuestionsMap;
@@ -1236,9 +1267,25 @@ export default function StudentPortalView({ student, notify = () => {} }) {
 
   const integrityCallbacksRef = useRef({});
   integrityCallbacksRef.current = {
-    isActive: () => Boolean(activeQuizToTake && !isExamSealedOffline && !autoSubmitTriggeredRef.current && activeLiveStateRef.current?.estado === "en_pregunta"),
-    isSuppressed: () => isSubmittingRef.current || isConfirmingRef.current || Boolean(violationModalRef.current),
-    onDeparture: seconds => registerViolation("salida_de_pantalla", "La evaluación dejó de estar visible durante una pregunta activa.", seconds),
+    isActive: () => Boolean(activeQuizToTake && !isExamSealedOffline && !autoSubmitTriggeredRef.current),
+    isSuppressed: () => isSubmittingRef.current,
+    onDeparture: (seconds, type) => {
+      const details = {
+        salida_de_pantalla: "La evaluación dejó de estar visible al cambiar de pestaña o aplicación.",
+        perdida_de_foco: "La ventana de la evaluación perdió el foco.",
+        salida_pantalla_completa: "Saliste del modo de pantalla completa obligatorio."
+      };
+      registerViolation(type, details[type], seconds);
+    },
+    onReturn: seconds => {
+      if (!activeQuizToTake || isExamSealedOffline || autoSubmitTriggeredRef.current || !seconds) return;
+      totalTimeOutRef.current += seconds;
+      let index = incidentsListRef.current.length - 1;
+      while (index >= 0 && !(incidentsListRef.current[index].strike === strikesCountRef.current && ["salida_de_pantalla", "perdida_de_foco", "salida_pantalla_completa"].includes(incidentsListRef.current[index].tipo))) index--;
+      incidentsListRef.current = incidentsListRef.current.map((incident, position) => position === index ? { ...incident, segundosFuera: seconds } : incident);
+      setIncidentsList(incidentsListRef.current);
+      saveActiveAttemptToDisk(activeQuizToTake, shuffledQuestions, quizAnswersRef.current, quizStartTimeRef.current, quizEndTimeRef.current, strikesCountRef.current, incidentsListRef.current, totalTimeOutRef.current);
+    },
     onBlocked: type => {
       if (type === "pegar_texto") pasteCountRef.current += 1;
       const incident = { tipo: type, detalle: "Acción bloqueada dentro de la evaluación; no implica una infracción confirmada.", strike: strikesCountRef.current, segundosFuera: 0, hora: new Date().toISOString(), origen: "cliente" };
@@ -1250,17 +1297,54 @@ export default function StudentPortalView({ student, notify = () => {} }) {
   };
   useEffect(() => {
     if (!activeQuizToTake || isExamSealedOffline) return;
-    return observeQuizIntegrity({
+    const controller = observeQuizIntegrity({
       document, window,
       isActive: () => integrityCallbacksRef.current.isActive(),
       isSuppressed: () => integrityCallbacksRef.current.isSuppressed(),
-      onHidden: () => activateDrmBlackout(),
-      onVisible: deactivateDrmBlackout,
-      onDeparture: seconds => integrityCallbacksRef.current.onDeparture(seconds),
+      onDeparture: (seconds, type) => integrityCallbacksRef.current.onDeparture(seconds, type),
+      onReturn: seconds => integrityCallbacksRef.current.onReturn(seconds),
       onBlocked: type => integrityCallbacksRef.current.onBlocked(type),
-      onFullscreen: current => setIsFullscreenActive(current)
+      requireFullscreen: requiresFullscreen,
+      onFullscreen: current => {
+        setIsFullscreenActive(current);
+        // The integrity observer records the departure and shows its warning.
+        // Only an explicit exit request opens the submission confirmation.
+      }
     });
-  }, [activeQuizToTake, isExamSealedOffline, activateDrmBlackout, deactivateDrmBlackout]);
+    integrityControllerRef.current = controller;
+    return () => { controller(); integrityControllerRef.current = null; };
+  }, [activeQuizToTake, isExamSealedOffline, requiresFullscreen]);
+
+  const requestQuizExit = () => {
+    if (!activeQuizToTake || autoSubmitTriggeredRef.current || isExamSealedOffline || isSubmittingRef.current) return;
+    isConfirmingRef.current = true;
+    setConfirmSubmitModalOpen(false);
+    setConfirmExitModalOpen(true);
+  };
+  const quizExitRef = useRef(requestQuizExit);
+  quizExitRef.current = requestQuizExit;
+  useEffect(() => {
+    onExitGuardChange?.(activeQuizToTake && !isExamSealedOffline ? () => quizExitRef.current() : null);
+    return () => onExitGuardChange?.(null);
+  }, [activeQuizToTake, isExamSealedOffline, onExitGuardChange]);
+  useEffect(() => {
+    if (!activeQuizToTake || isExamSealedOffline) return;
+    return guardQuizNavigation({ window, onBack: () => quizExitRef.current() });
+  }, [activeQuizToTake, isExamSealedOffline]);
+
+  const resumeQuizFullscreen = async () => {
+    if (requiresFullscreen && !(await requestQuizFullscreen())) return;
+    if (autoSubmitTriggeredRef.current || isSubmittingRef.current || isExamSealedOffline) return;
+    if (!integrityControllerRef.current?.resume()) {
+      setFullscreenError("Vuelve a la ventana de la prueba para continuar.");
+      return;
+    }
+    setConfirmExitModalOpen(false);
+    setConfirmSubmitModalOpen(false);
+    setViolationModal(null);
+    setSecurityCountdown(null);
+    isConfirmingRef.current = false;
+  };
 
   // G. Auto-desplazamiento inteligente para cuando el teclado virtual de celular se abre
   useEffect(() => {
@@ -1293,7 +1377,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
 
   // Manejar cambio en casilla de respuesta con auto-guardado persistente
   const handleAnswerChange = (preguntaId, itemId, indexOrText, textIfList = null) => {
-    if (isExamSealedOffline) return;
+    if (isExamSealedOffline || autoSubmitTriggeredRef.current || isSubmittingRef.current || !integrityControllerRef.current?.canRespond() || (requiresFullscreen && !hasQuizFullscreen(document)) || violationModal || confirmExitModalOpen || confirmSubmitModalOpen) return;
     setQuizAnswers((prev) => {
       const prevVal = prev[preguntaId];
       const currentQ = (prevVal && typeof prevVal === "object" && !Array.isArray(prevVal)) ? { ...prevVal } : {};
@@ -1382,6 +1466,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
 
   // Ver comprobante / revisión de una prueba entregada
   const handleOpenReview = (quiz, submission) => {
+    if (activeQuizToTake) { requestQuizExit(); return; }
     setReviewingSubmission({ quiz, submission });
     setActiveQuizToTake(null);
   };
@@ -1755,6 +1840,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
   }, [activeCareerWeeks, temario, examenesList, manualesList, pruebasList, asistencias, effectiveStudent]);
 
   const navigatePortal = tab => {
+    if (activeQuizToTake) { requestQuizExit(); return; }
     setActiveTab(tab);
     if (tab === "pruebas" || tab === "seguridad") {
       setActiveQuizToTake(null);
@@ -1974,36 +2060,6 @@ export default function StudentPortalView({ student, notify = () => {} }) {
             text-align: center !important;
             margin-top: 40vh !important;
           }
-        }
-        /* Sistema DRM de Protección Anti-Capturas y Blackout Inmediato */
-        body.anticheat-blackout-on {
-          background: #000000 !important;
-          overflow: hidden !important;
-        }
-        body.anticheat-blackout-on .sp-quiz-take-card {
-          opacity: 0 !important;
-          filter: brightness(0) !important;
-        }
-        #anti-cheat-blackout-curtain {
-          display: none;
-          position: fixed !important;
-          inset: 0 !important;
-          width: 100vw !important;
-          height: 100vh !important;
-          z-index: 9999990 !important;
-          background: #000000 !important;
-          color: #ffffff;
-          align-items: center;
-          justify-content: center;
-          flex-direction: column;
-          gap: 1.25rem;
-          pointer-events: auto !important;
-          cursor: pointer;
-        }
-        body.anticheat-blackout-on #anti-cheat-blackout-curtain {
-          display: flex !important;
-          opacity: 1 !important;
-          visibility: visible !important;
         }
         .sp-violation-modal-overlay {
           position: fixed !important;
@@ -3290,82 +3346,26 @@ export default function StudentPortalView({ student, notify = () => {} }) {
           <StudentQuizPlayer quiz={activeQuizToTake} liveState={activeLiveState} answers={quizAnswers}
             seconds={timeRemainingSeconds} strikes={strikesCount} online={isOnline} connection={liveConnection}
             sealed={isExamSealedOffline} submitting={submittingQuiz} confirmed={answeredQuestionsMap}
+            locked={(requiresFullscreen && !isFullscreenActive) || Boolean(violationModal) || confirmExitModalOpen || confirmSubmitModalOpen}
+            fullscreenRequired={requiresFullscreen}
             studentName={effectiveStudent?.nombre_completo} account={cuentaKey}
-            onExit={() => {
-              if (["lobby", "inactiva"].includes(activeLiveStateRef.current?.estado)) {
-                autoSubmitTriggeredRef.current = true;
-                clearActiveAttemptFromDisk(activeQuizToTake.numero_semana);
-                setActiveQuizToTake(null);
-                deactivateDrmBlackout();
-                if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(() => {});
-                return;
-              }
-              isConfirmingRef.current = true; outStartTimeRef.current = null; setConfirmExitModalOpen(true);
-            }}
+            onExit={requestQuizExit}
             onChange={handleAnswerChange} onBlur={handleAnswerBlur}
-            onConfirm={index => setAnsweredQuestionsMap(previous => ({ ...previous, [index]: true }))}
+            onConfirm={index => {
+              if (!integrityControllerRef.current?.canRespond() || (requiresFullscreen && !hasQuizFullscreen(document)) || isExamSealedOffline || isSubmittingRef.current || autoSubmitTriggeredRef.current || violationModal || confirmExitModalOpen || confirmSubmitModalOpen) return;
+              setAnsweredQuestionsMap(previous => ({ ...previous, [index]: true }));
+            }}
             onSubmit={() => handleSubmitQuiz()}
             onPasteBlocked={() => notify("No está permitido pegar texto durante la prueba.", "warning")} />
         )}
 
 
-        {/* TELÓN NEGRO ANTI-CAPTURAS Y CONTROL CENTER/NOTIFICACIONES (DRM STREAMING PROTECTION) */}
-        <div
-          id="anti-cheat-blackout-curtain"
-          onClick={() => deactivateDrmBlackout()}
-          onTouchStart={() => deactivateDrmBlackout()}
-          style={{
-            position: "fixed",
-            top: 0,
-            left: 0,
-            width: "100vw",
-            height: "100vh",
-            zIndex: 9999990,
-            background: "#000000",
-            color: "#ffffff",
-            flexDirection: "column",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: "1.25rem",
-            pointerEvents: isScreenBlackedOut ? "auto" : "none",
-            display: isScreenBlackedOut ? "flex" : "none",
-            cursor: "pointer"
-          }}
-        >
-          <ShieldAlert size={52} color="#ef4444" className="animate-pulse" />
-          <div style={{ textAlign: "center", padding: "0 1.5rem", maxWidth: "480px" }}>
-            <div style={{ fontSize: "1.2rem", fontWeight: 900, color: "#ffffff", letterSpacing: "0.5px" }}>
-              EVALUACIÓN EN PAUSA
-            </div>
-            <div style={{ fontSize: "0.88rem", color: "#94a3b8", marginTop: "0.45rem", lineHeight: 1.5 }}>
-              La evaluación dejó de estar visible. Vuelve a la prueba para continuar; tus respuestas se conservan.
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              deactivateDrmBlackout();
-            }}
-            style={{
-              marginTop: "0.5rem",
-              padding: "0.75rem 1.75rem",
-              borderRadius: "9999px",
-              background: "linear-gradient(135deg, #0284c7 0%, #0369a1 100%)",
-              color: "#ffffff",
-              border: "1px solid #38bdf8",
-              fontSize: "0.9rem",
-              fontWeight: 900,
-              cursor: "pointer",
-              boxShadow: "0 0 20px rgba(2, 132, 199, 0.5)"
-            }}
-          >
-            Tocar aquí para continuar evaluación
-          </button>
-        </div>
+        {activeQuizToTake && requiresFullscreen && !isFullscreenActive && !isExamSealedOffline && !submittingQuiz && !violationModal && !confirmExitModalOpen && !confirmSubmitModalOpen && (
+          <QuizFullscreenGate error={fullscreenError} onResume={resumeQuizFullscreen} onExit={requestQuizExit} />
+        )}
 
         {/* MODAL DE ADVERTENCIA / INFRACCIÓN DE SEGURIDAD ANTITRAMPAS */}
-        {violationModal && (
+        {violationModal && !confirmExitModalOpen && !confirmSubmitModalOpen && !isExamSealedOffline && (
           <div
             className="sp-violation-modal-overlay"
             style={{
@@ -3423,26 +3423,25 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                     color: violationModal.strike >= 3 ? "#dc2626" : "#d97706"
                   }}
                 >
-                  {violationModal.strike >= 3 ? "Cierre según las normas" : "Incidencia de Integridad Registrada"}
+                  {securityCountdown ? "Regreso obligatorio" : "Incidencia de integridad registrada"}
                 </span>
                 <h3 style={{ margin: "0.3rem 0 0", fontSize: "1.35rem", fontWeight: 900, color: "#0f172a" }}>
-                  {violationModal.strike >= 3 ? "Evaluación Bloqueada" : `Advertencia ${violationModal.strike} de 3`}
+                  {securityCountdown ? "Vuelve a la prueba" : "Evaluación bloqueada"}
                 </h3>
               </div>
 
               <p style={{ margin: 0, fontSize: "0.92rem", color: "#475569", lineHeight: 1.55 }}>
                 {violationModal.mensaje}
               </p>
+              {securityCountdown && <p role="timer" aria-live="assertive" style={{ margin: 0, fontSize: "1.25rem", fontWeight: 900, color: "#b91c1c" }}>
+                {violationModal.secondsLeft} segundos para regresar
+              </p>}
+              {fullscreenError && <p role="alert">{fullscreenError}</p>}
 
-              {violationModal.strike < 3 ? (
+              {securityCountdown ? (
                 <button
                   type="button"
-                  onClick={() => {
-                    deactivateDrmBlackout();
-                    setViolationModal(null);
-                    isFromTopBorderRef.current = false;
-                    requestQuizFullscreen();
-                  }}
+                  onClick={resumeQuizFullscreen}
                   style={{
                     width: "100%",
                     marginTop: "0.5rem",
@@ -3462,7 +3461,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                   }}
                 >
                   <Maximize2 size={18} />
-                  <span>Entendido • Continuar Evaluación</span>
+                  <span>Volver a pantalla completa</span>
                 </button>
               ) : (
                 <div
@@ -3479,8 +3478,8 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                     fontWeight: 800
                   }}
                 >
-                  <RefreshCw size={18} className="animate-spin" />
-                  <span>Cerrando y enviando prueba automáticamente al servidor...</span>
+                  <AlertTriangle size={18} />
+                  <span>La prueba fue anulada. Las respuestas no se enviaron.</span>
                 </div>
               )}
             </div>
@@ -3609,11 +3608,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
               >
                 <button
                   type="button"
-                  onClick={() => {
-                    setConfirmSubmitModalOpen(false);
-                    isConfirmingRef.current = false;
-                    outStartTimeRef.current = null;
-                  }}
+                  onClick={resumeQuizFullscreen}
                   disabled={submittingQuiz}
                   style={{
                     flex: 1,
@@ -3635,7 +3630,6 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                   onClick={() => {
                     setConfirmSubmitModalOpen(false);
                     isConfirmingRef.current = false;
-                    outStartTimeRef.current = null;
                     executeSubmitQuiz();
                   }}
                   disabled={submittingQuiz}
@@ -3668,6 +3662,9 @@ export default function StudentPortalView({ student, notify = () => {} }) {
         {confirmExitModalOpen && (
           <div
             className="quiz-player-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Confirmar salida de la prueba"
             style={{
               position: "fixed",
               inset: 0,
@@ -3733,6 +3730,8 @@ export default function StudentPortalView({ student, notify = () => {} }) {
               <p style={{ margin: 0, fontSize: "0.9rem", color: "#475569", lineHeight: 1.55 }}>
                 Al presionar salir, se tomará como que deseas terminar tu evaluación. Se enviarán y registrarán todas las respuestas que hayas completado hasta este momento.
               </p>
+              {violationModal && <p role="alert">{violationModal.mensaje}</p>}
+              {fullscreenError && <p role="alert">{fullscreenError}</p>}
 
               <div
                 style={{
@@ -3744,11 +3743,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
               >
                 <button
                   type="button"
-                  onClick={() => {
-                    setConfirmExitModalOpen(false);
-                    isConfirmingRef.current = false;
-                    outStartTimeRef.current = null;
-                  }}
+                  onClick={resumeQuizFullscreen}
                   style={{
                     flex: 1.2,
                     padding: "0.75rem",
@@ -3762,7 +3757,7 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                     boxShadow: "0 4px 14px rgba(2, 132, 199, 0.3)"
                   }}
                 >
-                  Permanecer en la Prueba
+                  Cancelar y volver a pantalla completa
                 </button>
 
                 <button
@@ -3770,9 +3765,6 @@ export default function StudentPortalView({ student, notify = () => {} }) {
                   onClick={() => {
                     setConfirmExitModalOpen(false);
                     isConfirmingRef.current = false;
-                    outStartTimeRef.current = null;
-                    if (document.exitFullscreen) document.exitFullscreen().catch(() => {});
-                    else if (document.webkitExitFullscreen) document.webkitExitFullscreen().catch(() => {});
                     executeSubmitQuiz({ motivo: "entrega_anticipada_por_salida" });
                   }}
                   style={{

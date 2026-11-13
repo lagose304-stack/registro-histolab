@@ -1,5 +1,6 @@
 import { quizItemLabel } from "../../../shared/quizItems.mjs";
 import { getQuizWindow } from "../../../shared/quizSchedule.mjs";
+import { canBypassQuizSchedule } from "../../../shared/instructorRoles.mjs";
 import { isAttendanceExamWeek } from "../../../shared/attendanceWindow.mjs";
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { Radio, Play, SkipForward, Square, RefreshCw, Users, Clock, CheckCircle2, AlertTriangle, ArrowLeft, Lock, User, Search, Wifi, WifiOff } from "lucide-react";
@@ -76,6 +77,7 @@ export default function LiveQuizControlView({
 
   // Identificación del usuario y rol de instructor titular
   const currentUser = currentInstructor || api.auth.getCurrentInstructor();
+  const bypassSchedule = canBypassQuizSchedule(currentUser?.rol);
   const hasFullAccess = useMemo(() => hasFullSectionAccess(currentUser, seccion), [currentUser, seccion]);
 
   // Verificación de horario exclusivo de la sección para el instructor asignado
@@ -306,9 +308,9 @@ export default function LiveQuizControlView({
       return;
     }
 
-    if (["habilitar","iniciar_pregunta","siguiente_pregunta"].includes(accion)) {
+    if (!bypassSchedule && ["habilitar","iniciar_pregunta_1","iniciar_pregunta","siguiente_pregunta"].includes(accion)) {
       const window = getQuizWindow(seccion,semanasConfig,selectedSemana,new Date(),scheduleEvents);
-      if (!window.isPracticeDay || (!hasFullAccess && accion !== "siguiente_pregunta" && !window.isOpen)) {
+      if (!window.isPracticeDay || !window.isOpen) {
         setActionError(window.reason);
         return;
       }
@@ -376,7 +378,7 @@ export default function LiveQuizControlView({
   const [stateLabel,stateDescription] = stateDetails[state] || stateDetails.inactiva;
   const controlDisabled = actionLoading || !canControl || !sessionSynced || Boolean(syncError);
   const quizWindow = getQuizWindow(seccion,semanasConfig,selectedSemana,new Date(),scheduleEvents);
-  const canStartNow = quizWindow.isPracticeDay && (hasFullAccess || quizWindow.isOpen);
+  const canStartNow = bypassSchedule || (quizWindow.isPracticeDay && quizWindow.isOpen);
   const dueToday = semanasConfig.filter(week => getQuizWindow(seccion,semanasConfig,week.numero_semana,new Date(),scheduleEvents).isPracticeDay).map(week => Number(week.numero_semana));
   const questionDuration = Number(currentQuestion?.tiempo_segundos || activeQuiz?.tiempo_por_pregunta_segundos || 90);
   const enrolled = new Set(studentsList.map(student => String(student.numero_cuenta || "").trim()));
@@ -421,14 +423,14 @@ export default function LiveQuizControlView({
                 <p className="live-quiz-panel__description">{stateDescription}</p>
                 {state==="en_pregunta" && <div className="live-quiz-panel__timer" data-urgent={localSecondsRemaining<=15}><span><Clock size={18} aria-hidden="true" /> Tiempo restante</span><strong role="timer" aria-label="Tiempo restante de la pregunta">{formatTimer(localSecondsRemaining)}</strong><small>Pregunta {currentQIdx+1}{isBonusQuestion?" · Bonus":""} · {formatTimer(questionDuration)} de duración</small><progress max={questionDuration} value={Math.max(0,Math.min(questionDuration,localSecondsRemaining))} aria-label="Tiempo disponible" /></div>}
                 <ol className="live-quiz-panel__progress" aria-label="Avance de preguntas">{activeQuiz.preguntas?.map((question,index)=><li key={question.id || index} data-current={index===currentQIdx && ["en_pregunta","esperando_siguiente"].includes(state)} data-done={state==="finalizada" || index<currentQIdx}><span>{index===5?"Bonus":index+1}</span></li>)}</ol>
-                <div className="live-quiz-panel__notice"><strong>Prueba de la práctica {selectedSemana}{quizWindow.practiceWeek ? ` · Se rinde en la práctica ${quizWindow.practiceWeek}` : ""}</strong><p>{quizWindow.reason}</p>{dueToday.length > 1 && <p>En esta práctica corresponden las pruebas de las semanas {dueToday.join(" y ")}. Habilita y dirige cada una por separado; sus calificaciones se guardan en su semana de origen.</p>}</div>
+                <div className="live-quiz-panel__notice"><strong>Prueba de la práctica {selectedSemana}{quizWindow.practiceWeek ? ` · Se rinde en la práctica ${quizWindow.practiceWeek}` : ""}</strong><p>{bypassSchedule ? "Excepción de Creador: puedes habilitar y dirigir esta prueba fuera de la fecha y horario programados." : quizWindow.reason}</p>{dueToday.length > 1 && <p>En esta práctica corresponden las pruebas de las semanas {dueToday.join(" y ")}. Habilita y dirige cada una por separado; sus calificaciones se guardan en su semana de origen.</p>}</div>
                 {syncError && <p className="user-dialog__error" role="alert">{syncError} Los controles se habilitarán al recuperar la conexión.</p>}
                 {actionError && <p className="user-dialog__error" role="alert">{actionError}</p>}
                 <div className="live-quiz-panel__actions">
                   {(state==="inactiva" || state==="finalizada") && actionButton(state==="finalizada"?"Abrir sala nuevamente":"Abrir sala de espera",Radio,"habilitar",{duracion_segundos:activeQuiz.tiempo_por_pregunta_segundos || 90},true,!canStartNow)}
                   {state==="lobby" && <>{actionButton("Iniciar pregunta 1",Play,"iniciar_pregunta",{pregunta_idx:0,duracion_segundos:activeQuiz.preguntas?.[0]?.tiempo_segundos || 90},true,!canStartNow)}{actionButton("Cerrar sala",Square,"deshabilitar")}</>}
                   {state==="en_pregunta" && <>{actionButton("Terminar tiempo de la pregunta",Square,"tiempo_agotado",{},true)}{actionButton("Finalizar prueba",Square,"finalizar")}</>}
-                  {state==="esperando_siguiente" && <>{currentQIdx<totalPreguntas-1?actionButton(`Iniciar pregunta ${currentQIdx+2}${currentQIdx+1===5?" · Bonus":""}`,SkipForward,"siguiente_pregunta",{duracion_segundos:activeQuiz.preguntas?.[currentQIdx+1]?.tiempo_segundos || 90},true,!quizWindow.isPracticeDay):actionButton("Finalizar y recoger entregas",CheckCircle2,"finalizar",{},true)}{currentQIdx<totalPreguntas-1 && actionButton("Finalizar prueba",Square,"finalizar")}</>}
+                  {state==="esperando_siguiente" && <>{currentQIdx<totalPreguntas-1?actionButton(`Iniciar pregunta ${currentQIdx+2}${currentQIdx+1===5?" · Bonus":""}`,SkipForward,"siguiente_pregunta",{duracion_segundos:activeQuiz.preguntas?.[currentQIdx+1]?.tiempo_segundos || 90},true,!canStartNow):actionButton("Finalizar y recoger entregas",CheckCircle2,"finalizar",{},true)}{currentQIdx<totalPreguntas-1 && actionButton("Finalizar prueba",Square,"finalizar")}</>}
                   {state==="finalizada" && actionButton("Deshabilitar sesión",Lock,"deshabilitar")}
                 </div>
               </section>

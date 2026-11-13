@@ -16,6 +16,8 @@ const module={exports:{}};vm.runInNewContext(result.outputFiles[0].text,{module,
 async function run(handler,token){let code=200,next=false;const req={headers:token?{authorization:'Bearer '+token}:{}};const res={status(value){code=value;return res},json(){return res}};await handler(req,res,()=>next=true);return {code,next,req};}
 const student=jwt.sign({rol:'ESTUDIANTE',numero_cuenta:'A',carrera:'Medicina',session_id:'active'},secret);
 const instructor=jwt.sign({rol:'Instructor',id:'instructor',session_id:'active'},secret);
+const staleCreator=await run(module.exports.authenticateInstructor,jwt.sign({rol:'Creador',id:'instructor',session_id:'active'},secret));
+assert(staleCreator.next);assert.equal(staleCreator.req.instructor.rol,'Instructor','El rol vigente de la cuenta prevalece sobre un rol Creador antiguo del token');
 assert((await run(module.exports.authenticateStudent,student)).next);
 assert((await run(module.exports.authenticateInstructor,instructor)).next);
 assert.equal((await run(module.exports.authenticateInstructor,student)).code,403);

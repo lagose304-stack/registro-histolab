@@ -1,5 +1,7 @@
 # Repository Guidelines
 
+Para explorar código, usa primero Serena (búsqueda por símbolo) antes de leer archivos completos.
+
 Este repositorio reúne el registro de muestras y la gestión académica de HistoLab. Para localizar un cambio, identifica el perfil afectado en el [índice de mapas](docs/mapa-del-sitio.md) y sigue la vista, la llamada HTTP, la ruta, el controlador y la persistencia que correspondan.
 
 ## Arquitectura
