@@ -557,7 +557,7 @@ export default function ReviewQuizSubmissionsView({
     if (!selectedEntrega) return;
 
     const confirmDel = window.confirm(
-      `¿Estás seguro de eliminar la entrega de ${selectedEntrega.nombre_completo || "este estudiante"}?\n\nEsta acción eliminará sus respuestas y le permitirá volver a realizar la prueba desde su portal de estudiante.`
+      `¿Estás seguro de eliminar la entrega de ${selectedEntrega.nombre_completo || "este estudiante"}?\n\nEsta acción eliminará sus respuestas, su nota y los registros de salidas y diagnóstico vinculados a esta entrega, incluidos los archivados por sus reaperturas. Los otros intentos independientes se conservan. El estudiante podrá volver a realizar la prueba desde su portal.`
     );
     if (!confirmDel) return;
 

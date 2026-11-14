@@ -16,6 +16,8 @@ try {
   await db.exec(await source("../src/db/live_quizzes_migration.sql"));
   await db.exec(await source("../../supabase/migrations/20261113214049_quiz_activity_journal.sql"));
   await db.exec(await source("../../supabase/migrations/20261114023949_quiz_individual_reopening.sql"));
+  await db.exec(await source("../../supabase/migrations/20261114030710_quiz_automatic_diagnostics.sql"));
+  await db.exec(await source("../../supabase/migrations/20261114131404_quiz_submission_activity_cleanup.sql"));
   await db.exec(`
     GRANT SELECT ON instructores, temario, configuracion_semanas TO service_role;
     GRANT SELECT, INSERT, UPDATE ON estudiantes_medicina TO service_role;
@@ -158,6 +160,69 @@ try {
   await db.exec('RESET ROLE; SET ROLE authenticated;');
   await assert.rejects(reopen(validVersion),{code:'42501'});
   console.log('PASS reapertura SQL: respuestas y faltas conservadas, nota retirada atómicamente, versión vigente, historial, reintento único y acceso exclusivo de API.');
+
+  const uuid=n=>`00000000-0000-0000-0000-${String(n).padStart(12,'0')}`;
+  const quiz=uuid(30),current=uuid(40),archived=uuid(41),foreign=uuid(42),otherWeek=uuid(43);
+  await db.exec(`RESET ROLE;
+    INSERT INTO pruebas_semanales(id,seccion_id,numero_semana) VALUES ('${quiz}','${section}',1);
+    INSERT INTO quiz_activity_attempts(id,quiz_id,seccion_id,numero_semana,alumno_id,numero_cuenta,politica,aceptado_cliente_at,faltas,reemplazado_at)
+      VALUES ('${current}','${quiz}','${section}',1,'student','A','salidas-tres-faltas-v1',now(),1,NULL),
+      ('${archived}','${quiz}','${section}',1,'student','A','salidas-tres-faltas-v1',now(),1,now()),
+      ('${foreign}','${quiz}','${section}',1,'other','B','salidas-tres-faltas-v1',now(),1,NULL),
+      ('${otherWeek}','${quiz}','${section}',2,'student','A','salidas-tres-faltas-v1',now(),1,NULL);
+    INSERT INTO quiz_activity_events(id,intento_id,episodio_id,tipo,falta,senales,pregunta_indice,hora_cliente)
+      SELECT gen_random_uuid(),id,gen_random_uuid(),'salida',1,'["ventana_sin_foco"]',0,now()
+      FROM quiz_activity_attempts WHERE id IN ('${current}','${archived}','${foreign}','${otherWeek}');
+    INSERT INTO quiz_diagnostic_batches(id,intento_id,datos)
+      SELECT gen_random_uuid(),id,'{"version":1,"muestras":[]}'
+      FROM quiz_activity_attempts WHERE id IN ('${current}','${archived}','${foreign}','${otherWeek}');
+    UPDATE entregas_pruebas SET quiz_id='${quiz}',estado='calificado',nota_obtenida=2,
+      auditoria='{"actividad":{"intento_id":"${current}"},"reaperturas":[{"entrega":{"auditoria":{"actividad":{"intento_id":"${archived}"}}}},{"entrega":{"auditoria":{"actividad":{"intento_id":"${foreign}"}}}},{"entrega":{"auditoria":{"actividad":{"intento_id":"${otherWeek}"}}}}]}'
+      WHERE id='${delivery}';
+    SET ROLE service_role;`);
+  const activityCount=async(table,id)=>(await db.query(`SELECT count(*)::int AS n FROM ${table} WHERE ${table==='quiz_activity_attempts'?'id':'intento_id'}=$1`,[id])).rows[0].n;
+  const currentVersion=(await db.query('SELECT updated_at FROM entregas_pruebas WHERE id=$1',[delivery])).rows[0].updated_at;
+  await db.query("SELECT reopen_quiz_submission($1,1,'A',$2,$3,'Continuar prueba aislada','00000000-0000-0000-0000-000000000001','Docente Ejemplo')",[section,currentVersion,uuid(60)]);
+  for(const table of ['quiz_activity_attempts','quiz_activity_events','quiz_diagnostic_batches']){
+    assert.equal(await activityCount(table,current),1,'La reapertura no elimina el registro');
+    assert.equal(await activityCount(table,archived),1);
+  }
+  await db.exec(`RESET ROLE;
+    UPDATE estudiantes_medicina SET notas=notas || '{"prueba_1":2}' WHERE seccion_id='${section}' AND numero_cuenta='A';
+    CREATE TRIGGER fail_activity_cleanup BEFORE DELETE ON quiz_activity_events FOR EACH ROW EXECUTE FUNCTION fail_audit_for_test();
+    SET ROLE service_role;`);
+  const deleteWithActivity=()=>db.query("SELECT delete_quiz_submission_with_grade($1,1,'A',$2)",[section,delivery]);
+  await db.exec('BEGIN');await deleteWithActivity();
+  await assert.rejects(db.exec('COMMIT'),/Fallo simulado/);
+  await db.exec('ROLLBACK');
+  assert.equal((await notes(section)).prueba_1,2,'Una falla de limpieza revierte la eliminación de la nota');
+  assert.equal((await db.query('SELECT count(*)::int AS n FROM entregas_pruebas WHERE id=$1',[delivery])).rows[0].n,1);
+  assert.equal(await activityCount('quiz_activity_events',current),1);
+  await db.exec('RESET ROLE; DROP TRIGGER fail_activity_cleanup ON quiz_activity_events; SET ROLE service_role;');
+  await db.exec('BEGIN');
+  await deleteWithActivity();await db.exec('SET CONSTRAINTS quiz_delivery_activity_cleanup IMMEDIATE');
+  assert.equal(await activityCount('quiz_activity_attempts',current),0);
+  await db.exec('ROLLBACK');
+  assert.equal(await activityCount('quiz_activity_attempts',current),1,'El rollback restaura también el intento');
+  assert.equal(await activityCount('quiz_diagnostic_batches',current),1);
+  await deleteWithActivity();
+  for(const table of ['quiz_activity_attempts','quiz_activity_events','quiz_diagnostic_batches']){
+    assert.equal(await activityCount(table,current),0);
+    assert.equal(await activityCount(table,archived),0);
+    assert.equal(await activityCount(table,foreign),1,'No borra otra cuenta aunque figure en metadatos inválidos');
+    assert.equal(await activityCount(table,otherWeek),1,'No borra otra semana aunque figure en metadatos inválidos');
+  }
+  assert.equal((await notes(section)).prueba_1,undefined);
+  assert.equal((await deleteWithActivity()).rows[0].delete_quiz_submission_with_grade,null,'Reintentar no borra otros registros');
+  assert.equal((await db.query("SELECT has_table_privilege('service_role','quiz_activity_events','DELETE') AS allowed")).rows[0].allowed,false);
+  await assert.rejects(db.query('SELECT cleanup_deleted_quiz_activity()'),{code:'42501'});
+  await db.exec(`RESET ROLE;
+    INSERT INTO entregas_pruebas(id,quiz_id,seccion_id,numero_semana,numero_cuenta,auditoria)
+      VALUES ('${uuid(70)}','${quiz}','${section}',2,'A','{}'),
+      ('${uuid(71)}','${quiz}','${section}',3,'A','{"actividad":{"intento_id":"invalid"},"reaperturas":{}}');
+    DELETE FROM entregas_pruebas WHERE id IN ('${uuid(70)}','${uuid(71)}');`);
+  assert.equal(await activityCount('quiz_activity_attempts',otherWeek),1,'Una entrega histórica sin vínculo no produce un borrado amplio');
+  console.log('PASS limpieza de entrega: intentos/eventos/diagnóstico vinculados, rollback completo, aislamiento, legado, reapertura intacta y permisos privados.');
 } finally {
   await db.close();
 }
