@@ -20,6 +20,7 @@ export default function QuizDiagnosticsReview({ section, week, account }) {
     setTimeout(()=>URL.revokeObjectURL(url),1000);
   };
   const samples=rows?.flatMap(row=>row.datos?.muestras || []) || [];
+  const detectorVersions=[...new Set(samples.map(sample=>Number.isInteger(sample.detector_version) ? String(sample.detector_version) : "sin versión informada"))];
   const devices=[...new Set((rows || []).map(row=>{const d=row.datos?.dispositivo || {};return `${d.navegador || "Otro"} ${d.version_navegador || "versión no informada"} · ${d.sistema || "Otro"} ${d.version_sistema || "versión no informada"}`;}))];
   return <details className="quiz-diagnostics-review" onToggle={event=>{if(event.currentTarget.open && rows===null && !error) void load();}}>
     <summary>Diagnóstico técnico de la prueba</summary>
@@ -30,6 +31,7 @@ export default function QuizDiagnosticsReview({ section, week, account }) {
     {rows?.length > 0 && <>
       <p>{samples.length} muestras recibidas en {rows.length} lotes · {new Set(rows.map(row=>row.intento_id)).size} intentos.</p>
       <ul>{devices.map(device=><li key={device}>{device}</li>)}</ul>
+      <p>Versión del detector en las muestras: {detectorVersions.join(", ")}. Las muestras antiguas conservan su versión original.</p>
       <p>Se guardan cambios de foco, visibilidad, tamaño, orientación y conexión, con muestras periódicas. La captura y los envíos tienen límites; el registro puede estar incompleto.</p>
       <button type="button" onClick={download}>Descargar diagnóstico técnico</button>
     </>}

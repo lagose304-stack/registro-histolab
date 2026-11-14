@@ -1,5 +1,6 @@
 import { diagnosticDevice, normalizeDiagnosticPayload, QUIZ_DIAGNOSTIC_BATCH_SIZE } from "../../../shared/quizDiagnostics.mjs";
 import { observeQuizDiagnostics } from "./quizDiagnosticsObserver.mjs";
+import { QUIZ_ACTIVITY_OBSERVER_VERSION } from "./quizActivityObserver.mjs";
 
 export function startQuizDiagnostics({ window, document, storage, section, week, account, attemptId, api, isActive, getQuestion, getFaults }) {
   if (typeof api.saveDiagnostics !== "function") return () => {};
@@ -34,7 +35,8 @@ export function startQuizDiagnostics({ window, document, storage, section, week,
   const stop = observeQuizDiagnostics({ window, document, isActive, onSample: sample => {
     if (blocked || queue.total >= 640 || queue.registros.length >= 160) return;
     queue.total++;
-    queue.registros.push({...sample,secuencia:queue.total,pregunta_indice:getQuestion()?.pregunta_indice ?? 0,faltas_observadas:getFaults()});
+    // Etiquetar al capturar, nunca al reenviar muestras antiguas de la cola.
+    queue.registros.push({...sample,detector_version:QUIZ_ACTIVITY_OBSERVER_VERSION,secuencia:queue.total,pregunta_indice:getQuestion()?.pregunta_indice ?? 0,faltas_observadas:getFaults()});
     persist();
     if (sample.motivos.includes("pagehide") || sample.visible === "hidden") void flush(true);
   }});

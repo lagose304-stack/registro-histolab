@@ -25,7 +25,9 @@ export function observeQuizDiagnostics({ window, document, onSample, isActive, n
     const callback = () => {
       if (!isActive()) return;
       pending.add(name);
-      if (name === "pagehide" || (name === "visibilitychange" && document.visibilityState === "hidden")) { window.clearTimeout(timeout); drain(); }
+      // Conservar ambos extremos de una pérdida breve de foco; agruparlos puede
+      // dejar solo el estado enfocado y ocultar la transición que contó la falta.
+      if (["blur", "focus", "pagehide", "freeze", "resume", "visibilitychange"].includes(name)) { window.clearTimeout(timeout); drain(); }
       else if (!timeout) timeout = window.setTimeout(drain, 250);
     };
     target.addEventListener(type, callback); removers.push(() => target.removeEventListener(type, callback));

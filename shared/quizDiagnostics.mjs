@@ -30,6 +30,7 @@ export function normalizeDiagnosticPayload(payload) {
     if (!Number.isFinite(date.getTime())) throw new Error("Hora de diagnóstico inválida.");
     return {
       motivos: [...new Set(sample.motivos)], hora_cliente: date.toISOString(),
+      ...(Number.isInteger(sample.detector_version) && sample.detector_version > 0 && sample.detector_version <= 100 ? {detector_version:sample.detector_version} : {}),
       secuencia: number(sample.secuencia, 10000), pregunta_indice: number(sample.pregunta_indice, 999), faltas_observadas: number(sample.faltas_observadas, 3),
       visible: ["visible", "hidden", "prerender"].includes(sample.visible) ? sample.visible : "desconocida",
       foco: bool(sample.foco), online: bool(sample.online), campo_activo: bool(sample.campo_activo),

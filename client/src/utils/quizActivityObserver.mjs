@@ -1,5 +1,8 @@
 import { QUIZ_ACTIVITY_LIMIT } from "../../../shared/quizActivity.mjs";
 
+// Revisión del algoritmo, independiente de la versión de la política de faltas.
+export const QUIZ_ACTIVITY_OBSERVER_VERSION = 3;
+
 // Observa señales del navegador. No intercepta teclas, navegación ni permisos.
 export function observeQuizActivity({ window, document, getState, onEvent, isActive, explicitReturn = false, makeId = () => crypto.randomUUID(), now = () => new Date().toISOString() }) {
   let returnTimer;
