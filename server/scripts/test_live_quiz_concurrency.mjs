@@ -12,6 +12,7 @@ const quizSection = { id:"isolated-pilot",carrera:"Medicina",dia:["Domingo","Lun
 let row;
 const deliveries = {};
 let pauseWrite = null;
+let writeFailure = null;
 const clone = value => structuredClone(value);
 const database = {
   from(table) {
@@ -27,6 +28,7 @@ const database = {
         try {
           if (table !== "sesiones_pruebas_en_vivo") return resolve({ data: [], error: null });
           if (operation === "select") return resolve({ data: single ? clone(row) : [clone(row)], error: null });
+          if (writeFailure) return resolve({ data: null, error: writeFailure });
           if (pauseWrite?.matches(payload)) {
             const paused = pauseWrite;
             pauseWrite = null;
@@ -57,12 +59,16 @@ const bundle = await build({
       : "export default { existsSync:()=>false, mkdirSync:()=>{}, writeFileSync:()=>{} };", loader: "js" }));
   }}]
 });
+function createController() {
 const module = { exports: {} };
 vm.runInNewContext(bundle.outputFiles[0].text, { module, exports: module.exports, database, deliveries, scheduling, console, process: { cwd: () => path.resolve("server") }, require: key => {
   if (key === "node:path") return path;
   if (key === "node:url") return { fileURLToPath };
   throw new Error(`Unexpected import: ${key}`);
 } });
+return module.exports;
+}
+const module = { exports: createController() };
 const { controlLiveQuiz, heartbeatLiveQuiz, getLiveQuizState } = module.exports;
 const params = { seccion_id: "isolated-pilot", semana: 1 };
 function initial() {
@@ -70,11 +76,11 @@ function initial() {
     pregunta_actual_idx: 0, duracion_segundos: 300, pregunta_inicio_timestamp: Date.now(),
     alumnos_conectados: {}, respuestas_globales: {}, updated_at: new Date().toISOString() };
 }
-async function call(handler, body = {}) {
+async function call(handler, body = {}, expectedCode = 200) {
   let code = 200, result;
   const response = { status(value) { code = value; return response; }, setHeader() {}, json(value) { result = value; return response; } };
   await handler({ params, body, headers: {}, socket: {}, quizSection, quizFullAccess: true }, response);
-  assert.equal(code, 200, JSON.stringify(result));
+  assert.equal(code, expectedCode, JSON.stringify(result));
   return result;
 }
 function pause(matches) {
@@ -94,21 +100,28 @@ async function until(predicate) {
 
 initial();
 const delayedHeartbeat = pause(payload => Boolean(payload.alumnos_conectados));
-await call(heartbeatLiveQuiz, { numero_cuenta: "pilot-A", respuestas_parciales: { q1: { a: "respuesta A" } }, pregunta_vista: 0 });
+let heartbeatConfirmed = false;
+const pendingHeartbeat = call(heartbeatLiveQuiz, { numero_cuenta: "pilot-A", respuestas_parciales: { q1: { a: "respuesta A" } }, pregunta_vista: 0 }).then(result => { heartbeatConfirmed = true; return result; });
 await delayedHeartbeat.ready;
+assert.equal(heartbeatConfirmed, false, "El latido no se confirma antes de persistirlo");
 await call(controlLiveQuiz, { accion: "siguiente_pregunta" });
 assert.equal(row.pregunta_actual_idx, 1);
 delayedHeartbeat.release();
+await pendingHeartbeat;
 await until(() => row.respuestas_globales["pilot-A"]);
+const independentState = await call(createController().getLiveQuizState);
+assert.ok(independentState.data.alumnos_conectados["pilot-A"], "El docente en otra instancia recibe la presencia persistida");
+assert.equal(independentState.data.total_conectados, 1);
 assert.equal(row.pregunta_actual_idx, 1, "Un latido atrasado no revierte el avance docente");
 assert.equal(row.respuestas_globales["pilot-A"].q1.a, "respuesta A");
 
 const firstStudent = pause(payload => Boolean(payload.alumnos_conectados));
-await call(heartbeatLiveQuiz, { numero_cuenta: "pilot-B", respuestas_parciales: { q1: { a: "respuesta B" } } });
+const pendingStudent = call(heartbeatLiveQuiz, { numero_cuenta: "pilot-B", respuestas_parciales: { q1: { a: "respuesta B" } } });
 await firstStudent.ready;
 await call(heartbeatLiveQuiz, { numero_cuenta: "pilot-C", respuestas_parciales: { q1: { a: "respuesta C" } } });
 await until(() => row.respuestas_globales["pilot-C"]);
 firstStudent.release();
+await pendingStudent;
 await until(() => row.respuestas_globales["pilot-B"]);
 assert.ok(row.respuestas_globales["pilot-C"], "Los alumnos concurrentes conservan ambas respuestas");
 
@@ -145,3 +158,14 @@ row.updated_at = new Date(Date.now() + 1000).toISOString();
 const resetState = await call(getLiveQuizState);
 assert.equal(Object.keys(resetState.data.alumnos_conectados).length, 0, "Un reinicio remoto no resucita conexiones de la memoria local");
 console.log("PASS: un reinicio remoto descarta las conexiones antiguas almacenadas en memoria.");
+
+writeFailure = new Error("Fallo de escritura simulado");
+const failedHeartbeat = await call(heartbeatLiveQuiz, { numero_cuenta: "pilot-retry", ubicacion: "prueba" }, 500);
+assert.equal(failedHeartbeat.success, false, "No se confirma un latido que no pudo guardarse");
+assert.equal(row.alumnos_conectados["pilot-retry"], undefined);
+writeFailure = null;
+await call(heartbeatLiveQuiz, { numero_cuenta: "pilot-retry", ubicacion: "prueba" });
+const recoveredState = await call(createController().getLiveQuizState);
+assert.ok(recoveredState.data.alumnos_conectados["pilot-retry"]);
+assert.equal(recoveredState.data.total_conectados, 1);
+console.log("PASS: fallo de persistencia visible y reintento confirmado desde otra instancia.");

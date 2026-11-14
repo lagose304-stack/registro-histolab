@@ -496,6 +496,10 @@ export const heartbeatLiveQuiz = async (req, res) => {
       };
     }
 
+    // Confirmar el guardado compartido antes de responder: Workers puede cancelar
+    // tareas pendientes al terminar la solicitud y otro proceso atiende al docente.
+    await persistStudentHeartbeat(session, cleanAccount);
+
     // Calcular tiempos actuales
     let tiempo_restante_segundos = session.duracion_segundos;
     let tiempo_transcurrido_segundos = 0;
@@ -522,11 +526,6 @@ export const heartbeatLiveQuiz = async (req, res) => {
     const key = getSessionKey(seccion_id, semana);
     liveSessions[key] = session;
     savePersistentLiveSessions(liveSessions);
-
-    // Sincronizar en segundo plano sin bloquear el latido del estudiante (latencia ultra baja <5ms)
-    persistStudentHeartbeat(session, cleanAccount).catch((err) => {
-      console.warn("Aviso en syncLiveSessionToSupabase background:", err?.message);
-    });
 
     return res.json({
       success: true,
