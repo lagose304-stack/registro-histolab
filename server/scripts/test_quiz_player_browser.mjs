@@ -12,7 +12,7 @@ const student = { id: 'fixture-student', numero_cuenta: 'fixture', carrera: 'Med
 const quiz = { id: 'fixture-quiz', numero_semana: 1, publicada: true, titulo: 'Prueba aislada', tiempo_por_pregunta_segundos: 90, preguntas: [{ id: 'q', enunciado: 'Pregunta de verificación', puntos: 1, items: [{ id: 'a', tipo: 'texto_corto', instruccion: 'Respuesta', puntos: 1 }] }] };
 const live = { estado: 'en_pregunta', habilitada: true, numero_semana: 1, pregunta_actual_idx: 0, tiempo_restante_segundos: 90 };
 const compiled = await build({
-  stdin: { contents: `import './client/src/index.css';import React from 'react';import{createRoot}from'react-dom/client';import Portal from './client/src/components/StudentPortalView.jsx';import Review from './client/src/components/QuizActivityReview.jsx';createRoot(document.getElementById('root')).render(window.fixture.review?<Review section="s" week={1} account="fixture"/>:<Portal student={window.fixture.student} onActivityLeaveChange={handler=>window.fixture.leavePortal=handler} notify={(message,type)=>window.fixture.notices.push({message,type})}/>);`, resolveDir: process.cwd(), loader: 'jsx' },
+  stdin: { contents: `import './client/src/index.css';import React from 'react';import{createRoot}from'react-dom/client';import Portal from './client/src/components/StudentPortalView.jsx';import Review from './client/src/components/QuizActivityReview.jsx';createRoot(document.getElementById('root')).render(window.fixture.review?<Review section="s" week={1} account="fixture" fallback={window.fixture.reviewFallback}/>:<Portal student={window.fixture.student} onActivityLeaveChange={handler=>window.fixture.leavePortal=handler} notify={(message,type)=>window.fixture.notices.push({message,type})}/>);`, resolveDir: process.cwd(), loader: 'jsx' },
   bundle: true, write: false, outfile: 'fixture.js', format: 'iife', logLevel: 'silent',
   loader: { '.png': 'dataurl', '.ico': 'dataurl' },
   plugins: [{ name: 'fixture-api', setup(b) {
@@ -26,7 +26,7 @@ const compiled = await build({
         temario:{getAll:()=>ok([]),getPuntajes:()=>ok({})},
         estudiantes:{getByCuenta:()=>ok(f().student),getMiRanking:()=>ok(null),getMySectionRank:()=>ok(null)},
         pruebas:{
-          getActivity:()=>ok([{id:'fixture-attempt',politica:'salidas-tres-faltas-v1',aceptado_at:new Date().toISOString(),faltas:1,eventos:[{id:'event-departure',episodio_id:'episode-1',tipo:'salida',falta:1,senales:['pagina_oculta'],pregunta_indice:0,pregunta_id:'q',hora_cliente:new Date().toISOString(),recibido_at:new Date().toISOString()},{id:'event-return',episodio_id:'episode-1',tipo:'regreso',falta:1,senales:[],hora_cliente:new Date().toISOString(),recibido_at:new Date().toISOString()}]}]),
+          getActivity:()=>f().failReview?Promise.reject(Error("fixture unavailable")):ok(f().reviewAttempts || [{id:'fixture-attempt',politica:'salidas-tres-faltas-v1',aceptado_at:new Date().toISOString(),faltas:1,eventos:[{id:'event-departure',episodio_id:'episode-1',tipo:'salida',falta:1,senales:['pagina_oculta'],pregunta_indice:0,pregunta_id:'q',hora_cliente:new Date().toISOString(),recibido_at:new Date().toISOString()},{id:'event-return',episodio_id:'episode-1',tipo:'regreso',falta:1,senales:[],hora_cliente:new Date().toISOString(),recibido_at:new Date().toISOString()}]}]),
           getBySeccion:()=>ok([f().quiz]),getBySemana:()=>ok(f().quiz),getLiveState:()=>ok(f().live),
           getMiEntrega:()=>ok(f().submission||null),getActiveLiveSession:()=>Promise.resolve({success:true,activa:false}),
           startActivity:async(section,week,payload)=>{
@@ -48,7 +48,7 @@ const compiled = await build({
 const js = compiled.outputFiles.find(file => file.path.endsWith('.js')).text;
 const css = compiled.outputFiles.find(file => file.path.endsWith('.css'))?.text || '';
 const browser = await chromium.launch({ headless: false, ...(process.env.HISTOLAB_CHROMIUM_PATH ? { executablePath: process.env.HISTOLAB_CHROMIUM_PATH } : {}) });
-async function setup({ size = { width: 390, height: 844 }, phase = 'en_pregunta', restore = false, deny = false, review = false } = {}) {
+async function setup({ size = { width: 390, height: 844 }, phase = 'en_pregunta', restore = false, deny = false, review = false, reviewAttempts = null, reviewFallback = null, failReview = false } = {}) {
   const context = await browser.newContext({ viewport: size });
   const page = await context.newPage(); const errors = [];
   page.on('pageerror', error => { errors.push(error.message); console.error('Portal fixture:', error.message); });
@@ -56,8 +56,8 @@ async function setup({ size = { width: 390, height: 844 }, phase = 'en_pregunta'
     if (route.request().url() !== TARGET_URL) throw Error(`Unexpected network: ${route.request().url()}`);
     await route.fulfill({ contentType: 'text/html', body: `<html><meta name="viewport" content="width=device-width,initial-scale=1"><style>${css}</style><body style="margin:0"><div id="root"></div><script>${js.replaceAll('</script', '<\\/script')}</script></body></html>` });
   });
-  await page.addInitScript(({ student, quiz, live, restore, deny, review }) => {
-    window.fixture = { student, quiz, live, notices: [], sent: [], heartbeats: [], fullscreenRequests: 0, deny, review };
+  await page.addInitScript(({ student, quiz, live, restore, deny, review, reviewAttempts, reviewFallback, failReview }) => {
+    window.fixture = { student, quiz, live, notices: [], sent: [], heartbeats: [], fullscreenRequests: 0, deny, review, reviewAttempts, reviewFallback, failReview };
     
     Element.prototype.requestFullscreen = function () { window.fixture.fullscreenRequests++;return Promise.reject(Error('fullscreen must not be requested')); };
     localStorage.setItem('histolab_cancelled_quiz_fixture_sem_1', JSON.stringify({cancelledAt:Date.now()}));
@@ -65,7 +65,7 @@ async function setup({ size = { width: 390, height: 844 }, phase = 'en_pregunta'
       localStorage.setItem('histolab_active_quiz_session_fixture', JSON.stringify({ quiz, liveSess: live }));
       localStorage.setItem('histolab_active_quiz_fixture_sem_1', JSON.stringify({ quiz, quizAnswers: { q: { a: 'Respuesta conservada' } }, strikes: 3, incidents: [{tipo:'perdida_de_foco'}], startTime: Date.now(), endTime: Date.now() + 90000 }));
     }
-  }, { student, quiz, live: { ...live, estado: phase }, restore, deny, review });
+  }, { student, quiz, live: { ...live, estado: phase }, restore, deny, review, reviewAttempts, reviewFallback, failReview });
   await page.goto(TARGET_URL);
   async function start() {
     await page.getByRole('button', { name: 'Pruebas semanales', exact: true }).click();
@@ -194,10 +194,37 @@ try{
  for(const size of [{width:320,height:640},{width:768,height:1024}]){
   fixture=await setup({size,review:true});page=fixture.page;
   await page.getByText('Falta 1: La página dejó de estar visible',{exact:true}).waitFor();
+  await page.getByText('Datos técnicos del intento',{exact:true}).click();
   assert(await page.getByText(/Recepción del servidor/).isVisible());
   assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
   await page.screenshot({path:`artifacts/quiz-activity/revision-${size.width}x${size.height}.png`,fullPage:true});
   assert.deepEqual(fixture.errors,[]);await fixture.context.close();
  }
- console.log('PASS navegador: aceptación, aviso completo de 10 segundos, regreso explícito sin faltas extra, falta grave, tres episodios/envío único, respuestas exactas, recarga, cierre offline/reintento, docente y lobby en móvil/tablet.');
+ // La entrega sin faltas no hereda visualmente las faltas de otros intentos.
+ const oldAttempt={id:'old-attempt',politica:'salidas-tres-faltas-v1',aceptado_at:'2026-11-14T06:45:00Z',faltas:3,eventos:[{id:'old-exit',episodio_id:'old-episode',tipo:'salida',falta:3,senales:['ventana_sin_foco'],pregunta_indice:0,pregunta_id:'q_1',hora_cliente:'2026-11-14T06:46:35Z',recibido_at:'2026-11-14T06:46:36Z'}]};
+ const cleanAttempt={id:'delivery-attempt',politica:'salidas-tres-faltas-v1',aceptado_at:'2026-11-14T06:13:00Z',faltas:0,eventos:[]};
+ for(const size of [{width:320,height:640},{width:640,height:360},{width:768,height:1024},{width:1024,height:768}]){
+  fixture=await setup({size,review:true,reviewAttempts:[oldAttempt,cleanAttempt,oldAttempt],reviewFallback:{...cleanAttempt,intento_id:cleanAttempt.id}});page=fixture.page;
+  const primary=page.getByRole('article',{name:'Intento de esta entrega',exact:true});
+  await primary.getByText('Sin faltas registradas',{exact:true}).waitFor();
+  assert(await primary.getByText('Sin salidas registradas en este intento.',{exact:true}).isVisible());
+  assert.equal(await primary.locator('ol').count(),0,'No genera listas vacías');
+  assert.equal(await page.getByText('3 de 3 faltas',{exact:true}).isVisible(),false);
+  assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+  await page.screenshot({path:`artifacts/quiz-activity/resumen-${size.width}x${size.height}.png`,fullPage:true});
+  await page.getByText('Historial de otros intentos (1)',{exact:true}).click();
+  assert(await page.getByText('3 de 3 faltas',{exact:true}).isVisible());
+  const history=page.getByRole('article',{name:'Otro intento guardado',exact:true});
+  assert.equal(await history.getByText('Evento de salida: old-exit',{exact:true}).isVisible(),false);
+  await history.getByText('Datos técnicos del intento',{exact:true}).click();
+  assert(await history.getByText('Evento de salida: old-exit',{exact:true}).isVisible());
+  assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+  await page.screenshot({path:`artifacts/quiz-activity/historial-${size.width}x${size.height}.png`,fullPage:true});
+  assert.deepEqual(fixture.errors,[]);await fixture.context.close();
+ }
+ fixture=await setup({review:true,reviewFallback:{...cleanAttempt,intento_id:cleanAttempt.id},failReview:true});page=fixture.page;
+ await page.getByRole('alert').getByText(/No se pudo consultar la bitácora independiente/).waitFor();
+ assert(await page.getByRole('article',{name:'Intento de esta entrega'}).getByText('Sin faltas registradas',{exact:true}).isVisible());
+ assert.deepEqual(fixture.errors,[]);await fixture.context.close();
+ console.log('PASS navegador: pruebas en móvil/tablet y revisión resumida, entrega correcta sin faltas, historial sin duplicados, detalles técnicos y copia ante fallo de consulta.');
 }finally{await browser.close();}
