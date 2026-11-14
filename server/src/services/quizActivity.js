@@ -31,21 +31,27 @@ function saveLocal(rows) {
 const scope = (section, week, student) => ({ seccion_id: String(section), numero_semana: Number(week), alumno_id: String(student.id), numero_cuenta: String(student.numero_cuenta) });
 const belongs = (row, where) => Object.entries(where).every(([key, value]) => row[key] === value);
 
-export async function beginQuizActivity(section, week, student, quiz, clientTime) {
+export async function beginQuizActivity(section, week, student, quiz, clientTime, notBefore = null, diagnosticVersion = null) {
   const where = { ...scope(section, week, student), quiz_id: String(quiz.id) };
   const date = new Date(clientTime);
   if (!Number.isFinite(date.getTime())) throw new Error("Hora de aceptación inválida.");
-  const row = { id: crypto.randomUUID(), ...where, nombre_completo: student.nombre_completo || "", politica: QUIZ_ACTIVITY_POLICY, aceptado_at: new Date().toISOString(), aceptado_cliente_at: date.toISOString(), faltas: 0, episodio_abierto: null, finalizado_at: null, reemplazado_at: null };
+  const row = { id: crypto.randomUUID(), ...where, nombre_completo: student.nombre_completo || "", politica: QUIZ_ACTIVITY_POLICY, aceptado_at: new Date().toISOString(), aceptado_cliente_at: date.toISOString(), faltas: 0, episodio_abierto: null, finalizado_at: null, reemplazado_at: null, ...(diagnosticVersion === 1 ? {diagnostico_version:1} : {}) };
   if (isSupabaseConfigured && supabase) {
     let { data, error } = await supabase.from("quiz_activity_attempts").select("*").match(where).is("reemplazado_at", null).maybeSingle();
     if (error) throw error;
-    if (data?.finalizado_at) {
+    if (data && (data.finalizado_at || (notBefore && new Date(data.aceptado_at) < new Date(notBefore)))) {
       const retired = await supabase.from("quiz_activity_attempts").update({ reemplazado_at: new Date().toISOString() }).eq("id", data.id).is("reemplazado_at", null);
       if (retired.error) throw retired.error;
       data = null;
     }
     if (!data) {
-      const result = await supabase.from("quiz_activity_attempts").insert(row).select("*").single();
+      let result = await supabase.from("quiz_activity_attempts").insert(row).select("*").single();
+      // Publicar el cliente antes de aplicar la migración no debe impedir rendir.
+      // Solo omitir el diagnóstico cuando falta exactamente su columna nueva.
+      if (["PGRST204", "42703"].includes(result.error?.code) && /diagnostico_version/.test(result.error?.message || "")) {
+        const { diagnostico_version, ...legacyRow } = row;
+        result = await supabase.from("quiz_activity_attempts").insert(legacyRow).select("*").single();
+      }
       if (result.error?.code === "23505") {
         const retry = await supabase.from("quiz_activity_attempts").select("*").match(where).is("reemplazado_at", null).single();
         if (retry.error) throw retry.error;
@@ -57,7 +63,7 @@ export async function beginQuizActivity(section, week, student, quiz, clientTime
   return locked(() => {
     const rows = loadLocal();
     let found = rows.find(item => belongs(item, where) && !item.reemplazado_at);
-    if (found?.finalizado_at) { found.reemplazado_at = new Date().toISOString(); found = null; }
+    if (found && (found.finalizado_at || (notBefore && new Date(found.aceptado_at) < new Date(notBefore)))) { found.reemplazado_at = new Date().toISOString(); found = null; }
     if (!found) { found = { ...row, eventos: [] }; rows.push(found); saveLocal(rows); }
     return structuredClone(found);
   });
@@ -81,7 +87,8 @@ export async function readQuizActivity(section, week, student, id) {
 export async function recordQuizActivity(section, week, student, id, events = []) {
   if (!Array.isArray(events) || events.length > 12) throw new Error("Lote de actividad inválido.");
   const clean = events.map(normalizeActivityEvent);
-  await readQuizActivity(section, week, student, id); // Nunca confiar en un ID ajeno.
+  const attempt = await readQuizActivity(section, week, student, id); // Nunca confiar en un ID ajeno.
+  if (attempt.reemplazado_at) { const error=new Error("Este intento fue reemplazado por una reapertura docente."); error.code="QUIZ_REOPENED"; throw error; }
   if (isSupabaseConfigured && supabase) {
     const { error } = await supabase.rpc("append_quiz_activity", { p_attempt: id, p_student: String(student.id), p_events: clean });
     if (error) throw error;

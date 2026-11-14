@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { api } from "../services/api";
 import { QUIZ_ACTIVITY_SIGNALS } from "../../../shared/quizActivity.mjs";
 import "./QuizActivity.css";
+import QuizDiagnosticsReview from "./QuizDiagnosticsReview";
 
 const stamp = value => value ? new Date(value).toLocaleString("es-HN", { timeZone: "America/Tegucigalpa", hour12: false }) : "Sin registrar";
 export default function QuizActivityReview({ section, week, account, fallback }) {
@@ -38,5 +39,6 @@ export default function QuizActivityReview({ section, week, account, fallback })
         </li>;
       })}</ol>
     </div>)}
+    <QuizDiagnosticsReview key={`${section}_${week}_${account}`} section={section} week={week} account={account} />
   </section>;
 }

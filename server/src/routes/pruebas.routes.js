@@ -1,5 +1,6 @@
 import { authenticateQuiz, quizAccess } from "../middlewares/quizAccess.middleware.js";
 import { Router } from "express";
+import { saveDiagnostic, reviewDiagnostics } from "../controllers/quizDiagnostics.controller.js";
 import {
   getPruebaSemanal,
   getPruebasPorSeccion,
@@ -8,6 +9,7 @@ import {
   startQuizActivity,
   saveQuizActivity,
   reviewQuizActivity,
+  reopenQuizSubmission,
   getEntregasPorSemana,
   getAllEntregasPorSeccion,
   getMiEntregaSemanal,
@@ -29,6 +31,7 @@ router.use(authenticateQuiz);
 router.get("/live/:seccion_id/activa", quizAccess({ student: true, kind: "live" }), getActiveLiveQuiz);
 router.get("/live/:seccion_id/:semana", quizAccess({ student: true, kind: "live" }), getLiveQuizState);
 router.post("/live/:seccion_id/:semana/control", quizAccess({ permission: "create", kind: "control" }), controlLiveQuiz);
+router.post("/live/:seccion_id/:semana/estudiante/:numero_cuenta/reabrir", quizAccess({ permission: "create", kind: "control" }), reopenQuizSubmission);
 router.post("/live/:seccion_id/:semana/heartbeat", quizAccess({ student: true, kind: "live" }), heartbeatLiveQuiz);
 
 // Consultas de pruebas y entregas
@@ -43,6 +46,8 @@ router.post("/seccion/:seccion_id", quizAccess({ permission: "create" }), savePr
 router.post("/seccion/:seccion_id/entregar", quizAccess({ student: true, kind: "submission" }), submitPruebaEstudiante);
 router.post("/seccion/:seccion_id/semana/:semana/actividad/iniciar", quizAccess({ student: true, kind: "submission" }), startQuizActivity);
 router.post("/seccion/:seccion_id/semana/:semana/actividad/:intento_id", quizAccess({ student: true, kind: "submission" }), saveQuizActivity);
+router.post("/seccion/:seccion_id/semana/:semana/actividad/:intento_id/diagnostico", quizAccess({ student: true, kind: "submission" }), saveDiagnostic);
+router.get("/seccion/:seccion_id/semana/:semana/diagnostico/estudiante/:numero_cuenta", quizAccess({ permission: "review", kind: "submission" }), reviewDiagnostics);
 router.get("/seccion/:seccion_id/semana/:semana/actividad/estudiante/:numero_cuenta", quizAccess({ permission: "review", kind: "submission" }), reviewQuizActivity);
 router.put("/entregas/:entrega_id/calificar", quizAccess({ permission: "review", submission: true }), calificarEntrega);
 router.delete("/entregas/:entrega_id", quizAccess({ permission: "review", submission: true }), deleteEntregaEstudiante);

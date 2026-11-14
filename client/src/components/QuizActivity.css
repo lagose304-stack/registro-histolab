@@ -39,3 +39,8 @@
   .quiz-activity-warning button { min-height:48px;padding:.6rem; }
   .quiz-activity-warning small { font-size:.7rem;line-height:1.3; }
 }
+.quiz-diagnostics-review { margin-top:1rem;padding:.9rem;border:1px solid #b7cbd7;border-radius:10px;background:#f8fbfd;overflow-wrap:anywhere; }
+.quiz-diagnostics-review summary { cursor:pointer;min-height:44px;font-weight:700; }
+.quiz-diagnostics-review p { line-height:1.6; }
+.quiz-diagnostics-review ul { padding-left:1.2rem; }
+.quiz-diagnostics-review button { min-height:44px;max-width:100%;padding:.65rem .85rem;border:1px solid #9eb9c9;border-radius:8px;background:#edf5f9;color:#16485f;font:inherit;cursor:pointer; }

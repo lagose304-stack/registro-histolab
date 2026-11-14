@@ -5,6 +5,8 @@ import { supabase, isSupabaseConfigured } from "../db/supabase.js";
 import { loadQuizSchedule } from "../services/quizSchedule.js";
 import { getQuizWindow } from "../../../shared/quizSchedule.mjs";
 import { canBypassQuizSchedule } from "../../../shared/instructorRoles.mjs";
+import { isLivePresenceRecent } from "../../../shared/liveQuizPresence.mjs";
+import { getQuizDeliveryPresence } from "./pruebas.controller.js";
 
 const __dirname = (() => {
   try {
@@ -198,7 +200,7 @@ async function getOrCreateSession(seccion_id, semana) {
     const mergedAnswers = { ...(sbSession.respuestas_globales || {}) };
     if (sbSession.estado !== "inactiva") {
       for (const [account,presence] of Object.entries(memSession?.alumnos_conectados || {})) {
-        if (presence?.ultimo_ping > (mergedConnected[account]?.ultimo_ping || 0)) {
+        if (presence?.ultimo_ping > sbSession.ultima_actualizacion && presence.ultimo_ping > (mergedConnected[account]?.ultimo_ping || 0)) {
           mergedConnected[account] = presence;
           if (memSession.respuestas_globales?.[account]) mergedAnswers[account] = memSession.respuestas_globales[account];
         }
@@ -261,13 +263,14 @@ export const getLiveQuizState = async (req, res) => {
       }
     }
 
-    // Estadísticas de alumnos conectados y respuestas de la pregunta actual
+    const deliveries = req.student ? undefined : await getQuizDeliveryPresence(seccion_id, semana);
+    // Las entregas ya registradas no permanecen en el contador de conexiones activas.
     const currentQIdx = session.pregunta_actual_idx ?? 0;
-    const activeStudentsList = Object.values(session.alumnos_conectados || {}).filter(
-      (c) => c && (!c.ultimo_ping || (now - c.ultimo_ping < 60000))
-    );
+    const activeStudentsList = Object.entries(session.alumnos_conectados || {}).filter(
+      ([account, c]) => (!deliveries?.[account] || (deliveries[account].estado === "borrador" && c?.ultimo_ping >= new Date(deliveries[account].updated_at).getTime())) && isLivePresenceRecent(c, now)
+    ).map(([, c]) => c);
     const respondieronCount = activeStudentsList.filter(
-      (c) => c.pregunta_vista === currentQIdx && c.ha_respondido
+      (c) => !["portal", "aviso", "entrega_pendiente"].includes(c.ubicacion) && c.pregunta_vista === currentQIdx && c.ha_respondido
     ).length;
 
     res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
@@ -277,6 +280,7 @@ export const getLiveQuizState = async (req, res) => {
         ...session,
         tiempo_restante_segundos,
         tiempo_transcurrido_segundos,
+        ...(deliveries ? { entregas_estudiantes: deliveries } : {}),
         total_conectados: activeStudentsList.length,
         respuestas_recibidas_count: respondieronCount,
         todos_respondieron: activeStudentsList.length > 0 && respondieronCount >= activeStudentsList.length,
@@ -459,18 +463,23 @@ export const heartbeatLiveQuiz = async (req, res) => {
     const cleanAccount = String(numero_cuenta).trim();
     const session = await getOrCreateSession(seccion_id, semana);
     const now = Date.now();
+    const previousPresence = session.alumnos_conectados?.[cleanAccount];
+    const incomingLocation = ["portal", "prueba", "aviso", "entrega_pendiente"].includes(req.body.ubicacion) ? req.body.ubicacion : Number(pregunta_vista) >= 0 ? "prueba" : "portal";
+    // Una consulta del banner iniciada antes de entrar puede llegar después del latido de prueba.
+    const latePortal = incomingLocation === "portal" && ["prueba", "aviso", "entrega_pendiente"].includes(previousPresence?.ubicacion) && isLivePresenceRecent(previousPresence, now);
 
     if (!session.alumnos_conectados) {
       session.alumnos_conectados = {};
     }
 
     // Actualizar registro del estudiante conectado
-    session.alumnos_conectados[cleanAccount] = {
+    session.alumnos_conectados[cleanAccount] = latePortal ? previousPresence : {
       ...(req.makeup ? { reposicion: { id: req.makeup.id, origen: req.makeup.origen_codigo } } : {}),
       nombre_completo: nombre_completo || session.alumnos_conectados[cleanAccount]?.nombre_completo || "Estudiante",
       ultimo_ping: now,
       pregunta_vista: typeof pregunta_vista === "number" ? pregunta_vista : -1,
-      ha_respondido: Boolean(ha_respondido)
+      ha_respondido: Number(pregunta_vista) === Number(session.pregunta_actual_idx) && ha_respondido === true,
+      ubicacion: incomingLocation
     };
 
     // Respaldar respuestas parciales si se enviaron
@@ -504,10 +513,10 @@ export const heartbeatLiveQuiz = async (req, res) => {
     // Calcular estadísticas en tiempo real de alumnos que ya respondieron la pregunta actual
     const currentQIdx = session.pregunta_actual_idx ?? 0;
     const activeStudentsList = Object.values(session.alumnos_conectados || {}).filter(
-      (c) => c && (!c.ultimo_ping || (now - c.ultimo_ping < 60000))
+      (c) => isLivePresenceRecent(c, now)
     );
     const respondieronCount = activeStudentsList.filter(
-      (c) => c.pregunta_vista === currentQIdx && c.ha_respondido
+      (c) => !["portal", "aviso", "entrega_pendiente"].includes(c.ubicacion) && c.pregunta_vista === currentQIdx && c.ha_respondido
     ).length;
 
     const key = getSessionKey(seccion_id, semana);

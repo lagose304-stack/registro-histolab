@@ -1,3 +1,4 @@
+import { buildLiveStudentRoster } from "../../../shared/liveQuizPresence.mjs";
 import { quizItemLabel } from "../../../shared/quizItems.mjs";
 import { getQuizWindow } from "../../../shared/quizSchedule.mjs";
 import { canBypassQuizSchedule } from "../../../shared/instructorRoles.mjs";
@@ -7,6 +8,7 @@ import { Radio, Play, SkipForward, Square, RefreshCw, Users, Clock, CheckCircle2
 import { api } from "../services/api";
 import { displaySectionCode } from "../../../shared/sectionCode.mjs";
 import "./LiveQuizControlView.css";
+import LiveQuizActionDialog from "./LiveQuizActionDialog";
 import {
   hasFullSectionAccess,
   isWeekAssignedToUser,
@@ -30,7 +32,14 @@ export default function LiveQuizControlView({
   const [quizRetry, setQuizRetry] = useState(0);
   const [syncError, setSyncError] = useState("");
   const [sessionSynced, setSessionSynced] = useState(false);
+  const [presenceClock, setPresenceClock] = useState(Date.now());
+  const presenceClockRef = useRef({ server: Date.now(), received: Date.now() });
+  const pollSequenceRef = useRef(0);
+  const appliedSequenceRef = useRef(0);
   const [actionError, setActionError] = useState("");
+  const [pendingAction, setPendingAction] = useState(null);
+  const [dialogError, setDialogError] = useState("");
+  const actionBusyRef = useRef(false);
   const [studentSearch, setStudentSearch] = useState("");
   const [studentFilter, setStudentFilter] = useState("all");
   const sessionKeyRef = useRef("");
@@ -42,6 +51,7 @@ export default function LiveQuizControlView({
   const [asignaciones, setAsignaciones] = useState([]);
   const [temario, setTemario] = useState([]);
   const [selectedSemana, setSelectedSemana] = useState(initialSemana || null);
+  useEffect(() => { setPendingAction(null); setDialogError(""); }, [seccion?.id, selectedSemana]);
 
   // Estado de la sesión en vivo
   const [liveSession, setLiveSession] = useState({
@@ -245,17 +255,21 @@ export default function LiveQuizControlView({
 
     const requestKey = `${seccion.id}_${selectedSemana}`;
     const controlEpoch = controlEpochRef.current;
+    const sequence = ++pollSequenceRef.current;
     try {
       const res = await api.pruebas.getLiveState(seccion.id, selectedSemana);
-      if (sessionKeyRef.current !== requestKey || controlEpochRef.current !== controlEpoch) return;
+      if (sessionKeyRef.current !== requestKey || controlEpochRef.current !== controlEpoch || sequence < appliedSequenceRef.current) return;
       if (res?.success && res.data) {
+        appliedSequenceRef.current = sequence;
+        presenceClockRef.current = { server: Number(res.data.server_time) || Date.now(), received: Date.now() };
+        setPresenceClock(Date.now());
         setSyncError("");
         setSessionSynced(true);
         setLiveSession(res.data);
         setLocalSecondsRemaining(res.data.tiempo_restante_segundos ?? 90);
       } else throw new Error("Estado no disponible");
     } catch (e) {
-      if (sessionKeyRef.current === requestKey && controlEpochRef.current === controlEpoch) setSyncError("Sin conexión con la sesión. Esperando sincronización…");
+      if (sessionKeyRef.current === requestKey && controlEpochRef.current === controlEpoch && sequence >= appliedSequenceRef.current) setSyncError("Sin conexión con la sesión. Esperando sincronización…");
       console.warn("Aviso en syncLiveState:", e.message);
     }
   }, [seccion?.id, selectedSemana]);
@@ -264,13 +278,17 @@ export default function LiveQuizControlView({
   useEffect(() => {
     setSessionSynced(false);
     setSyncError("");
-    syncLiveState();
-
-    if (pollTimerRef.current) clearInterval(pollTimerRef.current);
-    pollTimerRef.current = setInterval(syncLiveState, 1200);
-
+    let stopped = false;
+    const poll = async () => {
+      await syncLiveState();
+      if (!stopped) pollTimerRef.current = setTimeout(poll, 1200);
+    };
+    poll();
+    const clock = setInterval(() => setPresenceClock(Date.now()), 1000);
     return () => {
-      if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+      stopped = true;
+      clearTimeout(pollTimerRef.current);
+      clearInterval(clock);
     };
   }, [syncLiveState]);
 
@@ -297,9 +315,11 @@ export default function LiveQuizControlView({
   }, [liveSession.estado, localSecondsRemaining, syncLiveState]);
 
   // Ejecutar comando maestro de control
-  const handleExecuteControl = async (accion, extra = {}) => {
-    if (!seccion?.id || !selectedSemana || actionLoading || !sessionSynced || syncError) return;
-    if (accion === "finalizar" && !window.confirm("¿Finalizar la prueba para toda la sección? Los estudiantes terminarán su intento con las respuestas registradas.")) return;
+  const handleExecuteControl = async (accion, extra = {}, confirmed = false) => {
+    if (!seccion?.id || !selectedSemana || actionBusyRef.current || !sessionSynced || syncError) return;
+    if (["finalizar", "deshabilitar"].includes(accion) && !confirmed) {
+      setDialogError(""); setPendingAction({ type:"close", action:accion, extra }); return;
+    }
 
     // Validación estricta de permisos: solo asignado a crear/revisar o titular
     const canControl = hasFullAccess || isWeekAssignedToUser(asignaciones, QUIZ_ROLES, selectedSemana, currentUser, seccion);
@@ -316,6 +336,7 @@ export default function LiveQuizControlView({
       }
     }
 
+    actionBusyRef.current = true;
     setActionLoading(true);
     controlEpochRef.current++;
     setActionError("");
@@ -328,7 +349,10 @@ export default function LiveQuizControlView({
       }
 
       controlEpochRef.current++;
-      setLiveSession(res.data);
+      const received = Date.now();
+      presenceClockRef.current = { server: Number(res.data.server_time) || received, received };
+      setPresenceClock(received);
+      setLiveSession(previous => ({ ...res.data, entregas_estudiantes: previous.entregas_estudiantes || {} }));
       setLocalSecondsRemaining(res.data.tiempo_restante_segundos ?? 90);
 
       if (accion === "habilitar") {
@@ -342,12 +366,33 @@ export default function LiveQuizControlView({
       } else if (accion === "deshabilitar") {
         notify("Sesión en vivo deshabilitada.", "info");
       }
+      setPendingAction(null);
     } catch (err) {
       console.error("Error al ejecutar control:", err);
       setActionError(err.message || "No pudimos ejecutar la acción. El estado mostrado se actualizará al sincronizar.");
+      setDialogError(err.message || "No pudimos confirmar el cierre. Reintenta.");
     } finally {
+      actionBusyRef.current = false;
       setActionLoading(false);
     }
+  };
+
+  const confirmReopening = async reason => {
+    if (actionBusyRef.current || !pendingAction || !sessionSynced || syncError) return;
+    actionBusyRef.current = true;
+    setActionLoading(true); setDialogError("");
+    controlEpochRef.current++;
+    try {
+      const student=pendingAction.student;
+      const result=await api.pruebas.reopenQuiz(seccion.id,selectedSemana,student.key,{motivo:reason,solicitud_id:pendingAction.requestId,version:student.delivery.updated_at});
+      if (!result?.success) throw new Error(result?.message || "No pudimos confirmar la reapertura.");
+      controlEpochRef.current++;
+      setLiveSession(previous=>({...previous,entregas_estudiantes:{...previous.entregas_estudiantes,[student.key]:result.data}}));
+      setPendingAction(null);
+      notifyRef.current("Prueba habilitada de nuevo. El estudiante puede actualizar su catálogo y volver a entrar.","success");
+      await syncLiveState();
+    } catch (error) { setDialogError(error.message || "No pudimos confirmar la reapertura. Reintenta."); }
+    finally { actionBusyRef.current=false; setActionLoading(false); }
   };
 
   // Pregunta activa actual del cuestionario
@@ -355,14 +400,6 @@ export default function LiveQuizControlView({
   const currentQuestion = activeQuiz?.preguntas?.[currentQIdx] || null;
   const totalPreguntas = activeQuiz?.preguntas?.length || 6;
   const isBonusQuestion = currentQIdx === 5;
-
-  // Estadísticas de alumnos conectados en tiempo real (< 60 segundos)
-  const connectedMap = liveSession.alumnos_conectados || {};
-  const nowTs = Date.now();
-  const activeConnectedStudents = Object.values(connectedMap).filter(
-    (c) => c && (!c.ultimo_ping || (nowTs - c.ultimo_ping < 60000))
-  );
-  const connectedCount = activeConnectedStudents.length;
 
   const canControl = hasFullAccess || (selectedSemana && isWeekAssignedToUser(asignaciones,QUIZ_ROLES,selectedSemana,currentUser,seccion));
   const published = activeQuiz?.publicada === true || activeQuiz?.estado === "publicada";
@@ -376,25 +413,17 @@ export default function LiveQuizControlView({
     finalizada: ["Prueba finalizada", "La sesión terminó. Las respuestas se entregan y los apartados objetivos se califican automáticamente."]
   };
   const [stateLabel,stateDescription] = stateDetails[state] || stateDetails.inactiva;
-  const controlDisabled = actionLoading || !canControl || !sessionSynced || Boolean(syncError);
+  const controlDisabled = actionLoading || Boolean(pendingAction) || !canControl || !sessionSynced || Boolean(syncError);
   const quizWindow = getQuizWindow(seccion,semanasConfig,selectedSemana,new Date(),scheduleEvents);
   const canStartNow = bypassSchedule || (quizWindow.isPracticeDay && quizWindow.isOpen);
   const dueToday = semanasConfig.filter(week => getQuizWindow(seccion,semanasConfig,week.numero_semana,new Date(),scheduleEvents).isPracticeDay).map(week => Number(week.numero_semana));
   const questionDuration = Number(currentQuestion?.tiempo_segundos || activeQuiz?.tiempo_por_pregunta_segundos || 90);
-  const enrolled = new Set(studentsList.map(student => String(student.numero_cuenta || "").trim()));
-  const invited = Object.entries(connectedMap).filter(([account, connection]) => !enrolled.has(account) && connection?.reposicion)
-    .map(([numero_cuenta, connection]) => ({ numero_cuenta, nombre_completo: connection.nombre_completo, reposicion: connection.reposicion }));
-  const students = [...studentsList, ...invited].map(student => {
-    const key=String(student.numero_cuenta || "").trim();
-    const connection=connectedMap[key];
-    const connected=Boolean(connection && (!connection.ultimo_ping || nowTs-connection.ultimo_ping<60000));
-    return {...student,key,connected,answered:connected && Boolean(connection?.ha_respondido)};
-  });
+  const serverNow = presenceClockRef.current.server + Math.max(0, presenceClock - presenceClockRef.current.received);
+  const { students, enrolledCount, invitedCount, connectedCount, answeredCount } = buildLiveStudentRoster(studentsList, liveSession, serverNow, sessionSynced && !syncError);
   const shownStudents=students.filter(student => {
     const query=studentSearch.trim().toLocaleLowerCase();
-    return (!query || `${student.nombre_completo || ""} ${student.key}`.toLocaleLowerCase().includes(query)) && (studentFilter==="all" || (studentFilter==="connected" ? student.connected : !student.connected));
+    return (!query || `${student.nombre_completo || ""} ${student.key}`.toLocaleLowerCase().includes(query)) && (studentFilter==="all" || (studentFilter==="connected" ? student.connected : studentFilter==="submitted" ? student.state==="submitted" : student.state==="offline"));
   });
-  const answeredCount=students.filter(student=>student.answered).length;
   const actionButton=(label,Icon,action,extra={},primary=false,disabled=false)=><button type="button" className={`user-button${primary?" user-button--primary":""}${action==="finalizar"?" user-button--danger":""}`} disabled={controlDisabled || disabled} onClick={()=>handleExecuteControl(action,extra)}><Icon size={18} aria-hidden="true" />{actionLoading?"Procesando…":label}</button>;
 
   return (
@@ -405,7 +434,7 @@ export default function LiveQuizControlView({
       : loadError ? <div className="user-directory__state" role="alert"><p>{loadError}</p><button type="button" className="user-button" onClick={loadInitialData}>Reintentar</button></div>
       : !visibleSemanasConfig.length ? <div className="user-directory__state"><Lock size={24} aria-hidden="true" /><h3>{hasFullAccess?"No hay semanas configuradas":"No tienes semanas asignadas para control en vivo"}</h3><p>{hasFullAccess?"Define las semanas de esta carrera para comenzar.":"El titular puede asignarte la creación y revisión de una prueba desde Proporcionar asignaciones."}</p></div> : <>
         <div className="live-quiz-panel__selection">
-          <label className="user-field">Semana de la prueba<select aria-label="Semana de la prueba" value={selectedSemana || ""} disabled={actionLoading} onChange={event=>setSelectedSemana(Number(event.target.value))}>{visibleSemanasConfig.map(week=><option key={week.numero_semana} value={week.numero_semana}>{getWeekDisplayName(week)}</option>)}</select></label>
+          <label className="user-field">Semana de la prueba<select aria-label="Semana de la prueba" value={selectedSemana || ""} disabled={actionLoading || Boolean(pendingAction)} onChange={event=>setSelectedSemana(Number(event.target.value))}>{visibleSemanasConfig.map(week=><option key={week.numero_semana} value={week.numero_semana}>{getWeekDisplayName(week)}</option>)}</select></label>
           <div><p><User size={16} aria-hidden="true" /> Responsable <strong>{assignedTeacherName}</strong></p><small>{hasFullAccess?"Acceso completo a la sección":`Horario de habilitación: ${seccion?.dia} · ${seccion?.hora_inicio} – ${seccion?.hora_fin}`}</small></div>
           <button type="button" className="user-button" disabled={!selectedSemana || actionLoading} onClick={syncLiveState}><RefreshCw size={17} aria-hidden="true" /> Actualizar estado</button>
         </div>
@@ -414,7 +443,7 @@ export default function LiveQuizControlView({
         : !activeQuiz ? <div className="user-directory__state"><h3>No hay una prueba creada para esta semana</h3><p>Prepárala desde Crear prueba semanal antes de abrir la sesión en vivo.</p></div>
         : !published ? <div className="live-quiz-panel__warning"><AlertTriangle size={22} aria-hidden="true" /><div><h3>La prueba está en borrador</h3><p>Publícala desde Crear prueba semanal para habilitar el acceso de los estudiantes.</p></div></div> : <>
           <dl className="live-quiz-panel__stats" aria-label="Resumen de la sesión">
-            {[["Matriculados",studentsList.length],["Conectados",connectedCount],["Con respuesta",answeredCount],["Pregunta",state==="inactiva" || state==="lobby"?`— / ${totalPreguntas}`:`${currentQIdx+1} / ${totalPreguntas}`]].map(([label,value])=><div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}
+            {[["Matriculados",enrolledCount],["Conectados",sessionSynced && !syncError ? connectedCount : "—"],["Con respuesta",sessionSynced && !syncError ? answeredCount : "—"],["Pregunta",state==="inactiva" || state==="lobby"?`— / ${totalPreguntas}`:`${currentQIdx+1} / ${totalPreguntas}`]].map(([label,value])=><div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}
           </dl>
           <div className="live-quiz-panel__layout">
             <div className="live-quiz-panel__main">
@@ -442,14 +471,17 @@ export default function LiveQuizControlView({
               </section>}
             </div>
             <aside className="live-quiz-panel__students" aria-labelledby="live-students-title">
-              <header><div><h3 id="live-students-title">Estudiantes</h3><p>{connectedCount} conectados · {studentsList.length} matriculados{invited.length > 0 && ` · ${invited.length} en reposición`}</p></div><Users size={20} aria-hidden="true" /></header>
+              <header><div><h3 id="live-students-title">Estudiantes</h3><p>{sessionSynced && !syncError ? `${connectedCount} conectados` : "Conexión sin verificar"} · {enrolledCount} matriculados{invitedCount > 0 && ` · ${invitedCount} en reposición`}</p></div><Users size={20} aria-hidden="true" /></header>
+              <p className="live-quiz-panel__presence-help">Conectados al portal o a la prueba: señal recibida en los últimos 15 segundos. Las entregas finalizadas se muestran por separado.</p>
               <label className="user-directory__search"><Search size={17} aria-hidden="true" /><input type="search" aria-label="Buscar estudiante" placeholder="Nombre o cuenta" value={studentSearch} onChange={event=>setStudentSearch(event.target.value)} /></label>
-              <label className="user-field">Mostrar<select aria-label="Filtrar estudiantes por conexión" value={studentFilter} onChange={event=>setStudentFilter(event.target.value)}><option value="all">Todo el grupo</option><option value="connected">Conectados</option><option value="offline">Sin conexión</option></select></label>
-              {!shownStudents.length?<p className="live-quiz-panel__empty">{students.length?"Ningún estudiante coincide con los filtros.":"Aún no hay estudiantes matriculados."}</p>:<ul>{shownStudents.map(student=><li key={student.key} data-connected={student.connected}><div><strong>{student.nombre_completo || "Estudiante"}</strong><small>{student.key}{student.reposicion && ` · Reposición desde ${student.reposicion.origen}`}</small></div><span className="live-quiz-panel__student-state" data-answered={student.answered}>{!student.connected?"Sin conexión":state==="en_pregunta"?student.answered?"Respondió":"Respondiendo":state==="lobby"?"En sala":"Conectado"}</span></li>)}</ul>}
+              <label className="user-field">Mostrar<select aria-label="Filtrar estudiantes por conexión" value={studentFilter} onChange={event=>setStudentFilter(event.target.value)}><option value="all">Todo el grupo</option><option value="connected">Conectados</option><option value="offline">Sin conexión</option><option value="submitted">Entregaron</option></select></label>
+              {!shownStudents.length?<p className="live-quiz-panel__empty">{students.length?"Ningún estudiante coincide con los filtros.":"Aún no hay estudiantes matriculados."}</p>:<ul>{shownStudents.map(student=><li key={student.key} data-connected={student.connected}><div><strong>{student.nombre_completo || "Estudiante"}</strong><small>{student.key}{student.reposicion && ` · Reposición desde ${student.reposicion.origen}`}</small></div><span className="live-quiz-panel__student-state" data-answered={student.answered}>{student.label}</span>{student.delivery?.estado === "borrador" && <small className="live-quiz-panel__reopen-note">Reapertura autorizada · conserva sus respuestas</small>}{student.state === "submitted" && canControl && <button type="button" className="user-button live-quiz-panel__reopen" disabled={controlDisabled || !["lobby","en_pregunta","esperando_siguiente"].includes(state) || !student.delivery.updated_at} onClick={()=>{setDialogError("");setPendingAction({type:"reopen",student,requestId:crypto.randomUUID()});}} aria-label={`Habilitar de nuevo a ${student.nombre_completo || student.key}`}>Habilitar de nuevo</button>}</li>)}</ul>}
+              {["inactiva","finalizada"].includes(state) && <p className="live-quiz-panel__presence-help">Abre la sala antes de habilitar de nuevo a un estudiante.</p>}
             </aside>
           </div>
         </>}
       </>}
+      {pendingAction && <LiveQuizActionDialog action={pendingAction} busy={actionLoading} error={dialogError || syncError} onCancel={()=>{if(!actionBusyRef.current)setPendingAction(null);}} onConfirm={reason=>pendingAction.type === "reopen" ? confirmReopening(reason) : handleExecuteControl(pendingAction.action,pendingAction.extra,true)} />}
     </section>
   );
 }

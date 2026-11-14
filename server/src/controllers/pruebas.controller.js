@@ -433,8 +433,12 @@ async function loadQuizForAssessment(sectionId, week) {
 }
 
 function publicSubmission(submission) {
-  if (!submission || !Object.hasOwn(submission, "instructor_calificador_id")) return submission;
+  if (!submission) return submission;
   const { instructor_calificador_id, ...visible } = submission;
+  if (visible.auditoria?.reaperturas || visible.auditoria?.reapertura) {
+    const { reaperturas, reapertura, ...audit } = visible.auditoria;
+    visible.auditoria = { ...audit, ...(reapertura ? { reapertura: { id: reapertura.id, fecha: reapertura.fecha, motivo: reapertura.motivo } } : {}) };
+  }
   return visible;
 }
 
@@ -456,6 +460,17 @@ export async function getQuizSubmissionForAccess(id) {
   return cachePruebas.entregas.find(item=>String(item.id)===String(id));
 }
 
+// Resumen para control docente: no incluye respuestas, notas ni auditorías.
+export async function getQuizDeliveryPresence(section, week) {
+  let rows;
+  if (isSupabaseConfigured && supabase) {
+    const result = await supabase.from("entregas_pruebas").select("id,numero_cuenta,estado,fecha_envio,updated_at").eq("seccion_id", String(section)).eq("numero_semana", Number(week));
+    if (result.error) throw result.error;
+    rows = result.data || [];
+  } else rows = cachePruebas.entregas.filter(row => String(row.seccion_id) === String(section) && Number(row.numero_semana) === Number(week));
+  return Object.fromEntries(rows.map(row => [String(row.numero_cuenta).trim(), { id: row.id, estado: row.estado, fecha_envio: row.fecha_envio, updated_at: row.updated_at }]));
+}
+
 const localSubmissionLocks = new Map();
 async function lockLocalSubmission(key) {
   const previous = localSubmissionLocks.get(key);
@@ -473,17 +488,17 @@ export const startQuizActivity = async (req, res) => {
     const { seccion_id, semana } = req.params;
     if (req.body.politica !== QUIZ_ACTIVITY_POLICY) return res.status(400).json({ success: false, message: "Debes aceptar las reglas de las tres faltas." });
     const quiz = await loadQuizForAssessment(seccion_id, Number(semana));
-    // Solo una eliminación docente de la entrega permite otro intento; la bitácora anterior permanece.
+    // Un borrador autorizado conserva las respuestas y permite un intento nuevo.
     let previous;
     if (isSupabaseConfigured && supabase) {
-      const check = await supabase.from("entregas_pruebas").select("id").eq("seccion_id", seccion_id).eq("numero_semana", Number(semana)).eq("numero_cuenta", String(req.student.numero_cuenta)).maybeSingle();
+      const check = await supabase.from("entregas_pruebas").select("id,estado,auditoria").eq("seccion_id", seccion_id).eq("numero_semana", Number(semana)).eq("numero_cuenta", String(req.student.numero_cuenta)).maybeSingle();
       if (check.error) throw check.error;
       previous = check.data;
     } else previous = cachePruebas.entregas.find(row => String(row.seccion_id) === String(seccion_id) && Number(row.numero_semana) === Number(semana) && String(row.numero_cuenta) === String(req.student.numero_cuenta));
-    if (previous) return res.status(409).json({ success: false, message: "Esta prueba ya tiene una entrega registrada." });
+    if (previous && (previous.estado !== "borrador" || !previous.auditoria?.reapertura)) return res.status(409).json({ success: false, message: "Esta prueba ya tiene una entrega registrada." });
     const live = await getLiveQuizEvidence(seccion_id, Number(semana));
     if (!(quiz.publicada === true || String(quiz.publicada) === "true" || quiz.estado === "publicada") || String(quiz.id) !== String(req.body.quiz_id) || !["lobby", "en_pregunta", "esperando_siguiente"].includes(live.estado)) return res.status(409).json({ success: false, message: "La prueba no está disponible para iniciar." });
-    const attempt = await beginQuizActivity(seccion_id, semana, req.student, quiz, req.body.hora_cliente);
+    const attempt = await beginQuizActivity(seccion_id, semana, req.student, quiz, req.body.hora_cliente, previous?.auditoria?.reapertura?.fecha, req.body.diagnostico_version);
     return res.json({ success: true, data: attempt });
   } catch (error) { console.error("Inicio de actividad:", error.message); return res.status(503).json({ success: false, message: "No se pudo registrar el inicio. Reintenta sin cerrar esta pantalla." }); }
 };
@@ -530,11 +545,13 @@ export const submitPruebaEstudiante = async (req,res) => {
       return res.json({success:true,message:"La entrega ya está registrada. Sus respuestas originales se conservan.",data:publicSubmission(existing)});
     }
     const quiz=await loadQuizForAssessment(seccion_id,numSemana);
+    if (existing?.estado === "borrador" && !req.student) return res.status(403).json({success:false,message:"La prueba reabierta debe ser entregada por el estudiante."});
     let activity;
     if (req.student && !req.body.actividad_intento_id) return res.status(428).json({ success: false, message: "Debes registrar la aceptación de las reglas antes de entregar." });
     if (req.body.actividad_intento_id) {
       if (!req.student) return res.status(403).json({ success:false, message:"El registro de actividad requiere la sesión estudiantil." });
       activity = await recordQuizActivity(seccion_id, numSemana, req.student, req.body.actividad_intento_id, req.body.actividad_eventos_pendientes || []);
+      if (activity.reemplazado_at || (existing?.estado === "borrador" && (!existing.auditoria?.reapertura || new Date(activity.aceptado_at).getTime() < new Date(existing.auditoria.reapertura.fecha).getTime()))) return res.status(409).json({ success:false, reason:"QUIZ_REOPENED", message:"Esta entrega pertenece a un intento anterior. Vuelve a entrar a la prueba reabierta." });
       if (String(activity.quiz_id) !== String(quiz.id)) return res.status(409).json({ success:false, message:"El intento pertenece a otra prueba." });
       if (activity.faltas >= 3) clientAudit.motivo_finalizacion = "limite_tres_faltas";
       else if (clientAudit.motivo_finalizacion === "falta_grave_tiempo") {
@@ -555,29 +572,36 @@ export const submitPruebaEstudiante = async (req,res) => {
     const trustedAudit=sanitizeClientAudit(clientAudit);
     for (const key of ["calificacion_automatica","evaluaciones_incisos","nota_real","nota_con_bonus"]) delete trustedAudit[key];
     trustedAudit.hora_recepcion_servidor=new Date().toISOString();
+    if (existing?.auditoria?.reaperturas) trustedAudit.reaperturas = existing.auditoria.reaperturas;
     if (activity) trustedAudit.actividad = { intento_id: activity.id, politica: activity.politica, faltas: activity.faltas, aceptado_at: activity.aceptado_at, eventos: activity.eventos, origen: "senales_declaradas_por_navegador" };
     if (activity && clientAudit.motivo_finalizacion === "falta_grave_tiempo") trustedAudit.actividad.falta_grave = { motivo: "plazo_regreso_agotado", episodio_id: activity.episodio_abierto, plazo_segundos: 10, declarado_cliente: true, confirmado_at: trustedAudit.hora_recepcion_servidor };
     if (result.automaticCount) Object.assign(trustedAudit,{calificacion_automatica:assessment,evaluaciones_incisos:result.evaluations,puntos_automaticos:result.automaticScore,apartados_pendientes:result.pending,...(result.complete?{nota_real:result.raw,nota_con_bonus:result.raw}:{})});
     const submission={id:existing?.id || crypto.randomUUID(),quiz_id:quiz.id,seccion_id,carrera:quiz.carrera || carrera || "Medicina",numero_semana:numSemana,numero_cuenta:String(numero_cuenta),nombre_completo:nombre_completo || existing?.nombre_completo || "",respuestas:answers,estado:result.complete?"calificado":"enviado",nota_obtenida:result.complete?result.official:null,comentarios:"",auditoria:trustedAudit,fecha_envio:new Date().toISOString(),updated_at:new Date().toISOString(),...(result.complete?{nota_real:result.raw,nota_con_bonus:result.raw,calificado_por:"Sistema · Calificación automática"}:{})};
     if (isSupabaseConfigured && supabase) {
       // Insertar conserva el sello de respuestas si dos solicitudes llegan al mismo tiempo.
-      const {error}=await supabase.from("entregas_pruebas").insert(submission);
+      const write = existing?.estado === "borrador"
+        ? await supabase.from("entregas_pruebas").update(submission).eq("id",existing.id).eq("estado","borrador").eq("updated_at",existing.updated_at).select("*")
+        : await supabase.from("entregas_pruebas").insert(submission);
+      const error = write.error || (existing?.estado === "borrador" && !write.data?.length ? {code:"23505"} : null);
       if (error?.code === "23505") {
         const {data:sealed,error:readError}=await supabase.from("entregas_pruebas").select("*").eq("seccion_id",seccion_id).eq("numero_semana",numSemana).eq("numero_cuenta",String(numero_cuenta)).maybeSingle();
         if (readError || !sealed) throw readError || error;
+        if (sealed.estado === "borrador") return res.status(409).json({success:false,message:"La autorización cambió. Actualiza la prueba antes de entregar."});
         if (sealed.auditoria?.calificacion_automatica?.version===1) await syncAutomaticStudentGrade(sealed);
         if (req.student && sealed.auditoria?.actividad?.intento_id) await finishQuizActivity(seccion_id, numSemana, req.student, sealed.auditoria.actividad.intento_id);
         return res.json({success:true,message:"La entrega ya está registrada. Sus respuestas originales se conservan.",data:publicSubmission(sealed)});
       }
       if (error) throw error;
+      if (existing?.estado === "borrador") Object.assign(submission, write.data[0]);
     }
     if (activity) await finishQuizActivity(seccion_id, numSemana, req.student, activity.id);
     const index=cachePruebas.entregas.findIndex(row=>String(row.id)===String(submission.id));
     if (index===-1) cachePruebas.entregas.push(submission); else cachePruebas.entregas[index]=submission;
     savePersistentPruebas(cachePruebas, !(isSupabaseConfigured && supabase));
     if (result.automaticCount && result.complete) await syncAutomaticStudentGrade(submission);
-    return res.json({success:true,message:result.complete?"Prueba entregada y calificada automáticamente.":"Prueba entregada. Los apartados objetivos ya fueron calificados; los demás quedan pendientes de revisión.",data:submission});
+    return res.json({success:true,message:result.complete?"Prueba entregada y calificada automáticamente.":"Prueba entregada. Los apartados objetivos ya fueron calificados; los demás quedan pendientes de revisión.",data:publicSubmission(submission)});
   } catch(error) {
+    if (error.code === "QUIZ_REOPENED") return res.status(409).json({success:false,reason:"QUIZ_REOPENED",message:"El docente reabrió la prueba. Actualiza el catálogo y vuelve a entrar."});
     console.error("Error en submitPruebaEstudiante:",error.message);
     return res.status(500).json({success:false,message:"No pudimos completar el registro y la calificación de la entrega. Reintenta para confirmar el guardado.",error:error.message});
   } finally { releaseLocalLock?.(); }
@@ -790,6 +814,7 @@ export const calificarEntrega = async (req, res) => {
       });
     }
 
+    if (sub.estado === "borrador") return res.status(409).json({success:false,message:"El estudiante tiene una reapertura pendiente. Espera su nueva entrega antes de calificar."});
     sub={...sub};
     let assessment=sub.auditoria?.calificacion_automatica;
     if (!assessment) {
@@ -1035,6 +1060,52 @@ export const deletePruebasSeccionHandler = async (req, res) => {
       error: err.message
     });
   }
+};
+
+export const reopenQuizSubmission = async (req, res) => {
+  let releaseLocalLock;
+  try {
+    if (req.student || !req.instructor?.id) return res.status(403).json({success:false,message:"Solo el docente autorizado puede reabrir una prueba."});
+    const {seccion_id, semana, numero_cuenta} = req.params;
+    const {motivo, solicitud_id, version} = req.body;
+    const reason = String(motivo || "").trim();
+    if (reason.length < 5 || reason.length > 500 || !/^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i.test(solicitud_id || "") || !version || !Number.isFinite(new Date(version).getTime())) return res.status(400).json({success:false,message:"Indica un motivo de 5 a 500 caracteres y actualiza el estado de la entrega."});
+    const live = await getLiveQuizEvidence(seccion_id, Number(semana));
+    if (!live.habilitada || !["lobby","en_pregunta","esperando_siguiente"].includes(live.estado)) return res.status(409).json({success:false,message:"Primero abre la sala de esta prueba. La reapertura se incorporará a su pregunta vigente."});
+    let reopened;
+    if (isSupabaseConfigured && supabase) {
+      const result = await withGradeActor(supabase.rpc("reopen_quiz_submission", {
+        p_section:seccion_id,p_week:Number(semana),p_account:String(numero_cuenta),p_version:version,
+        p_request:solicitud_id,p_reason:reason,p_actor:req.instructor.id,p_actor_name:gradeInstructorName(req.instructor)
+      }),req.instructor);
+      if (result.error) throw result.error;
+      reopened=result.data;
+    } else {
+      releaseLocalLock=await lockLocalSubmission(JSON.stringify([seccion_id,Number(semana),String(numero_cuenta)]));
+      const delivery=cachePruebas.entregas.find(row=>String(row.seccion_id)===String(seccion_id)&&Number(row.numero_semana)===Number(semana)&&String(row.numero_cuenta)===String(numero_cuenta));
+      if (!delivery) return res.status(404).json({success:false,message:"Entrega no encontrada."});
+      if (delivery.estado === "borrador" && delivery.auditoria?.reapertura?.id === solicitud_id) reopened=delivery;
+      else {
+        if (delivery.estado === "borrador" || new Date(delivery.updated_at).getTime() !== new Date(version).getTime()) return res.status(409).json({success:false,message:"La entrega cambió. Actualiza el panel antes de reabrir."});
+        const stamp=new Date().toISOString();
+        const authorization={id:solicitud_id,fecha:stamp,motivo:reason,instructor_id:req.instructor.id,instructor_nombre:gradeInstructorName(req.instructor)};
+        const {reaperturas=[],...previousAudit}=delivery.auditoria || {};
+        const snapshot={...delivery,auditoria:previousAudit};
+        reopened={...delivery,estado:"borrador",nota_obtenida:null,nota_real:null,nota_con_bonus:null,comentarios:"",calificado_por:"",instructor_calificador_id:null,updated_at:stamp,auditoria:{reapertura:authorization,reaperturas:[...reaperturas,{autorizacion:authorization,entrega:snapshot}]}};
+        await updateEstudianteGradeDirect(seccion_id,numero_cuenta,delivery.carrera,`prueba_${Number(semana)}`,null,false,req.instructor);
+        await updateEstudianteGradeDirect(seccion_id,numero_cuenta,delivery.carrera,`prueba_${Number(semana)}_real`,null,false,req.instructor);
+        const next={...cachePruebas,entregas:cachePruebas.entregas.map(row=>row.id===delivery.id?reopened:row)};
+        savePersistentPruebas(next,true);
+        cachePruebas=next;
+      }
+    }
+    if (!reopened?.id) throw new Error("La reapertura no fue confirmada.");
+    return res.json({success:true,message:"Prueba reabierta. El estudiante puede actualizar su catálogo y volver a entrar.",data:{id:reopened.id,estado:reopened.estado,updated_at:reopened.updated_at}});
+  } catch (error) {
+    console.error("Error al reabrir prueba:",error.code || error.message);
+    if (error.code === "P0001") return res.status(409).json({success:false,message:"La entrega o la sala cambió. Actualiza el panel antes de volver a autorizar."});
+    return res.status(503).json({success:false,message:"No pudimos confirmar la reapertura. Actualiza el panel y reintenta; no se debe eliminar la entrega."});
+  } finally { releaseLocalLock?.(); }
 };
 
 // 10. Eliminar entrega individual de un estudiante (permite habilitar reintento)

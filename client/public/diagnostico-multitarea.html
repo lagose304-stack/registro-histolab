@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="es">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Diagnóstico de multitarea · HistoLab</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#eef4f7;color:#183d51;font:16px/1.55 system-ui,sans-serif}main{max-width:900px;margin:auto;padding:20px}section{padding:18px;background:white;border:1px solid #b8cdd8;border-radius:12px;margin:16px 0}h1{font-size:1.5rem;line-height:1.25}h2{font-size:1.1rem}p{margin:.6rem 0}button,textarea{font:inherit}button{min-height:44px;padding:10px 14px;border:1px solid #98b5c5;border-radius:8px;background:#eaf3f8;color:#163d53;cursor:pointer}button:disabled{opacity:.5;cursor:default}button:focus-visible,textarea:focus-visible{outline:3px solid #0085a5;outline-offset:2px}.actions{display:flex;flex-wrap:wrap;gap:10px}.actions button{flex:1 1 190px}textarea{display:block;width:100%;margin-top:8px;min-height:90px;padding:10px;border:1px solid #98b5c5;border-radius:8px}pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:.8rem;max-height:320px;overflow:auto}.note{color:#72500b;background:#fff6df;padding:12px;border-radius:8px}ol{padding-left:22px}#status{font-weight:700}
+</style>
+<main>
+<h1>Diagnóstico de multitarea en iPad</h1>
+<p>Esta página comprueba qué señales entrega el navegador al usar otras ventanas. No abre pruebas ni registra faltas.</p>
+<p class="note">El registro se queda en esta página hasta que lo descargues. No se envía al servidor y no guarda lo que escribas en el campo de teclado.</p>
+<section>
+<h2>Cómo comprobarlo</h2>
+<ol><li>Pulsa «Iniciar diagnóstico».</li><li>Marca «Voy a abrir una ventana flotante» y abre la misma aplicación que aparece en el video. Úsala unos segundos y vuelve aquí.</li><li>Marca «Ya cerré la ventana flotante». Repite con pantalla dividida, cambio de aplicación, teclado y rotación.</li><li>Pulsa «Detener» y descarga el registro.</li></ol>
+<div class="actions"><button id="start">Iniciar diagnóstico</button><button id="stop" disabled>Detener</button><button id="download" disabled>Descargar registro</button></div>
+<p id="status" role="status">Sin iniciar.</p>
+</section>
+<section><h2>Marcas de la prueba</h2><div class="actions" id="markers">
+<button data-mark="antes_ventana_flotante" disabled>Voy a abrir una ventana flotante</button>
+<button data-mark="despues_ventana_flotante" disabled>Ya cerré la ventana flotante</button>
+<button data-mark="antes_pantalla_dividida" disabled>Voy a dividir la pantalla</button>
+<button data-mark="despues_pantalla_dividida" disabled>Volví de pantalla dividida</button>
+<button data-mark="antes_cambio_aplicacion" disabled>Voy a cambiar de aplicación</button>
+<button data-mark="despues_cambio_aplicacion" disabled>Volví de otra aplicación</button>
+<button data-mark="antes_rotacion" disabled>Voy a girar el iPad</button>
+<button data-mark="despues_rotacion" disabled>Terminé de girarlo</button>
+</div><label>Campo para probar el teclado (su contenido no se registra)<textarea id="keyboard" placeholder="Abre y cierra el teclado aquí"></textarea></label></section>
+<section><h2>Señales recibidas</h2><p>Compara las marcas con los cambios de foco, visibilidad y tamaño. Una marca manual indica lo que probaste; no demuestra que el navegador lo haya detectado.</p><pre id="events">Sin datos.</pre></section>
+</main>
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  let recording = false, rows = [], timer, previous = '', lastSample = 0;
+  const removers = [];
+  const snapshot = () => ({
+    visible: document.visibilityState, foco: document.hasFocus(),
+    ventana: { ancho: innerWidth, alto: innerHeight },
+    pantalla: { ancho: screen.width, alto: screen.height },
+    viewport: window.visualViewport ? { ancho: visualViewport.width, alto: visualViewport.height, escala: visualViewport.scale, x: visualViewport.offsetLeft, y: visualViewport.offsetTop } : null,
+    orientacion: screen.orientation?.type || window.orientation || null,
+    campo_activo: document.activeElement?.tagName || null
+  });
+  const record = type => {
+    if (!recording || rows.length >= 1500) return;
+    const state = snapshot(); previous = JSON.stringify(state); lastSample = Date.now();
+    rows.push({ tipo: type, hora: new Date().toISOString(), ...state });
+    $('events').textContent = rows.slice(-30).map(row => JSON.stringify(row)).join('\n');
+    $('status').textContent = `Grabando · ${rows.length} registros. Foco: ${state.foco ? 'sí' : 'no'}. Visibilidad: ${state.visible}.`;
+  };
+  const listen = (target, type, name = type) => {
+    if (!target) return;
+    const callback = () => record(name);
+    target.addEventListener(type, callback);
+    removers.push(() => target.removeEventListener(type, callback));
+  };
+  const controls = () => {
+    $('start').disabled = recording; $('stop').disabled = !recording; $('download').disabled = recording || !rows.length;
+    document.querySelectorAll('[data-mark]').forEach(button => { button.disabled = !recording; });
+  };
+  $('start').onclick = () => {
+    rows = []; recording = true;
+    record('inicio');
+    for (const type of ['blur','focus','resize','orientationchange','pagehide','pageshow']) listen(window, type);
+    for (const type of ['visibilitychange','focusin','focusout','freeze','resume']) listen(document, type);
+    listen(window.visualViewport, 'resize', 'visual_viewport_resize');
+    listen(screen.orientation, 'change', 'orientacion');
+    timer = setInterval(() => {
+      if (JSON.stringify(snapshot()) !== previous) record('cambio_observado_por_sondeo');
+      else if (Date.now() - lastSample >= 5000) record('muestra_periodica');
+    }, 500);
+    controls();
+  };
+  $('stop').onclick = () => {
+    record('fin'); recording = false; clearInterval(timer);
+    removers.splice(0).forEach(remove => remove());
+    $('status').textContent = `Detenido · ${rows.length} registros. Ya puedes descargarlos.`;
+    controls();
+  };
+  $('markers').onclick = event => {
+    const mark = event.target.closest('[data-mark]');
+    if (mark) record(`marca_manual:${mark.dataset.mark}`);
+  };
+  $('download').onclick = () => {
+    const report = { version: 1, navegador: navigator.userAgent, plataforma: navigator.platform, puntos_tactiles: navigator.maxTouchPoints, registros: rows };
+    const url = URL.createObjectURL(new Blob([JSON.stringify(report, null, 2)], {type:'application/json'}));
+    const link = document.createElement('a'); link.href = url; link.download = 'histolab-diagnostico-multitarea.json'; link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+})();
+</script>
+</html>

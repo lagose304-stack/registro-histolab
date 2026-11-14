@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { safeStorage } from "./safeStorage";
 import { observeQuizActivity } from "./quizActivityObserver.mjs";
+import { startQuizDiagnostics } from "./quizDiagnosticsTransport.mjs";
 import { appendLocalActivity, QUIZ_ACTIVITY_POLICY, quizReturnDeadline } from "../../../shared/quizActivity.mjs";
 
 export function useQuizActivity({ quiz, student, api, active, getQuestion, onLimit }) {
@@ -20,7 +21,7 @@ export function useQuizActivity({ quiz, student, api, active, getQuestion, onLim
   }, []);
   const initialize = useCallback(async target => {
     const section = student?.seccion_id || student?.seccion?.id;
-    const result = await api.startActivity(section, target.numero_semana, { quiz_id: target.id, politica: QUIZ_ACTIVITY_POLICY, hora_cliente: new Date().toISOString() });
+    const result = await api.startActivity(section, target.numero_semana, { quiz_id: target.id, politica: QUIZ_ACTIVITY_POLICY, hora_cliente: new Date().toISOString(), diagnostico_version: 1 });
     if (!result?.success) throw new Error(result?.message || "No se pudo registrar la aceptación.");
     const key = keyFor(target);
     let saved;
@@ -110,6 +111,15 @@ export function useQuizActivity({ quiz, student, api, active, getQuestion, onLim
       onEvent: recordEvent
     });
   }, [ready, recordEvent]);
+  // Diagnóstico independiente, únicamente para intentos con el aviso nuevo aceptado.
+  useEffect(() => {
+    if (!ready || state?.attempt?.diagnostico_version !== 1) return;
+    const value=current.current;
+    return startQuizDiagnostics({ window, document, storage:safeStorage, section:value.section, week:value.week,
+      account:student?.numero_cuenta, attemptId:value.attempt.id, api,
+      isActive:()=>callbacks.current.active(), getQuestion:()=>callbacks.current.getQuestion(), getFaults:()=>current.current?.attempt.faltas ?? 0 });
+  }, [ready, state?.attempt?.id, state?.attempt?.diagnostico_version]);
+
   // También se aplica al restaurar un intento que ya alcanzó el límite.
   useEffect(() => { if (ready && state.attempt.faltas >= 3 && callbacks.current.active()) callbacks.current.onLimit(); }, [ready, state?.attempt.faltas]);
   return { ready, state, error, initialize, leave, returnToQuiz, secondsLeft, warning: Boolean(ready && state.attempt.episodio_abierto && state.attempt.faltas < 3), payload: () => ({ actividad_intento_id: current.current?.attempt.id, actividad_eventos_pendientes: current.current?.pending || [] }) };

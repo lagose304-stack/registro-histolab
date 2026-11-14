@@ -19,7 +19,7 @@ const database={rpc(name,args){
     }).then(resolve,reject);}
   };
   return request;
-},from(table){let operation='read',payload,single=false;const filters=[];const query={select(){return query},eq(key,value){filters.push([key,value]);return query},in(key,values){filters.push([key,values]);return query},maybeSingle(){single=true;return query},insert(value){operation='insert';payload=structuredClone(value);return query},update(value){operation='update';payload=structuredClone(value);return query},async then(resolve){const data=table==='pruebas_semanales'?quizzes:rows;if(operation==='update'){if(failSubmissionWrite)return resolve({error:{code:'WRITE_FAILED'}});const selected=data.filter(row=>filters.every(([key,value])=>(Array.isArray(value)?value.includes(row[key]):row[key]===value)));selected.forEach(row=>Object.assign(row,payload));return resolve({data:selected,error:null})}if(operation==='insert'){if(rows.some(row=>row.seccion_id===payload.seccion_id&&row.numero_semana===payload.numero_semana&&row.numero_cuenta===payload.numero_cuenta))return resolve({error:{code:'23505'}});rows.push(payload);return resolve({error:null})}const found=data.filter(row=>filters.every(([key,value])=>(Array.isArray(value)?value.includes(row[key]):row[key]===value)));return resolve({data:single?structuredClone(found[0]||null):structuredClone(found),error:null})}};return query}};
+},from(table){let operation='read',payload,single=false;const filters=[];const query={select(){return query},eq(key,value){filters.push([key,value]);return query},in(key,values){filters.push([key,values]);return query},maybeSingle(){single=true;return query},insert(value){operation='insert';payload=structuredClone(value);return query},update(value){operation='update';payload=structuredClone(value);return query},async then(resolve){const data=table==='pruebas_semanales'?quizzes:rows;if(operation==='update'){if(failSubmissionWrite)return resolve({error:{code:'WRITE_FAILED'}});const selected=data.filter(row=>filters.every(([key,value])=>(Array.isArray(value)?value.includes(row[key]):row[key]===value)));selected.forEach(row=>{Object.assign(row,payload);if(row.id==='resumed-auto')row.updated_at='2026-11-15T00:00:00.123456Z';});return resolve({data:selected,error:null})}if(operation==='insert'){if(rows.some(row=>row.seccion_id===payload.seccion_id&&row.numero_semana===payload.numero_semana&&row.numero_cuenta===payload.numero_cuenta))return resolve({error:{code:'23505'}});rows.push(payload);return resolve({error:null})}const found=data.filter(row=>filters.every(([key,value])=>(Array.isArray(value)?value.includes(row[key]):row[key]===value)));return resolve({data:single?structuredClone(found[0]||null):structuredClone(found),error:null})}};return query}};
 const activityRows=new Map();let failActivity=false;
 const recordActivity=async(section,week,student,id,events=[])=>{
  if(failActivity)throw Error('ACTIVITY_WRITE_FAILED');
@@ -128,3 +128,37 @@ assert.equal(result.status,200);assert.equal(result.payload.data.respuestas.q.re
 assert.equal((await submit('grave-premature',1,{}, {motivo_finalizacion:'falta_grave_tiempo'},{actividad_eventos_pendientes:[departure(302,402)]})).status,409);
 assert.equal((await submit('grave-missing',1,{}, {motivo_finalizacion:'falta_grave_tiempo'})).status,409);
 console.log('PASS: falta grave tras diez segundos entrega desde lobby con respuestas exactas; no acepta un vencimiento prematuro o sin salida.');
+
+rows.push(
+  {seccion_id:'presence-section',numero_semana:9,numero_cuenta:' complete ',estado:'enviado',fecha_envio:'2026-11-13',respuestas:{private:true},nota:100},
+  {seccion_id:'presence-section',numero_semana:9,numero_cuenta:'draft',estado:'borrador'},
+  {seccion_id:'presence-section',numero_semana:8,numero_cuenta:'other-week',estado:'enviado'},
+  {seccion_id:'other-section',numero_semana:9,numero_cuenta:'other-section',estado:'enviado'}
+);
+const deliveryPresence=await module.exports.getQuizDeliveryPresence('presence-section',9);
+assert.deepEqual(JSON.parse(JSON.stringify(deliveryPresence)),{complete:{estado:'enviado',fecha_envio:'2026-11-13'},draft:{estado:'borrador'}});
+console.log('PASS: resumen de presencia limitado a sección/semana, entregas y reaperturas sin respuestas ni notas.');
+
+live={estado:'en_pregunta',habilitada:true};
+const reopenStamp=new Date(Date.now()-1000).toISOString();
+const previousSnapshot={respuestas:{q:{respuesta:'Respuesta previa'}},auditoria:{actividad:{faltas:3}},instructor_calificador_id:'private-teacher'};
+rows.push({id:'resumed-delivery',quiz_id:'manual',seccion_id:'s',numero_semana:1,numero_cuenta:'resumed',estado:'borrador',updated_at:reopenStamp,respuestas:previousSnapshot.respuestas,auditoria:{reapertura:{id:'authorization',fecha:reopenStamp,instructor_id:'private-teacher'},reaperturas:[{entrega:previousSnapshot}]}});
+activityRows.set('resumed',{id:'old-attempt',quiz_id:'manual',aceptado_at:'2026-01-01',reemplazado_at:reopenStamp,faltas:0,eventos:[]});
+assert.equal((await submit('resumed',1)).status,409,'Un intento retirado no sella la prueba reabierta');
+activityRows.set('resumed',{id:'new-attempt',quiz_id:'manual',aceptado_at:new Date().toISOString(),faltas:0,eventos:[]});
+const resumedRace=await Promise.all([submit('resumed',1,{q:{respuesta:'Primera respuesta recuperada'}}),submit('resumed',1,{q:{respuesta:'Segunda'}})]);
+assert(resumedRace.every(item=>item.status===200));
+assert.equal(resumedRace[0].payload.data.respuestas.q.respuesta,resumedRace[1].payload.data.respuestas.q.respuesta);
+assert.equal(resumedRace[0].payload.data.auditoria.reaperturas,undefined,'El estudiante no recibe el archivo docente');
+const savedResumed=rows.find(row=>row.id==='resumed-delivery');
+assert.equal(savedResumed.auditoria.reaperturas[0].entrega.auditoria.actividad.faltas,3);
+assert.equal(savedResumed.auditoria.actividad.faltas,0);
+assert.equal(savedResumed.estado,'enviado');
+console.log('PASS reapertura: descarta intento antiguo, nueva entrega única con respuestas conservadas, faltas nuevas y archivo privado intacto.');
+rows.push({id:'resumed-auto',quiz_id:'auto',seccion_id:'s',numero_semana:2,numero_cuenta:'resumed-auto',estado:'borrador',updated_at:reopenStamp,auditoria:{reapertura:{fecha:reopenStamp},reaperturas:[{entrega:previousSnapshot}]}});
+activityRows.set('resumed-auto',{id:'new-auto-attempt',quiz_id:'auto',aceptado_at:new Date().toISOString(),faltas:0,eventos:[]});
+const automaticReopening=await submit('resumed-auto',2,{q:{a:'Verdadero'}});
+assert.equal(automaticReopening.status,200);assert.equal(automaticReopening.payload.data.nota_obtenida,1);
+assert.equal(automaticReopening.payload.data.updated_at,'2026-11-15T00:00:00.123456Z');
+assert.equal(gradeUpdates.at(-1)[7].updated_at,'2026-11-15T00:00:00.123456Z','La nota usa la versión devuelta por el servidor, incluida la precisión de su trigger');
+console.log('PASS reapertura automática: nueva calificación sincronizada con la versión real de la entrega.');

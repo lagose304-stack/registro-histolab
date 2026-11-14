@@ -742,6 +742,13 @@ export const api = {
       return await handleResponse(res);
     },
 
+    async reopenQuiz(seccionId, semana, numeroCuenta, payload) {
+      const res = await fetch(`${API_BASE}/pruebas/live/${encodeURIComponent(seccionId)}/${semana}/estudiante/${encodeURIComponent(numeroCuenta)}/reabrir`, {
+        method: "POST", headers: getAuthHeaders(), body: JSON.stringify(payload)
+      });
+      return await handleResponse(res);
+    },
+
     async calificar(entregaId, payload) {
       const res = await fetch(`${API_BASE}/pruebas/entregas/${entregaId}/calificar`, {
         method: "PUT",
@@ -803,6 +810,14 @@ export const api = {
     },
     async getActivity(seccionId, semana, cuenta) {
       const res = await fetch(`${API_BASE}/pruebas/seccion/${seccionId}/semana/${semana}/actividad/estudiante/${encodeURIComponent(cuenta)}`, { headers: getAuthHeaders() });
+      return await handleResponse(res);
+    },
+    async saveDiagnostics(seccionId, semana, intentoId, lote) {
+      const res = await fetch(`${API_BASE}/pruebas/seccion/${seccionId}/semana/${semana}/actividad/${encodeURIComponent(intentoId)}/diagnostico`, {method:"POST",headers:getAuthHeaders(),body:JSON.stringify(lote),keepalive:true});
+      return await handleResponse(res);
+    },
+    async getDiagnostics(seccionId, semana, cuenta) {
+      const res = await fetch(`${API_BASE}/pruebas/seccion/${seccionId}/semana/${semana}/diagnostico/estudiante/${encodeURIComponent(cuenta)}`, {headers:getAuthHeaders()});
       return await handleResponse(res);
     },
     async sendLiveHeartbeat(seccionId, semana, payload) {

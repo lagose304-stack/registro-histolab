@@ -8,6 +8,8 @@
 | Consultar información académica y calificaciones | `StudentPortalView.jsx` reúne los datos de cuenta, carrera y sección. Consulta las familias `/api/estudiantes`, `/api/secciones`, `/api/temario` y `/api/semanas`. Los cálculos están en `client/src/utils/academicEngine.js`. |
 | Abrir una prueba habilitada, responder, entregar y consultar su propia entrega | `StudentPortalView.jsx` y las llamadas de pruebas en `client/src/services/api.js`. Sigue `/api/pruebas/seccion` hasta `pruebas.routes.js` y `pruebas.controller.js`. |
 | Participar en una prueba en vivo | La entrada y el envío de latidos están en `StudentPortalView.jsx`. El estado y la sesión activa se consultan en `/api/pruebas/live`, atendido por `liveQuiz.controller.js`. |
+| Retomar una prueba reabierta por el docente | `StudentPortalView.jsx` reconoce la entrega en borrador autorizada, permite aceptar de nuevo las reglas y recupera las respuestas desde el servidor. El contador comienza de cero y se incorpora a la pregunta y al tiempo vigentes de la sala. Las faltas y la entrega anteriores permanecen en el archivo docente. |
+| Diagnóstico automático de compatibilidad en pruebas | El aviso de inicio describe los datos técnicos. Los intentos nuevos con `diagnostico_version: 1` activan `quizDiagnosticsObserver.mjs` y `quizDiagnosticsTransport.mjs` desde `useQuizActivity.js`. La captura no guarda respuestas ni genera faltas y usa una ruta independiente de diagnóstico; véase [Seguridad y funcionamiento de pruebas](seguridad-pruebas.md). |
 
 Al cambiar el portal, comprueba cómo se determina la cuenta, carrera y sección, y qué validación aplica el servidor a la operación. La creación, revisión y administración de evaluaciones se documentan en los mapas docentes.
 

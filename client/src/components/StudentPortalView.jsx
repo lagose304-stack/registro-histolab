@@ -166,6 +166,8 @@ export default function StudentPortalView({ student, notify = () => {}, onActivi
   });
   const [submittingQuiz, setSubmittingQuiz] = useState(false);
   const [existingSubmissions, setExistingSubmissions] = useState({});
+  const [reopenedSubmissions, setReopenedSubmissions] = useState({});
+  const presenceContextRef = useRef({});
   const [reviewingSubmission, setReviewingSubmission] = useState(null);
 
   // Estados de Control en Vivo y Sincronización Global
@@ -225,6 +227,8 @@ export default function StudentPortalView({ student, notify = () => {}, onActivi
     onActivityLeaveChange?.(activity.ready ? activity.leave : null);
     return () => onActivityLeaveChange?.(null);
   }, [activity.ready, activity.leave, onActivityLeaveChange]);
+
+  presenceContextRef.current = { quiz: activeQuizToTake, warning: activity.warning, pending: isExamSealedOffline || submittingQuiz, submissions: existingSubmissions };
 
   // Sincronizar si cambia el prop student desde el padre (aislamiento estricto por cuenta)
   useEffect(() => {
@@ -361,12 +365,8 @@ export default function StudentPortalView({ student, notify = () => {}, onActivi
       setLiveSessionsMap(liveMap);
       setOnlineQuizzes(publishedOrLive);
       setMakeupAssignments(Array.isArray(res.reposiciones) ? res.reposiciones : []);
-      setExistingSubmissions(Object.fromEntries(submissionEntries.filter(([, submission]) => submission)));
-      if (cuentaKey) res.data.forEach(quiz => {
-        api.pruebas.sendLiveHeartbeat(secId, quiz.numero_semana, {
-          numero_cuenta: cuentaKey, nombre_completo: effectiveStudent?.nombre_completo || "Estudiante", pregunta_vista: -1
-        }).catch(() => {});
-      });
+      setExistingSubmissions(Object.fromEntries(submissionEntries.filter(([, submission]) => submission && submission.estado !== "borrador")));
+      setReopenedSubmissions(Object.fromEntries(submissionEntries.filter(([, submission]) => submission?.estado === "borrador" && submission.auditoria?.reapertura)));
     } catch (error) {
       if (request === quizLoadRequestRef.current) setQuizLoadError(error.message || "No se pudieron cargar las pruebas. Revisa tu conexión e inténtalo de nuevo.");
     } finally {
@@ -409,13 +409,22 @@ export default function StudentPortalView({ student, notify = () => {}, onActivi
           const liveSem = Number(liveData.numero_semana);
           setActiveLiveBannerSession(liveData);
           setLiveSessionsMap((prev) => ({ ...prev, [liveSem]: liveData }));
+          // Una reapertura docente debe aparecer aunque el alumno tenga el catálogo abierto.
+          if (presenceContextRef.current.submissions?.[liveSem]) {
+            const check = await api.pruebas.getMiEntrega(secId, liveSem, cuentaKey);
+            if (!isMounted) return;
+            if (check?.success && check.data?.estado === "borrador" && check.data.auditoria?.reapertura) {
+              setReopenedSubmissions(prev => ({...prev,[liveSem]:check.data}));
+              setExistingSubmissions(prev => { const next={...prev}; delete next[liveSem]; return next; });
+            }
+          }
 
           // 2. Registrar presencia del estudiante en la sala de espera ante el docente
-          if (cuentaKey) {
+          if (cuentaKey && !presenceContextRef.current.quiz && !presenceContextRef.current.submissions?.[liveSem]) {
             api.pruebas.sendLiveHeartbeat(secId, liveSem, {
               numero_cuenta: cuentaKey,
               nombre_completo: effectiveStudent?.nombre_completo || "Estudiante",
-              pregunta_vista: -1
+              pregunta_vista: -1, ubicacion: "portal"
             }).catch(() => {});
           }
 
@@ -546,7 +555,14 @@ export default function StudentPortalView({ student, notify = () => {}, onActivi
         });
       }
     });
+    const reopened = reopenedSubmissions[quiz.numero_semana];
+    if (reopened?.respuestas && String(reopened.quiz_id) === String(quiz.id)) {
+      Object.assign(initAnswers, reopened.respuestas);
+      clearActiveAttemptFromDisk(quiz.numero_semana);
+    }
     setQuizAnswers(initAnswers);
+    quizAnswersRef.current = initAnswers;
+    setAnsweredQuestionsMap({});
 
     setTimeRemainingSeconds(initialSecs);
     const effectiveLive = liveSess || {
@@ -655,6 +671,22 @@ export default function StudentPortalView({ student, notify = () => {}, onActivi
     [activeQuizToTake, clearActiveAttemptFromDisk, getPendingSubmissionStorageKey, loadStudentQuizzes, notify]
   );
 
+  const returnToReopenedQuiz = useCallback(week => {
+    // El servidor confirmó que este envío pertenece al intento retirado.
+    // La entrega canónica anterior permanece en su archivo de reapertura.
+    autoSubmitTriggeredRef.current = true;
+    clearActiveAttemptFromDisk(week);
+    safeStorage.removeItem(getPendingSubmissionStorageKey(week));
+    setActiveQuizToTake(null);
+    setIsExamSealedOffline(false);
+    setPendingSubmissionPayload(null);
+    setConfirmSubmitModalOpen(false);
+    setConfirmExitModalOpen(false);
+    setActiveTab("pruebas");
+    loadStudentQuizzes();
+    notify("El docente habilitó de nuevo tu prueba. Vuelve a entrar desde el catálogo; tus respuestas anteriores se conservan.", "info");
+  }, [clearActiveAttemptFromDisk, getPendingSubmissionStorageKey, loadStudentQuizzes, notify]);
+
   // Estadísticas de preguntas respondidas para el diálogo de confirmación de entrega
   const getAnsweredStats = useMemo(() => {
     if (!activeQuizToTake || !Array.isArray(activeQuizToTake.preguntas)) {
@@ -745,6 +777,7 @@ export default function StudentPortalView({ student, notify = () => {}, onActivi
         throw new Error(res?.message || "Error al registrar en servidor");
       }
     } catch (err) {
+      if (err.reason === "QUIZ_REOPENED") { returnToReopenedQuiz(activeQuizToTake.numero_semana); return; }
       console.warn("Aviso al entregar prueba (activando sellado offline inmutable):", err.message);
       // Activar sellado inmutable en dispositivo
       setIsExamSealedOffline(true);
@@ -815,13 +848,14 @@ export default function StudentPortalView({ student, notify = () => {}, onActivi
         notify("No se pudo sincronizar en este momento. Vuelve a intentarlo.", "warning");
       }
     } catch (err) {
+      if (err.reason === "QUIZ_REOPENED") { returnToReopenedQuiz(pendingSubmissionPayload.numero_semana); return; }
       console.warn("Aviso al sincronizar entrega offline:", err.message);
       notify("Fallo al contactar el servidor. Verifica tu conexión e inténtalo de nuevo.", "error");
     } finally {
       pendingDispatchLock.current = false;
       setSyncingOfflineSubmission(false);
     }
-  }, [pendingSubmissionPayload, syncingOfflineSubmission, effectiveStudent, resolveStudentSectionId, notify, handlePostSubmitSuccess, activeQuizToTake]);
+  }, [pendingSubmissionPayload, syncingOfflineSubmission, effectiveStudent, resolveStudentSectionId, notify, handlePostSubmitSuccess, activeQuizToTake, returnToReopenedQuiz]);
 
   dispatchPendingRef.current = dispatchPendingOfflineSubmission;
 
@@ -997,7 +1031,8 @@ export default function StudentPortalView({ student, notify = () => {}, onActivi
           nombre_completo: effectiveStudent?.nombre_completo,
           respuestas_parciales: curAnswers,
           pregunta_vista: curIdx,
-          ha_respondido: hasAnswered
+          ha_respondido: hasAnswered,
+          ubicacion: presenceContextRef.current.pending ? "entrega_pendiente" : presenceContextRef.current.warning ? "aviso" : "prueba"
         });
 
         if (res?.success && res.data && isMounted) {

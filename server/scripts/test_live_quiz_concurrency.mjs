@@ -10,6 +10,7 @@ const scheduling = { weeks: [{numero_semana:1,es_examen:false},{numero_semana:2,
 const quizSection = { id:"isolated-pilot",carrera:"Medicina",dia:["Domingo","Lunes","Martes","Miércoles","Jueves","Viernes","Sábado"][new Date(`${today}T00:00:00Z`).getUTCDay()],hora_inicio:"00:00",hora_fin:"23:59" };
 
 let row;
+const deliveries = {};
 let pauseWrite = null;
 const clone = value => structuredClone(value);
 const database = {
@@ -46,17 +47,18 @@ const bundle = await build({
   entryPoints: [fileURLToPath(new URL("../src/controllers/liveQuiz.controller.js", import.meta.url))],
   bundle: true, platform: "node", format: "cjs", write: false, logLevel: "silent",
   plugins: [{ name: "isolate-storage", setup(builder) {
+    builder.onResolve({ filter: /pruebas\.controller\.js$/ }, () => ({ path: "deliveries", namespace: "pilot" }));
     builder.onResolve({ filter: /db\/supabase\.js$/ }, () => ({ path: "database", namespace: "pilot" }));
     builder.onResolve({ filter: /services\/quizSchedule\.js$/ }, () => ({ path: "scheduling", namespace: "pilot" }));
     builder.onResolve({ filter: /^node:fs$/ }, () => ({ path: "filesystem", namespace: "pilot" }));
-    builder.onLoad({ filter: /.*/, namespace: "pilot" }, args => ({ contents: args.path === "database"
+    builder.onLoad({ filter: /.*/, namespace: "pilot" }, args => ({ contents: args.path === "deliveries" ? "export const getQuizDeliveryPresence=async()=>globalThis.deliveries;" : args.path === "database"
       ? "export const isSupabaseConfigured=true; export const supabase=globalThis.database;"
       : args.path === "scheduling" ? "export const loadQuizSchedule=async()=>globalThis.scheduling;"
       : "export default { existsSync:()=>false, mkdirSync:()=>{}, writeFileSync:()=>{} };", loader: "js" }));
   }}]
 });
 const module = { exports: {} };
-vm.runInNewContext(bundle.outputFiles[0].text, { module, exports: module.exports, database, scheduling, console, process: { cwd: () => path.resolve("server") }, require: key => {
+vm.runInNewContext(bundle.outputFiles[0].text, { module, exports: module.exports, database, deliveries, scheduling, console, process: { cwd: () => path.resolve("server") }, require: key => {
   if (key === "node:path") return path;
   if (key === "node:url") return { fileURLToPath };
   throw new Error(`Unexpected import: ${key}`);
@@ -128,3 +130,18 @@ await until(()=>row.alumnos_conectados["pilot-legacy"]);
 assert.equal(row.alumnos_conectados["pilot-legacy"].integridad,undefined);
 assert.equal(row.alumnos_conectados["pilot-legacy"].ip,undefined);
 console.log("PASS: los latidos conservan presencia y respuestas sin recopilar datos anticopias.");
+await call(heartbeatLiveQuiz,{numero_cuenta:"pilot-location",pregunta_vista:2,ha_respondido:true,ubicacion:"prueba"});
+await until(()=>row.alumnos_conectados["pilot-location"]?.ubicacion==="prueba");
+await call(heartbeatLiveQuiz,{numero_cuenta:"pilot-location",pregunta_vista:-1,ubicacion:"portal"});
+assert.equal(row.alumnos_conectados["pilot-location"].pregunta_vista,2,"El banner atrasado no reemplaza la presencia dentro de la prueba");
+deliveries["pilot-location"]={estado:"enviado",fecha_envio:new Date().toISOString()};
+const finalState=await call(getLiveQuizState);
+assert.equal(finalState.data.entregas_estudiantes["pilot-location"].estado,"enviado");
+assert.equal(Object.hasOwn(finalState.data.entregas_estudiantes["pilot-location"],"respuestas"),false);
+console.log("PASS: presencia de prueba no retrocede por banner atrasado; el resumen docente reconoce la entrega sin exponer respuestas.");
+row.alumnos_conectados = {};
+row.respuestas_globales = {};
+row.updated_at = new Date(Date.now() + 1000).toISOString();
+const resetState = await call(getLiveQuizState);
+assert.equal(Object.keys(resetState.data.alumnos_conectados).length, 0, "Un reinicio remoto no resucita conexiones de la memoria local");
+console.log("PASS: un reinicio remoto descarta las conexiones antiguas almacenadas en memoria.");

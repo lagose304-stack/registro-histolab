@@ -12,6 +12,10 @@ try {
   await db.exec(await source("../src/db/student_makeups_migration.sql"));
   await db.exec(await source("../src/db/student_makeup_attendance_migration.sql"));
   await db.exec(await source("../../supabase/migrations/20261109024000_grade_history_quiz_integrity.sql"));
+  await db.exec((await source("../src/db/pruebas_schema.sql")).replace(/CREATE EXTENSION IF NOT EXISTS "pgcrypto";/i, ""));
+  await db.exec(await source("../src/db/live_quizzes_migration.sql"));
+  await db.exec(await source("../../supabase/migrations/20261113214049_quiz_activity_journal.sql"));
+  await db.exec(await source("../../supabase/migrations/20261114023949_quiz_individual_reopening.sql"));
   await db.exec(`
     GRANT SELECT ON instructores, temario, configuracion_semanas TO service_role;
     GRANT SELECT, INSERT, UPDATE ON estudiantes_medicina TO service_role;
@@ -123,6 +127,37 @@ try {
   assert.equal((await notes(section))["manual_00000000-0000-0000-0000-000000000003"], 0.8);
   console.log("PASS borrado transaccional, reposiciones, reintentos atrasados y manuales históricos.");
   console.log("PASS historial de notas: cambios efectivos, cero, alias, rollback, identidad y acceso privado.");
+
+  await db.exec(`RESET ROLE;
+    INSERT INTO entregas_pruebas (id,seccion_id,numero_semana,numero_cuenta,estado,nota_obtenida,respuestas,auditoria,updated_at)
+      VALUES ('${delivery}','${section}',1,'A','calificado',2,'{"q":{"a":"Conservar"}}','{"actividad":{"faltas":3}}','${validVersion}');
+    UPDATE estudiantes_medicina SET notas=notas || '{"prueba_1":2,"prueba_1_real":3}' WHERE seccion_id='${section}' AND numero_cuenta='A';
+    INSERT INTO sesiones_pruebas_en_vivo(seccion_id,numero_semana,estado,habilitada) VALUES ('${section}',1,'en_pregunta',true);
+    INSERT INTO quiz_activity_attempts(quiz_id,seccion_id,numero_semana,alumno_id,numero_cuenta,politica,aceptado_cliente_at,faltas)
+      VALUES ('quiz','${section}',1,'student','A','salidas-tres-faltas-v1',now(),3);
+    GRANT SELECT ON sesiones_pruebas_en_vivo TO service_role;
+    SET ROLE service_role;`);
+  const request='00000000-0000-0000-0000-000000000009';
+  const reopen=version=>db.query("SELECT reopen_quiz_submission($1,1,'A',$2,$3,'Conexión interrumpida','00000000-0000-0000-0000-000000000001','Docente Ejemplo') AS result",[section,version,request]);
+  await assert.rejects(reopen(staleVersion), /entrega cambió/);
+  assert.equal((await notes(section)).prueba_1,2);
+  await db.exec("RESET ROLE; CREATE TRIGGER fail_reopening BEFORE INSERT ON historial_notas FOR EACH ROW EXECUTE FUNCTION fail_audit_for_test(); SET ROLE service_role;");
+  await assert.rejects(reopen(validVersion), /Fallo simulado/);
+  assert.equal((await notes(section)).prueba_1,2,'Fallo del historial revierte la nota y la reapertura');
+  assert.equal((await db.query('SELECT estado FROM entregas_pruebas WHERE id=$1',[delivery])).rows[0].estado,'calificado');
+  await db.exec('RESET ROLE; DROP TRIGGER fail_reopening ON historial_notas; SET ROLE service_role;');
+  const reopened=(await reopen(validVersion)).rows[0].result;
+  assert.equal(reopened.estado,'borrador');assert.equal(reopened.nota_obtenida,null);
+  assert.equal(reopened.respuestas.q.a,'Conservar');
+  assert.equal(reopened.auditoria.reaperturas.length,1);
+  assert.equal(reopened.auditoria.reaperturas[0].entrega.auditoria.actividad.faltas,3);
+  assert.equal(reopened.auditoria.reapertura.instructor_nombre,'Docente Ejemplo');
+  assert.equal((await notes(section)).prueba_1,undefined);assert.equal((await notes(section)).prueba_1_real,undefined);
+  assert.equal((await db.query('SELECT faltas,reemplazado_at IS NOT NULL AS retired FROM quiz_activity_attempts')).rows[0].retired,true);
+  assert.equal((await reopen(validVersion)).rows[0].result.auditoria.reaperturas.length,1,'Reintentar la misma autorización no duplica el historial');
+  await db.exec('RESET ROLE; SET ROLE authenticated;');
+  await assert.rejects(reopen(validVersion),{code:'42501'});
+  console.log('PASS reapertura SQL: respuestas y faltas conservadas, nota retirada atómicamente, versión vigente, historial, reintento único y acceso exclusivo de API.');
 } finally {
   await db.close();
 }
