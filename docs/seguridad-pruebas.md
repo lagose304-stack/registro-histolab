@@ -41,6 +41,8 @@ El observador también consulta foco y visibilidad cada segundo para cubrir esta
 
 ## Entregas pendientes después de cerrar la sala
 
+Si un envío sellado perdió `actividad_intento_id`, la API recupera únicamente la aceptación existente de la misma matrícula autenticada (ID y cuenta), sección, semana y prueba, sin reemplazo. No crea una aceptación, no reinicia faltas y no asocia envíos antiguos a una reapertura. El cliente también recupera la referencia y los eventos pendientes del almacenamiento de esa matrícula y prueba si el cierre llega antes del efecto de restauración. Si no hay aceptación, responde `QUIZ_ACCEPTANCE_NOT_FOUND` y conserva el sellado para revisión docente. Comprobaciones aisladas: `test_quiz_activity_recovery.mjs`, `test_quiz_activity_payload.mjs` y `test_quiz_submission_security.mjs`.
+
 Una entrega con intento válido ya aceptado puede sincronizarse aunque el docente haya cerrado o reiniciado la sala y su estado sea `inactiva`. La API comprueba propietario, semana, prueba e intento no retirado antes de aceptarla; no permite crear un intento nuevo con la sala cerrada. El portal sella también cuando recibe el cierre directo, conserva las respuestas pendientes y muestra el mensaje de error de la API en esa pantalla. Si la resolución de sección falla, libera el bloqueo para que el siguiente envío pueda reintentar. La reapertura docente sigue requiriendo una sala abierta, una entrega registrada y la migración `20261114023949_quiz_individual_reopening.sql`; un error `QUIZ_REOPENING_UNAVAILABLE` identifica que falta su función y no elimina la entrega.
 
 ## Límites de interpretación

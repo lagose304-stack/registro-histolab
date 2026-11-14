@@ -3,7 +3,7 @@ import { getLiveQuizEvidence } from "./liveQuiz.controller.js";
 import { syncMakeupSubmission } from "../services/studentMakeups.js";
 import { sanitizeClientAudit } from "../middlewares/quizPrivacy.mjs";
 import fs from "node:fs";
-import { beginQuizActivity, recordQuizActivity, finishQuizActivity, listQuizActivity } from "../services/quizActivity.js";
+import { beginQuizActivity, recordQuizActivity, finishQuizActivity, listQuizActivity, findCurrentQuizActivity } from "../services/quizActivity.js";
 import { QUIZ_ACTIVITY_POLICY, quizReturnDeadline } from "../../../shared/quizActivity.mjs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -547,10 +547,19 @@ export const submitPruebaEstudiante = async (req,res) => {
     const quiz=await loadQuizForAssessment(seccion_id,numSemana);
     if (existing?.estado === "borrador" && !req.student) return res.status(403).json({success:false,message:"La prueba reabierta debe ser entregada por el estudiante."});
     let activity;
-    if (req.student && !req.body.actividad_intento_id) return res.status(428).json({ success: false, message: "Debes registrar la aceptación de las reglas antes de entregar." });
-    if (req.body.actividad_intento_id) {
+    let activityId = req.body.actividad_intento_id;
+    if (req.student && !activityId) {
+      // Una reapertura no autoriza asociar un envío antiguo al intento nuevo.
+      if (existing?.estado === "borrador") return res.status(409).json({success:false,reason:"QUIZ_REOPENED",message:"El docente reabrió la prueba. Actualiza el catálogo y vuelve a entrar."});
+      if (req.body.quiz_id && String(req.body.quiz_id) === String(quiz.id)) {
+        const accepted = await findCurrentQuizActivity(seccion_id, numSemana, req.student, quiz.id);
+        activityId = accepted?.id;
+      }
+      if (!activityId) return res.status(428).json({ success: false, reason:"QUIZ_ACCEPTANCE_NOT_FOUND", message: "No se encontró una aceptación previa para esta prueba y matrícula. Tus respuestas siguen selladas en el dispositivo; solicita al docente que revise el intento. No borres los datos del navegador." });
+    }
+    if (activityId) {
       if (!req.student) return res.status(403).json({ success:false, message:"El registro de actividad requiere la sesión estudiantil." });
-      activity = await recordQuizActivity(seccion_id, numSemana, req.student, req.body.actividad_intento_id, req.body.actividad_eventos_pendientes || []);
+      activity = await recordQuizActivity(seccion_id, numSemana, req.student, activityId, req.body.actividad_eventos_pendientes || []);
       if (activity.reemplazado_at || (existing?.estado === "borrador" && (!existing.auditoria?.reapertura || new Date(activity.aceptado_at).getTime() < new Date(existing.auditoria.reapertura.fecha).getTime()))) return res.status(409).json({ success:false, reason:"QUIZ_REOPENED", message:"Esta entrega pertenece a un intento anterior. Vuelve a entrar a la prueba reabierta." });
       if (String(activity.quiz_id) !== String(quiz.id)) return res.status(409).json({ success:false, message:"El intento pertenece a otra prueba." });
       if (activity.faltas >= 3) clientAudit.motivo_finalizacion = "limite_tres_faltas";

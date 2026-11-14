@@ -28,8 +28,8 @@ const recordActivity=async(section,week,student,id,events=[])=>{
  const row=activityRows.get(account)||{id,quiz_id:week===1?'manual':'auto',politica:'salidas-tres-faltas-v1',faltas:0,episodio_abierto:null,eventos:[],aceptado_at:new Date().toISOString()};
  const next=appendLocalActivity(row,events);activityRows.set(account,next);return next;
 };
-const compiled=await build({entryPoints:[fileURLToPath(new URL('../src/controllers/pruebas.controller.js',import.meta.url))],platform:'node',format:'cjs',bundle:true,write:false,logLevel:'silent',plugins:[{name:'isolation',setup(b){b.onResolve({filter:/services\/quizActivity\.js$/},()=>({path:'activity',namespace:'isolate'}));b.onResolve({filter:/db\/supabase\.js$/},()=>({path:'db',namespace:'isolate'}));b.onResolve({filter:/estudiantes\.controller\.js$/},()=>({path:'grades',namespace:'isolate'}));b.onResolve({filter:/liveQuiz\.controller\.js$/},()=>({path:'live',namespace:'isolate'}));b.onResolve({filter:/^node:fs$/},()=>({path:'fs',namespace:'isolate'}));b.onLoad({filter:/.*/,namespace:'isolate'},args=>({contents:args.path==='activity'?'export const recordQuizActivity=(...args)=>globalThis.recordActivity(...args);export const finishQuizActivity=async()=>{};export const beginQuizActivity=async()=>{};export const listQuizActivity=async()=>[];':args.path==='db'?'export const isSupabaseConfigured=true,supabase=globalThis.database;':args.path==='grades'?'export const updateEstudianteGradeDirect=async(...args)=>globalThis.recordGrade(args);':args.path==='live'?'export const getLiveQuizEvidence=async()=>globalThis.getLive();':'export default {existsSync:()=>false,mkdirSync(){},writeFileSync(){}};',loader:'js'}))}}]});
-const module={exports:{}};vm.runInNewContext(compiled.outputFiles[0].text,{module,exports:module.exports,require,console,database,gradeUpdates,recordActivity,recordGrade:args=>{if(failGradeWrite)throw Error("GRADE_WRITE_FAILED");gradeUpdates.push(args);},getLive:()=>live,process:{cwd:()=>path.resolve('server')}});
+const compiled=await build({entryPoints:[fileURLToPath(new URL('../src/controllers/pruebas.controller.js',import.meta.url))],platform:'node',format:'cjs',bundle:true,write:false,logLevel:'silent',plugins:[{name:'isolation',setup(b){b.onResolve({filter:/services\/quizActivity\.js$/},()=>({path:'activity',namespace:'isolate'}));b.onResolve({filter:/db\/supabase\.js$/},()=>({path:'db',namespace:'isolate'}));b.onResolve({filter:/estudiantes\.controller\.js$/},()=>({path:'grades',namespace:'isolate'}));b.onResolve({filter:/liveQuiz\.controller\.js$/},()=>({path:'live',namespace:'isolate'}));b.onResolve({filter:/^node:fs$/},()=>({path:'fs',namespace:'isolate'}));b.onLoad({filter:/.*/,namespace:'isolate'},args=>({contents:args.path==='activity'?'export const recordQuizActivity=(...args)=>globalThis.recordActivity(...args);export const finishQuizActivity=async()=>{};export const beginQuizActivity=async()=>{};export const listQuizActivity=async()=>[];export const findCurrentQuizActivity=(section,week,student,quizId)=>globalThis.findAccepted(student,quizId);':args.path==='db'?'export const isSupabaseConfigured=true,supabase=globalThis.database;':args.path==='grades'?'export const updateEstudianteGradeDirect=async(...args)=>globalThis.recordGrade(args);':args.path==='live'?'export const getLiveQuizEvidence=async()=>globalThis.getLive();':'export default {existsSync:()=>false,mkdirSync(){},writeFileSync(){}};',loader:'js'}))}}]});
+const module={exports:{}};vm.runInNewContext(compiled.outputFiles[0].text,{module,exports:module.exports,require,console,database,gradeUpdates,recordActivity,findAccepted:(student,quizId)=>{const row=activityRows.get(student.numero_cuenta);return row && row.quiz_id===quizId && !row.reemplazado_at ? row : null;},recordGrade:args=>{if(failGradeWrite)throw Error("GRADE_WRITE_FAILED");gradeUpdates.push(args);},getLive:()=>live,process:{cwd:()=>path.resolve('server')}});
 const {submitPruebaEstudiante}=module.exports;
 async function submit(account,week,answers={q:{respuesta:'Original'}},audit={},extra={}){let status=200,payload;const req={params:{seccion_id:'s'},student:{numero_cuenta:account},body:{numero_cuenta:account,numero_semana:week,respuestas:answers,actividad_intento_id:'fixture-attempt',...extra,auditoria:{nota_real:999,strikes:999,origen_integridad:'servidor',...audit}}};const res={status(value){status=value;return res},json(value){payload=value;return res}};await submitPruebaEstudiante(req,res);return {status,payload};}
 let result=await submit('manual',1);assert.equal(result.status,200);assert.equal(result.payload.data.estado,'enviado');assert(!('strikes' in result.payload.data.auditoria));assert(!('origen_integridad' in result.payload.data.auditoria));
@@ -65,6 +65,23 @@ activityRows.set('closed-other-quiz',{id:'other',quiz_id:'different',faltas:0,ev
 assert.equal((await submit('closed-other-quiz',1)).status,409);
 live={estado:'en_pregunta'};
 console.log('PASS cierre: sincronización pendiente e idempotente, sin aceptar intentos ausentes, retirados o de otra prueba.');
+
+live={estado:'inactiva',habilitada:false};
+activityRows.set('lost-reference',{id:'accepted-before-close',quiz_id:'manual',politica:'salidas-tres-faltas-v1',aceptado_at:new Date().toISOString(),faltas:2,eventos:[]});
+result=await submit('lost-reference',1,{q:{respuesta:'Respuestas selladas intactas'}},{motivo_finalizacion:'finalizada_por_docente'},{quiz_id:'manual',actividad_intento_id:undefined});
+assert.equal(result.status,200);
+assert.equal(result.payload.data.respuestas.q.respuesta,'Respuestas selladas intactas');
+assert.equal(result.payload.data.auditoria.actividad.intento_id,'accepted-before-close');
+assert.equal(result.payload.data.auditoria.actividad.faltas,2,'Recuperar la referencia no reinicia las faltas');
+result=await submit('no-server-acceptance',1,{}, {},{quiz_id:'manual',actividad_intento_id:undefined});
+assert.equal(result.status,428);assert.equal(result.payload.reason,'QUIZ_ACCEPTANCE_NOT_FOUND');
+assert.equal(activityRows.has('no-server-acceptance'),false,'No crea una aceptación durante la entrega');
+activityRows.set('retired-reference',{id:'retired',quiz_id:'manual',reemplazado_at:new Date().toISOString(),eventos:[]});
+assert.equal((await submit('retired-reference',1,{}, {},{quiz_id:'manual',actividad_intento_id:undefined})).status,428);
+activityRows.set('wrong-reference',{id:'wrong',quiz_id:'different',eventos:[]});
+assert.equal((await submit('wrong-reference',1,{}, {},{quiz_id:'manual',actividad_intento_id:undefined})).status,428);
+live={estado:'en_pregunta'};
+console.log('PASS referencia perdida: recupera aceptación existente con faltas intactas; rechaza ausencia, retiro y otra prueba sin fabricar aceptación.');
 
 async function grade(account,grade,extra={}) {const row=rows.find(item=>item.numero_cuenta===account);let status=200,payload;await module.exports.calificarEntrega({params:{entrega_id:row.id},body:{nota_obtenida:grade,comentarios:'Comentario del instructor',...extra}},{status(value){status=value;return this},json(value){payload=value;return this}});assert.equal(status,200);return payload.data;}
 let graded=await grade('manual',.875,{evaluaciones_incisos:{q___direct:{estado:'regular',puntos_obtenidos:.875}}});
@@ -158,6 +175,7 @@ live={estado:'en_pregunta',habilitada:true};
 const reopenStamp=new Date(Date.now()-1000).toISOString();
 const previousSnapshot={respuestas:{q:{respuesta:'Respuesta previa'}},auditoria:{actividad:{faltas:3}},instructor_calificador_id:'private-teacher'};
 rows.push({id:'resumed-delivery',quiz_id:'manual',seccion_id:'s',numero_semana:1,numero_cuenta:'resumed',estado:'borrador',updated_at:reopenStamp,respuestas:previousSnapshot.respuestas,auditoria:{reapertura:{id:'authorization',fecha:reopenStamp,instructor_id:'private-teacher'},reaperturas:[{entrega:previousSnapshot}]}});
+assert.equal((await submit('resumed',1,{}, {},{quiz_id:'manual',actividad_intento_id:undefined})).payload.reason,'QUIZ_REOPENED','No asocia un envío antiguo sin referencia al nuevo intento autorizado');
 activityRows.set('resumed',{id:'old-attempt',quiz_id:'manual',aceptado_at:'2026-01-01',reemplazado_at:reopenStamp,faltas:0,eventos:[]});
 assert.equal((await submit('resumed',1)).status,409,'Un intento retirado no sella la prueba reabierta');
 activityRows.set('resumed',{id:'new-attempt',quiz_id:'manual',aceptado_at:new Date().toISOString(),faltas:0,eventos:[]});

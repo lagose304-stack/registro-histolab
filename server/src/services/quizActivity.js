@@ -69,6 +69,18 @@ export async function beginQuizActivity(section, week, student, quiz, clientTime
   });
 }
 
+// Recuperación de una referencia perdida; nunca crea una aceptación ni retira intentos.
+export async function findCurrentQuizActivity(section, week, student, quizId) {
+  const where = { ...scope(section, week, student), quiz_id: String(quizId) };
+  let found;
+  if (isSupabaseConfigured && supabase) {
+    const { data, error } = await supabase.from("quiz_activity_attempts").select("id").match(where).is("reemplazado_at", null).maybeSingle();
+    if (error) throw error;
+    found = data;
+  } else found = loadLocal().find(row => belongs(row, where) && !row.reemplazado_at);
+  return found ? readQuizActivity(section, week, student, found.id) : null;
+}
+
 export async function readQuizActivity(section, week, student, id) {
   const where = { ...scope(section, week, student), id };
   if (isSupabaseConfigured && supabase) {

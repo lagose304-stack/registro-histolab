@@ -122,5 +122,15 @@ export function useQuizActivity({ quiz, student, api, active, getQuestion, onLim
 
   // También se aplica al restaurar un intento que ya alcanzó el límite.
   useEffect(() => { if (ready && state.attempt.faltas >= 3 && callbacks.current.active()) callbacks.current.onLimit(); }, [ready, state?.attempt.faltas]);
-  return { ready, state, error, initialize, leave, returnToQuiz, secondsLeft, warning: Boolean(ready && state.attempt.episodio_abierto && state.attempt.faltas < 3), payload: () => ({ actividad_intento_id: current.current?.attempt.id, actividad_eventos_pendientes: current.current?.pending || [] }) };
+  const payload = () => {
+    let value = current.current;
+    // El cierre docente puede llegar antes de que el efecto restaure el registro.
+    // Leer solo la clave de esta matrícula y prueba, sin crear otra aceptación.
+    if (quiz && value?.quizId !== quiz.id) {
+      try { value = JSON.parse(safeStorage.getItem(keyFor(quiz)) || "null"); } catch { value = null; }
+    }
+    if (!quiz || value?.quizId !== quiz.id || value.attempt?.politica !== QUIZ_ACTIVITY_POLICY) return {};
+    return { actividad_intento_id: value.attempt.id, actividad_eventos_pendientes: value.pending || [] };
+  };
+  return { ready, state, error, initialize, leave, returnToQuiz, secondsLeft, warning: Boolean(ready && state.attempt.episodio_abierto && state.attempt.faltas < 3), payload };
 }
