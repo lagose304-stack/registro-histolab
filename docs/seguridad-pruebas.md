@@ -37,7 +37,7 @@ La entrega incluye una copia del registro en `auditoria.actividad`, junto con lo
 
 ## Comprobación de foco y visibilidad
 
-El observador también consulta foco y visibilidad cada segundo para cubrir estados que cambien sin emitir su evento. No penaliza dimensiones, teclado ni rotación. Esta comprobación no garantiza detectar ventanas flotantes en Android o iPadOS: si el navegador conserva foco y visibilidad, la superposición puede no producir ninguna señal observable. Debe contrastarse con el diagnóstico del mismo dispositivo.
+El observador consulta foco y visibilidad cada 500 ms para cubrir estados que cambien sin emitir su evento. Los cambios de campo, cancelación de gesto, tamaño, orientación, viewport y reanudación añaden comprobaciones al terminar la transición y 200 ms después, con una cola acotada por ráfaga. Solo registra salida si encuentra la página oculta o el documento sin foco; las pausas al leer, dimensiones, teclado y rotación no generan faltas por sí solos. Conserva el regreso explícito y una sola falta por episodio. Verificación: `node server/scripts/test_quiz_focus_transitions.mjs`. Esta comprobación no garantiza detectar ventanas flotantes en Android o iPadOS: si el navegador conserva foco y visibilidad, la superposición puede no producir ninguna señal observable. Debe contrastarse con el diagnóstico del mismo dispositivo.
 
 ## Entregas pendientes después de cerrar la sala
 

@@ -7,7 +7,7 @@ import { observeQuizActivity } from "../../client/src/utils/quizActivityObserver
 const id = n => `00000000-0000-4000-8000-${String(n).padStart(12,"0")}`;
 const event = (n, episode, tipo = "salida") => ({ id:id(n), episodio_id:id(episode), tipo, hora_cliente:new Date(1700000000000+n*1000).toISOString(), senales:tipo === "salida" ? ["ventana_sin_foco"] : [], pregunta_id:"q1", pregunta_indice:0 });
 let state = { faltas:0, episodio_abierto:null, eventos:[] };
-const win = new EventTarget(); win.setTimeout = setTimeout;
+const win = new EventTarget(); win.setTimeout = setTimeout; win.clearTimeout = clearTimeout;
 const stateChecks = new Map(); let timerId = 0;
 win.setInterval = callback => { stateChecks.set(++timerId, callback); return timerId; };
 win.clearInterval = timer => stateChecks.delete(timer);
