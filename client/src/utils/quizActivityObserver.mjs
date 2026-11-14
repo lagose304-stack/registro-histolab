@@ -28,10 +28,19 @@ export function observeQuizActivity({ window, document, getState, onEvent, isAct
   window.addEventListener("pagehide", pagehide);
   window.addEventListener("pageshow", returned);
   document.addEventListener("visibilitychange", visibility);
+  // Algunos navegadores cambian el estado sin emitir blur/visibilitychange.
+  // El tamaño de ventana, el teclado y la rotación no deciden una falta.
+  const checkState = () => {
+    if (document.visibilityState === "hidden") departure("pagina_oculta");
+    else if (!document.hasFocus()) departure("ventana_sin_foco");
+    else if (getState().episodio_abierto) returned();
+  };
+  const stateTimer = window.setInterval(checkState, 1000);
   if (document.visibilityState === "hidden") departure("pagina_oculta");
   else if (!document.hasFocus()) departure("ventana_sin_foco");
   else returned();
   return () => {
+    window.clearInterval(stateTimer);
     clearTimeout(returnTimer);
     window.removeEventListener("blur", blur);
     window.removeEventListener("focus", returned);

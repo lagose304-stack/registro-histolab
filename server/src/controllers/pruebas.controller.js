@@ -565,7 +565,10 @@ export const submitPruebaEstudiante = async (req,res) => {
       if (!(quiz.publicada === true || String(quiz.publicada) === "true" || quiz.estado === "publicada")) return res.status(403).json({success:false,message:"Esta prueba no está publicada."});
       const live = await getLiveQuizEvidence(seccion_id,numSemana);
       const canEndLobbyAttempt = live.estado === "lobby" && live.habilitada && (clientAudit?.motivo_finalizacion === "entrega_anticipada_por_salida" || clientAudit?.motivo_finalizacion === "falta_grave_tiempo" || activity?.faltas >= 3);
-      if (!["en_pregunta","esperando_siguiente","finalizada"].includes(live.estado) && !canEndLobbyAttempt) return res.status(409).json({success:false,message:"La prueba aún no se ha iniciado para esta sección."});
+      // Cerrar/reiniciar la sala no debe impedir sincronizar un intento ya aceptado.
+      // recordQuizActivity verificó propietario, semana, prueba y que no esté retirado.
+      const canSyncClosedAttempt = live.estado === "inactiva" && Boolean(activity);
+      if (!["en_pregunta","esperando_siguiente","finalizada"].includes(live.estado) && !canEndLobbyAttempt && !canSyncClosedAttempt) return res.status(409).json({success:false,message:"La prueba aún no se ha iniciado para esta sección."});
     }
     const assessment=buildAutomaticQuizAssessment(quiz.preguntas,answers);
     const result=resolveQuizAssessment(assessment);
@@ -1103,6 +1106,7 @@ export const reopenQuizSubmission = async (req, res) => {
     return res.json({success:true,message:"Prueba reabierta. El estudiante puede actualizar su catálogo y volver a entrar.",data:{id:reopened.id,estado:reopened.estado,updated_at:reopened.updated_at}});
   } catch (error) {
     console.error("Error al reabrir prueba:",error.code || error.message);
+    if (error.code === "PGRST202" || error.code === "42883") return res.status(503).json({success:false,reason:"QUIZ_REOPENING_UNAVAILABLE",message:"La reapertura no está instalada en el servidor. El administrador debe aplicar la migración de reapertura individual; conserva la entrega y reintenta después."});
     if (error.code === "P0001") return res.status(409).json({success:false,message:"La entrega o la sala cambió. Actualiza el panel antes de volver a autorizar."});
     return res.status(503).json({success:false,message:"No pudimos confirmar la reapertura. Actualiza el panel y reintenta; no se debe eliminar la entrega."});
   } finally { releaseLocalLock?.(); }

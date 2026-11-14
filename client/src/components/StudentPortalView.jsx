@@ -199,6 +199,7 @@ export default function StudentPortalView({ student, notify = () => {}, onActivi
   const [isExamSealedOffline, setIsExamSealedOffline] = useState(false);
   const [pendingSubmissionPayload, setPendingSubmissionPayload] = useState(null);
   const [syncingOfflineSubmission, setSyncingOfflineSubmission] = useState(false);
+  const [submissionSyncError, setSubmissionSyncError] = useState("");
   const [confirmSubmitModalOpen, setConfirmSubmitModalOpen] = useState(false);
   const [confirmExitModalOpen, setConfirmExitModalOpen] = useState(false);
   const [activeLiveBannerSession, setActiveLiveBannerSession] = useState(null);
@@ -782,6 +783,7 @@ export default function StudentPortalView({ student, notify = () => {}, onActivi
       // Activar sellado inmutable en dispositivo
       setIsExamSealedOffline(true);
       setPendingSubmissionPayload(payload);
+      setSubmissionSyncError(err.message || "No se pudo confirmar la entrega en el servidor.");
       try {
         const pKey = getPendingSubmissionStorageKey(activeQuizToTake.numero_semana);
         safeStorage.setItem(pKey, JSON.stringify(payload));
@@ -789,7 +791,7 @@ export default function StudentPortalView({ student, notify = () => {}, onActivi
       } catch (_) {}
 
       notify(
-        "📶 Sin conexión con el servidor. Tu evaluación ha sido sellada y resguardada de forma segura en este dispositivo. Se enviará de inmediato al restablecerse la señal.",
+        "La entrega está pendiente de confirmación. Tus respuestas quedaron selladas en este dispositivo y se reintentará el envío automáticamente.",
         "warning"
       );
     } finally {
@@ -820,14 +822,11 @@ export default function StudentPortalView({ student, notify = () => {}, onActivi
   const dispatchPendingOfflineSubmission = useCallback(async () => {
     if (!pendingSubmissionPayload || pendingDispatchLock.current) return;
     pendingDispatchLock.current = true;
-    let secId = effectiveStudent?.seccion_id || effectiveStudent?.seccion?.id;
-    if (!secId) {
-      secId = await resolveStudentSectionId();
-    }
-    if (!secId) { pendingDispatchLock.current = false; return; }
-
     setSyncingOfflineSubmission(true);
     try {
+      let secId = effectiveStudent?.seccion_id || effectiveStudent?.seccion?.id;
+      if (!secId) secId = await resolveStudentSectionId();
+      if (!secId) throw new Error("No se pudo identificar tu sección para sincronizar la entrega.");
       const payloadToSend = {
         ...pendingSubmissionPayload,
         auditoria: {
@@ -838,6 +837,7 @@ export default function StudentPortalView({ student, notify = () => {}, onActivi
       };
       const res = await api.pruebas.submit(secId, payloadToSend);
       if (res?.success) {
+        setSubmissionSyncError("");
         notify("✅ ¡Conexión restablecida! Tu evaluación sellada ha sido entregada exitosamente al servidor.", "success");
         handlePostSubmitSuccess(
           res.data || payloadToSend,
@@ -845,12 +845,12 @@ export default function StudentPortalView({ student, notify = () => {}, onActivi
           activeQuizToTake
         );
       } else {
-        notify("No se pudo sincronizar en este momento. Vuelve a intentarlo.", "warning");
+        throw new Error(res?.message || "No se pudo sincronizar en este momento. Vuelve a intentarlo.");
       }
     } catch (err) {
       if (err.reason === "QUIZ_REOPENED") { returnToReopenedQuiz(pendingSubmissionPayload.numero_semana); return; }
       console.warn("Aviso al sincronizar entrega offline:", err.message);
-      notify("Fallo al contactar el servidor. Verifica tu conexión e inténtalo de nuevo.", "error");
+      setSubmissionSyncError(err.message || "No se pudo contactar el servidor. Tus respuestas siguen guardadas y se reintentará el envío.");
     } finally {
       pendingDispatchLock.current = false;
       setSyncingOfflineSubmission(false);
@@ -1074,7 +1074,7 @@ export default function StudentPortalView({ student, notify = () => {}, onActivi
           }
 
           // Si el docente finalizó la prueba para toda la sección
-          if (liveData.estado === "finalizada" && !autoSubmitTriggeredRef.current) {
+          if (["finalizada", "inactiva"].includes(liveData.estado) && !autoSubmitTriggeredRef.current) {
             autoSubmitTriggeredRef.current = true;
             handleSubmitQuiz({ motivo: "finalizada_por_docente" });
           }
@@ -3430,6 +3430,9 @@ export default function StudentPortalView({ student, notify = () => {}, onActivi
         {/* MODAL DE RESGUARDO Y SELLADO OFFLINE INMUTABLE */}
         {isExamSealedOffline && (
           <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Entrega pendiente de sincronización"
             style={{
               position: "fixed",
               inset: 0,
@@ -3438,14 +3441,16 @@ export default function StudentPortalView({ student, notify = () => {}, onActivi
               backdropFilter: "blur(12px)",
               WebkitBackdropFilter: "blur(12px)",
               display: "flex",
-              alignItems: "center",
+              alignItems: "flex-start",
               justifyContent: "center",
+              overflowY: "auto",
               padding: "1.25rem"
             }}
           >
             <div
               className="animate-scale-in"
               style={{
+                margin: "auto",
                 maxWidth: "520px",
                 width: "100%",
                 background: "#ffffff",
@@ -3514,10 +3519,12 @@ export default function StudentPortalView({ student, notify = () => {}, onActivi
                 <Clock size={22} style={{ flexShrink: 0 }} />
                 <span>
                   {isOnline
-                    ? "Señal de internet detectada. Listo para sincronizar con la base de datos de Histolab."
+                    ? "El dispositivo indica conexión a internet. La entrega sigue pendiente de confirmación del servidor."
                     : "Sin conexión a internet. Conecta tu teléfono o computadora a Wi-Fi o datos móviles para completar la sincronización."}
                 </span>
               </div>
+
+              {submissionSyncError && <p role="alert" style={{ margin: 0, color: "#9f1239", overflowWrap: "anywhere" }}>{submissionSyncError}</p>}
 
               <button
                 type="button"

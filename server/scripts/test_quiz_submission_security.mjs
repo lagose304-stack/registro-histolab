@@ -10,9 +10,10 @@ const require=createRequire(import.meta.url);
 const quizzes=[{id:'manual',seccion_id:'s',numero_semana:1,publicada:true,preguntas:[{id:'q',puntos:1,items:[]}]},{id:'auto',seccion_id:'s',numero_semana:2,publicada:true,preguntas:[{id:'q',items:[{id:'a',tipo:'verdadero_falso',instruccion:'Demo',puntos:1,respuesta_correcta:'Verdadero'}]}]}];
 let failGradeWrite=false,failSubmissionWrite=false,failDelete=false;const gradeUpdates=[];const rows=[];let live={estado:'en_pregunta'};
 const database={rpc(name,args){
-  assert.equal(name,"delete_quiz_submission_with_grade");
+  assert(["delete_quiz_submission_with_grade","reopen_quiz_submission"].includes(name));
   const request={setHeader(key,value){assert.equal(key,"x-histolab-grade-actor");assert.equal(value,"actor");return request;},
     then(resolve,reject){return Promise.resolve().then(()=>{
+      if(name==="reopen_quiz_submission")return {error:{code:"PGRST202"}};
       if(failDelete)return {error:{code:"WRITE_FAILED"}};
       const index=rows.findIndex(row=>row.id===args.p_id&&row.seccion_id===args.p_section&&row.numero_semana===args.p_week&&row.numero_cuenta===args.p_account);
       return {data:index<0?null:rows.splice(index,1)[0].id};
@@ -50,6 +51,20 @@ live.habilitada=false;
 assert.equal((await submit('lobby-disabled',1,{}, {motivo_finalizacion:'expulsion_infracciones'})).status,409);
 quizzes[0].publicada=false;live={estado:'en_pregunta'};assert.equal((await submit('draft',1)).status,403);
 console.log('PASS: entrega manual reintentable e inmutable, carrera concurrente, nota calculada en servidor y rechazo de borradores/entregas antes de iniciar.');
+
+quizzes[0].publicada=true;live={estado:'inactiva',habilitada:false};
+result=await submit('closed-pending',1,{q:{respuesta:'Sellada antes de cerrar'}},{motivo_finalizacion:'finalizada_por_docente'});
+assert.equal(result.status,200,'Un intento aceptado puede sincronizarse después de cerrar la sala');
+assert.equal(result.payload.data.respuestas.q.respuesta,'Sellada antes de cerrar');
+result=await submit('closed-pending',1,{q:{respuesta:'No sobrescribir'}});
+assert.equal(result.payload.data.respuestas.q.respuesta,'Sellada antes de cerrar');
+assert.equal((await submit('closed-no-acceptance',1,{}, {},{actividad_intento_id:undefined})).status,428);
+activityRows.set('closed-retired',{id:'retired',quiz_id:'manual',reemplazado_at:new Date().toISOString(),faltas:0,eventos:[]});
+assert.equal((await submit('closed-retired',1)).payload.reason,'QUIZ_REOPENED');
+activityRows.set('closed-other-quiz',{id:'other',quiz_id:'different',faltas:0,eventos:[]});
+assert.equal((await submit('closed-other-quiz',1)).status,409);
+live={estado:'en_pregunta'};
+console.log('PASS cierre: sincronización pendiente e idempotente, sin aceptar intentos ausentes, retirados o de otra prueba.');
 
 async function grade(account,grade,extra={}) {const row=rows.find(item=>item.numero_cuenta===account);let status=200,payload;await module.exports.calificarEntrega({params:{entrega_id:row.id},body:{nota_obtenida:grade,comentarios:'Comentario del instructor',...extra}},{status(value){status=value;return this},json(value){payload=value;return this}});assert.equal(status,200);return payload.data;}
 let graded=await grade('manual',.875,{evaluaciones_incisos:{q___direct:{estado:'regular',puntos_obtenidos:.875}}});
@@ -162,3 +177,10 @@ assert.equal(automaticReopening.status,200);assert.equal(automaticReopening.payl
 assert.equal(automaticReopening.payload.data.updated_at,'2026-11-15T00:00:00.123456Z');
 assert.equal(gradeUpdates.at(-1)[7].updated_at,'2026-11-15T00:00:00.123456Z','La nota usa la versión devuelta por el servidor, incluida la precisión de su trigger');
 console.log('PASS reapertura automática: nueva calificación sincronizada con la versión real de la entrega.');
+
+const reopenReply=response();
+await module.exports.reopenQuizSubmission({params:{seccion_id:'s',semana:1,numero_cuenta:'manual'},instructor:actor,body:{motivo:'Recuperar intento',solicitud_id:uuid(900),version:new Date().toISOString()}},reopenReply);
+assert.equal(reopenReply.code,503);
+assert.equal(reopenReply.body.reason,'QUIZ_REOPENING_UNAVAILABLE');
+assert.match(reopenReply.body.message,/migración/);
+console.log('PASS reapertura pendiente de migración: informa el motivo sin borrar ni sustituir la entrega.');

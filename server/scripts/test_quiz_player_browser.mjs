@@ -40,7 +40,7 @@ const compiled = await build({
             localStorage.setItem('fixture-server-activity',JSON.stringify(a));return ok(structuredClone(a));
           },
           sendLiveHeartbeat:async(section,week,payload)=>{f().heartbeats.push(structuredClone(payload));return ok(f().live);},
-          submit:async(section,payload)=>{f().sent.push(structuredClone(payload));if(f().failSubmit)throw Error('isolated offline');if(f().delaySubmit)await new Promise(r=>setTimeout(r,250));f().submission={...payload,id:'fixture-delivery',estado:'enviado'};return {success:true,data:f().submission};}
+          submit:async(section,payload)=>{f().sent.push(structuredClone(payload));if(f().failSubmit)throw Object.assign(Error(f().submitError || 'isolated offline'),{status:f().submitStatus});if(f().delaySubmit)await new Promise(r=>setTimeout(r,250));f().submission={...payload,id:'fixture-delivery',estado:'enviado'};return {success:true,data:f().submission};}
         }
       };`, loader: 'js' }));
   } }]
@@ -152,6 +152,33 @@ try{
  await page.evaluate(()=>{window.fixture.live={...window.fixture.live,estado:'finalizada'};});
  await page.waitForFunction(()=>window.fixture.sent.length===1);
  assert.equal(await page.evaluate(()=>window.fixture.sent[0].auditoria.motivo_finalizacion),'finalizada_por_docente');
+ assert.deepEqual(fixture.errors,[]);await fixture.context.close();
+ // Un error del servidor deja visible su motivo y permite reintentar sin editar.
+ for(const size of [{width:320,height:640},{width:640,height:360},{width:768,height:1024},{width:1024,height:768}]){
+  fixture=await setup({size});page=fixture.page;await fixture.start();await playable(page);
+  await page.getByRole('textbox').fill('Respuesta sellada al cerrar la sala');
+  await page.evaluate(()=>{window.fixture.failSubmit=true;window.fixture.submitStatus=409;window.fixture.submitError='La prueba aún no se ha iniciado para esta sección.';window.fixture.live={...window.fixture.live,estado:'finalizada',habilitada:false};});
+  await page.getByRole('alert').getByText('La prueba aún no se ha iniciado para esta sección.',{exact:true}).waitFor();
+  assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+  assert.equal(await page.getByRole('textbox').count(),0,'La entrega pendiente permanece cerrada para edición');
+  const retryButton=page.getByRole('button',{name:'Reintentar Sincronización Ahora',exact:true});
+  await retryButton.scrollIntoViewIfNeeded();
+  const retryBounds=await retryButton.boundingBox();
+  assert(retryBounds.y>=0 && retryBounds.y+retryBounds.height<=size.height,'Se puede alcanzar completo el botón de reintento en móvil y tablet');
+  await page.screenshot({path:`artifacts/quiz-activity/sincronizacion-${size.width}x${size.height}.png`,fullPage:true});
+  assert(await retryButton.isVisible());
+  await page.evaluate(()=>{window.fixture.failSubmit=false;window.fixture.live.estado='inactiva';[...document.querySelectorAll('button')].find(button=>button.textContent.includes('Reintentar Sincronización Ahora')).click();});
+  await page.waitForFunction(()=>Boolean(window.fixture.submission));
+  assert.equal(await page.evaluate(()=>window.fixture.submission.respuestas.q.a),'Respuesta sellada al cerrar la sala');
+  assert.equal(await page.getByRole('button',{name:'Reintentar Sincronización Ahora',exact:true}).count(),0);
+  assert.deepEqual(fixture.errors,[]);await fixture.context.close();
+ }
+ // Cerrar directamente también sella y envía, aunque no se haya recibido finalizada.
+ fixture=await setup();page=fixture.page;await fixture.start();await playable(page);
+ await page.getByRole('textbox').fill('Cierre directo de sala');
+ await page.evaluate(()=>{window.fixture.live={...window.fixture.live,estado:'inactiva',habilitada:false};});
+ await page.waitForFunction(()=>Boolean(window.fixture.submission));
+ assert.equal(await page.evaluate(()=>window.fixture.submission.respuestas.q.a),'Cierre directo de sala');
  assert.deepEqual(fixture.errors,[]);await fixture.context.close();
  // La sala de espera tiene las mismas tres faltas y entrega vacía permitida.
  fixture=await setup({phase:'lobby'});page=fixture.page;await fixture.start();

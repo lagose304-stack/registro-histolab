@@ -8,6 +8,9 @@ const id = n => `00000000-0000-4000-8000-${String(n).padStart(12,"0")}`;
 const event = (n, episode, tipo = "salida") => ({ id:id(n), episodio_id:id(episode), tipo, hora_cliente:new Date(1700000000000+n*1000).toISOString(), senales:tipo === "salida" ? ["ventana_sin_foco"] : [], pregunta_id:"q1", pregunta_indice:0 });
 let state = { faltas:0, episodio_abierto:null, eventos:[] };
 const win = new EventTarget(); win.setTimeout = setTimeout;
+const stateChecks = new Map(); let timerId = 0;
+win.setInterval = callback => { stateChecks.set(++timerId, callback); return timerId; };
+win.clearInterval = timer => stateChecks.delete(timer);
 const doc = new EventTarget(); doc.visibilityState = "visible"; let focused = true; doc.hasFocus = () => focused;
 let active = true, sequence = 100;
 const cleanup = observeQuizActivity({ window:win, document:doc, getState:()=>state, isActive:()=>active, makeId:()=>id(sequence++), onEvent:source => { state=appendLocalActivity(state,[{...source,pregunta_indice:0}]); if(state.faltas===3)active=false; } });
@@ -36,6 +39,18 @@ assert(state.episodio_abierto,"El foco no confirma el regreso automáticamente")
 state=appendLocalActivity(state,[{id:id(sequence++),episodio_id:state.episodio_abierto,tipo:"regreso",hora_cliente:new Date().toISOString(),senales:[],pregunta_indice:0}]);
 assert.equal(state.faltas,1);assert.equal(quizReturnDeadline(state),null);explicitCleanup();
 console.log("PASS regreso explícito: foco no detiene ni reinicia el plazo; confirmar conserva una sola falta.");
+
+state={faltas:0,episodio_abierto:null,eventos:[]};focused=true;doc.visibilityState="visible";active=true;
+const pollCleanup=observeQuizActivity({window:win,document:doc,explicitReturn:true,getState:()=>state,isActive:()=>active,makeId:()=>id(sequence++),onEvent:source=>{state=appendLocalActivity(state,[{...source,pregunta_indice:0}]);}});
+const poll=()=>{for(const check of stateChecks.values())check();};
+poll();assert.equal(state.faltas,0);
+focused=false;poll();poll();assert.equal(state.faltas,1,"Detecta pérdida de foco aunque no se emita blur, sin duplicar episodios");
+focused=true;poll();assert(state.episodio_abierto,"El sondeo no confirma el regreso explícito");
+state=appendLocalActivity(state,[{id:id(sequence++),episodio_id:state.episodio_abierto,tipo:"regreso",hora_cliente:new Date().toISOString(),senales:[],pregunta_indice:0}]);
+doc.visibilityState="hidden";poll();assert.equal(state.faltas,2,"Detecta página oculta sin evento");
+pollCleanup();assert.equal(stateChecks.size,0,"Retira el sondeo al salir de la prueba");
+doc.visibilityState="visible";focused=true;
+console.log("PASS sondeo: foco y visibilidad sin eventos, episodios deduplicados, regreso explícito y limpieza.");
 
 const db=new PGlite();
 try {
