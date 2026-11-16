@@ -67,7 +67,7 @@ export default function ReviewQuizSubmissionsView({
   const currentUser = currentInstructor || api.auth.getCurrentInstructor();
   const hasFullAccess = useMemo(() => hasFullSectionAccess(currentUser, seccion), [currentUser, seccion]);
 
-  // Modal de Calificación
+  // Revisión individual dentro del módulo
   const [selectedEntrega, setSelectedEntrega] = useState(null);
   const [notaInput, setNotaInput] = useState("");
   const [notaRealInput, setNotaRealInput] = useState("");
@@ -75,6 +75,19 @@ export default function ReviewQuizSubmissionsView({
   const [evaluaciones, setEvaluaciones] = useState({});
   const [savingGrade, setSavingGrade] = useState(false);
   const [gradeError, setGradeError] = useState("");
+  const reviewHeadingRef = useRef(null);
+  const reviewTriggerRef = useRef(null);
+  const listingScrollRef = useRef(0);
+  useEffect(() => {
+    if (selectedEntrega) {
+      reviewHeadingRef.current?.focus({ preventScroll: true });
+      reviewHeadingRef.current?.scrollIntoView({ block: "start" });
+    } else if (reviewTriggerRef.current) {
+      if (reviewTriggerRef.current.isConnected) reviewTriggerRef.current.focus({ preventScroll: true });
+      window.scrollTo({ top: listingScrollRef.current });
+      reviewTriggerRef.current = null;
+    }
+  }, [selectedEntrega?.id]);
 
   // Estado para Revisión Rápida (Reactivo por Reactivo a todos los estudiantes)
   const [showQuickReviewModal, setShowQuickReviewModal] = useState(false);
@@ -86,18 +99,18 @@ export default function ReviewQuizSubmissionsView({
   const [quickQuestionFinishedPrompt, setQuickQuestionFinishedPrompt] = useState(false);
   const [quickAllCompleted, setQuickAllCompleted] = useState(false);
 
-  // Bloquear el scroll de fondo mientras cualquier modal esté abierto
+  // La revisión rápida conserva su diálogo y el bloqueo de fondo.
   useEffect(() => {
-    if (selectedEntrega || showQuickReviewModal) {
+    if (showQuickReviewModal) {
       const originalOverflow = document.body.style.overflow;
       document.body.style.overflow = "hidden";
       return () => {
         document.body.style.overflow = originalOverflow;
       };
     }
-  }, [selectedEntrega, showQuickReviewModal]);
+  }, [showQuickReviewModal]);
 
-  const reviewOpen = Boolean(selectedEntrega || showQuickReviewModal);
+  const reviewOpen = showQuickReviewModal;
   useEffect(() => {
     if (!reviewOpen) return;
     const previousFocus = document.activeElement;
@@ -287,8 +300,10 @@ export default function ReviewQuizSubmissionsView({
     return {...stored,...automatic};
   };
 
-  // Abrir modal de calificación
+  // Abrir revisión individual y conservar la posición del listado.
   const handleOpenGradeModal = (entrega) => {
+    reviewTriggerRef.current = document.activeElement;
+    listingScrollRef.current = window.scrollY;
     setSelectedEntrega(entrega);
     const oficial =
       entrega.nota_obtenida !== null && entrega.nota_obtenida !== undefined
@@ -326,7 +341,7 @@ export default function ReviewQuizSubmissionsView({
     setGradeError("");
   };
 
-  // Cerrar modal
+  // Volver al listado de entregas.
   const handleCloseGradeModal = () => {
     setSelectedEntrega(null);
     setNotaInput("");
@@ -902,6 +917,7 @@ export default function ReviewQuizSubmissionsView({
 
   return (
     <section className="user-directory quiz-review" aria-labelledby="quiz-review-title">
+      <div hidden={Boolean(selectedEntrega)}>
       <header className="quiz-review__header">
         <div className="quiz-review__heading">
           {!hideBackButton && <button type="button" className="user-button" onClick={onClose} aria-label="Volver al panel de la sección"><ArrowLeft size={18} /></button>}
@@ -1135,116 +1151,26 @@ export default function ReviewQuizSubmissionsView({
         </>}
       </>}
 
-      {/* =================================================================== */}
-      {/* 4. MODAL INTERACTIVO DE REVISIÓN Y CALIFICACIÓN (PORTAL GLOBAL)      */}
-      {/* =================================================================== */}
-      {selectedEntrega && createPortal(
-        <div
-          className="quiz-review-overlay animate-fade-in"
-          style={{
-            position: "fixed",
-            inset: 0,
-            width: "100vw",
-            height: "100vh",
-            background: "rgba(15, 23, 42, 0.72)",
-            backdropFilter: "blur(5px)",
-            WebkitBackdropFilter: "blur(5px)",
-            zIndex: 999999,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: "1.25rem",
-            boxSizing: "border-box"
-          }}
-          onClick={(e) => {
-            if (e.target === e.currentTarget && !savingGrade) handleCloseGradeModal();
-          }}
-        >
-          <div
-            className="quiz-review-dialog quiz-review-dialog--individual"
-            role="dialog" aria-modal="true" aria-label={`Revisión de prueba de ${selectedEntrega.nombre_completo || "Estudiante"}`} tabIndex={-1}
-            style={{
-              background: "#ffffff",
-              borderRadius: "1.2rem",
-              width: "100%",
-              maxWidth: "920px",
-              maxHeight: "92vh",
-              display: "flex",
-              flexDirection: "column",
-              boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.35)",
-              overflow: "hidden"
-            }}
-          >
-            {/* Header del Modal */}
-            <div
-              style={{
-                padding: "1.25rem 1.5rem",
-                borderBottom: "1.5px solid #e2e8f0",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                background: "#f8fafc"
-              }}
-            >
-              <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
-                <div
-                  style={{
-                    width: "42px",
-                    height: "42px",
-                    borderRadius: "0.65rem",
-                    background: "#0284c7",
-                    color: "#ffffff",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center"
-                  }}
-                >
-                  <Award size={22} />
-                </div>
-                <div>
-                  <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                    <h3 style={{ margin: 0, fontSize: "1.15rem", fontWeight: 900, color: "#0f172a" }}>
-                      Revisión de Prueba: {selectedEntrega.nombre_completo}
-                    </h3>
-                    <span
-                      style={{
-                        fontSize: "0.72rem",
-                        fontWeight: 800,
-                        padding: "0.15rem 0.5rem",
-                        borderRadius: "9999px",
-                        background: "#eff6ff",
-                        color: "#1d4ed8"
-                      }}
-                    >
-                      Semana {selectedSemana}
-                    </span>
-                  </div>
-                  <span style={{ fontSize: "0.8rem", color: "#64748b" }}>
-                    Cuenta: <strong>{selectedEntrega.numero_cuenta}</strong> • {carrera}
-                  </span>
-                </div>
-              </div>
-
-              <button
-                type="button"
-                aria-label="Cerrar revisión"
-                onClick={handleCloseGradeModal}
-                disabled={savingGrade}
-                style={{
-                  background: "transparent",
-                  border: "none",
-                  color: "#64748b",
-                  cursor: "pointer",
-                  padding: "0.4rem",
-                  borderRadius: "0.4rem"
-                }}
-              >
-                <X size={22} />
-              </button>
+      </div>
+      {/* Vista individual de revisión y calificación */}
+      {selectedEntrega && (
+        <section className="quiz-review-workspace" aria-labelledby="quiz-review-student">
+          <header className="quiz-review-workspace__header">
+            <button type="button" className="user-button" onClick={handleCloseGradeModal} disabled={savingGrade}><ArrowLeft size={18} /> Volver a las entregas</button>
+            <div>
+              <span className="quiz-review__eyebrow">REVISIÓN INDIVIDUAL · SEMANA {selectedSemana}</span>
+              <h2 id="quiz-review-student" ref={reviewHeadingRef} tabIndex={-1}>{selectedEntrega.nombre_completo || "Estudiante"}</h2>
+              <p>Cuenta {selectedEntrega.numero_cuenta} · {carrera} · Sección {seccion?.codigo}</p>
             </div>
-
+            <span className="quiz-review-workspace__state" data-graded={selectedEntrega.estado === "calificado"}>{selectedEntrega.estado === "calificado" ? "Calificada" : "Pendiente de calificar"}</span>
+          </header>
+          <nav className="quiz-review-workspace__nav" aria-label="Secciones de la revisión">
+            <a href="#quiz-review-answers">Respuestas <span>{quizSemanal?.preguntas?.length || 0} preguntas</span></a>
+            <a href="#quiz-review-grade">Calificación y comentarios</a>
+          </nav>
+          <div className="quiz-review-workspace__layout">
             {/* Contenido / Respuestas del Alumno */}
-            <div
+            <div id="quiz-review-answers" className="quiz-review-workspace__answers"
               style={{
                 padding: "1.5rem",
                 overflowY: "auto",
@@ -1311,6 +1237,7 @@ export default function ReviewQuizSubmissionsView({
                 </div>
               </div>
 
+              <details className="quiz-review-workspace__activity"><summary>Actividad y datos de entrega<span>Salidas, conectividad y diagnóstico técnico</span></summary>
               <QuizActivityReview section={selectedEntrega.seccion_id || seccion.id} week={selectedEntrega.numero_semana || selectedSemana} account={selectedEntrega.numero_cuenta} fallback={selectedEntrega.auditoria?.actividad} />
               {/* Datos de entrega y conectividad */}
               {selectedEntrega.auditoria && (
@@ -1354,6 +1281,10 @@ export default function ReviewQuizSubmissionsView({
                 </div>
               )}
 
+              </details>
+              <nav className="quiz-review-workspace__questions" aria-label="Ir a una pregunta">
+                {(quizSemanal?.preguntas || []).map((question, index) => <a key={question.id} href={`#quiz-review-question-${index}`}>Pregunta {index + 1}{question.es_bonus || index === 5 ? " · Bonus" : ""}</a>)}
+              </nav>
               {/* Listado de Preguntas y Respuestas */}
               {(!quizSemanal?.preguntas || quizSemanal.preguntas.length === 0) ? (
                 <div style={{ textAlign: "center", padding: "2rem", color: "#64748b" }}>
@@ -1396,7 +1327,7 @@ export default function ReviewQuizSubmissionsView({
                           </div>
                         )}
 
-                        <div
+                        <div id={`quiz-review-question-${qIdx}`} className="quiz-review-workspace__question"
                           style={{
                             borderRadius: "1rem",
                             border: isBonus ? "2px solid #fde68a" : "2px solid #cbd5e1",
@@ -1561,7 +1492,7 @@ export default function ReviewQuizSubmissionsView({
                                     )}
                                   </div>
 
-                                  <div style={{ display: "flex", alignItems: "center", gap: "0.35rem" }}>
+                                  <div className="quiz-review-evaluation-actions" style={{ display: "flex", alignItems: "center", gap: "0.35rem" }}>
                                     <button
                                       type="button"
                                       onClick={() => handleEvaluateItem(pregunta.id, null, "buena", maxPts)}
@@ -1750,7 +1681,7 @@ export default function ReviewQuizSubmissionsView({
                                       )}
                                     </div>
 
-                                    <div style={{ display: "flex", alignItems: "center", gap: "0.35rem" }}>
+                                    <div className="quiz-review-evaluation-actions" style={{ display: "flex", alignItems: "center", gap: "0.35rem" }}>
                                       <button
                                         type="button"
                                         disabled={currentEval?.origen === "automatica"}
@@ -1994,7 +1925,7 @@ export default function ReviewQuizSubmissionsView({
                                         </div>
 
                                         {/* Botones de Calificación para esta casilla */}
-                                        <div style={{ display: "flex", alignItems: "center", gap: "0.35rem" }}>
+                                        <div className="quiz-review-evaluation-actions" style={{ display: "flex", alignItems: "center", gap: "0.35rem" }}>
                                           <span
                                             style={{
                                               fontSize: "0.74rem",
@@ -2103,7 +2034,7 @@ export default function ReviewQuizSubmissionsView({
 
             {/* Footer / Panel de Calificación */}
             <form
-              className="quiz-review-dialog__grade"
+              id="quiz-review-grade" aria-labelledby="quiz-review-grade-title" className="quiz-review-workspace__grade"
               onSubmit={handleSaveGrade}
               style={{
                 padding: "1.25rem 1.5rem",
@@ -2114,6 +2045,7 @@ export default function ReviewQuizSubmissionsView({
                 gap: "1rem"
               }}
             >
+              <div className="quiz-review-workspace__grade-heading"><Award size={22} /><div><h3 id="quiz-review-grade-title">Calificación de la prueba</h3><p>Evalúa las respuestas y guarda la revisión del estudiante.</p></div></div>
               {gradeError && (
                 <div role="alert"
                   style={{
@@ -2131,7 +2063,7 @@ export default function ReviewQuizSubmissionsView({
               )}
 
               {/* Resumen de Calificación Compacto (Horizontal y Delgado) */}
-              <div
+              <div className="quiz-review-workspace__scores"
                 style={{
                   display: "grid",
                   gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 240px), 1fr))",
@@ -2307,8 +2239,7 @@ export default function ReviewQuizSubmissionsView({
               </div>
             </form>
           </div>
-        </div>,
-        document.body
+        </section>
       )}
 
       {/* =================================================================== */}

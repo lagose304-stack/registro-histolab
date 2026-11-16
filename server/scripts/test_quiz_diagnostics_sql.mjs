@@ -3,7 +3,7 @@ import {readFile} from "node:fs/promises";
 import {PGlite} from "@electric-sql/pglite";
 import {normalizeDiagnosticPayload} from "../../shared/quizDiagnostics.mjs";
 const db=new PGlite();const id=n=>`00000000-0000-4000-8000-${String(n).padStart(12,'0')}`;
-const payload=normalizeDiagnosticPayload({version:1,dispositivo:{sistema:'iPadOS',navegador:'Safari'},muestras:[{motivos:['inicio'],hora_cliente:new Date().toISOString(),visible:'visible',foco:true,faltas_observadas:0}]});
+const payload=normalizeDiagnosticPayload({version:1,dispositivo:{sistema:'iPadOS',navegador:'Safari'},muestras:[{motivos:['inicio'],hora_cliente:new Date().toISOString(),visible:'visible',foco:true,faltas_observadas:0,campo_editable_activo:false,escritura_reciente:true}]});
 try{
  await db.exec('CREATE ROLE anon;CREATE ROLE authenticated;CREATE ROLE service_role BYPASSRLS;');
  for(const file of ['20261113214049_quiz_activity_journal.sql','20261114030710_quiz_automatic_diagnostics.sql'])await db.exec(await readFile(new URL('../../supabase/migrations/'+file,import.meta.url),'utf8'));
@@ -13,6 +13,8 @@ try{
  await db.exec('SET ROLE service_role');
  await assert.rejects(append(100,'other'));await assert.rejects(append(100,'other',id(2)));
  await Promise.all([append(100),append(100)]);assert.equal((await db.query('SELECT count(*)::int n FROM quiz_diagnostic_batches')).rows[0].n,1);
+ const saved=(await db.query('SELECT datos FROM quiz_diagnostic_batches WHERE id=$1',[id(100)])).rows[0].datos.muestras[0];
+ assert.equal(saved.campo_editable_activo,false);assert.equal(saved.escritura_reciente,true,'Conserva el contexto de cierre del teclado en JSONB');
  await assert.rejects(append(101,'student',id(1),{...payload,muestras:Array(17).fill(payload.muestras[0])}));
  await assert.rejects(append(101,'student',id(1),{...payload,extra:'X'.repeat(17000)}));
  await assert.rejects(db.query("UPDATE quiz_diagnostic_batches SET datos='{}'"),{code:'42501'});await assert.rejects(db.query('DELETE FROM quiz_diagnostic_batches'),{code:'42501'});

@@ -40,7 +40,7 @@ const compiled = await build({
             localStorage.setItem('fixture-server-activity',JSON.stringify(a));return ok(structuredClone(a));
           },
           sendLiveHeartbeat:async(section,week,payload)=>{f().heartbeats.push(structuredClone(payload));return ok(f().live);},
-          submit:async(section,payload)=>{f().sent.push(structuredClone(payload));if(f().failSubmit)throw Object.assign(Error(f().submitError || 'isolated offline'),{status:f().submitStatus});if(f().delaySubmit)await new Promise(r=>setTimeout(r,250));f().submission={...payload,id:'fixture-delivery',estado:'enviado'};return {success:true,data:f().submission};}
+          submit:async(section,payload)=>{f().sent.push(structuredClone(payload));if(f().failSubmit)throw Object.assign(Error(f().submitError || 'isolated offline'),{status:f().submitStatus});if(f().delaySubmit)await new Promise(r=>setTimeout(r,Number(f().delaySubmit)||250));f().submission={...payload,id:'fixture-delivery',estado:'enviado'};return {success:true,data:f().submission};}
         }
       };`, loader: 'js' }));
   } }]
@@ -102,12 +102,30 @@ try{
   assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
   await page.screenshot({path:`artifacts/quiz-activity/${size.width}x${size.height}.png`,fullPage:true});
   await leave(page);await page.getByRole('alertdialog').getByText('Falta 2 de 3',{exact:true}).waitFor();await back(page);
-  await page.evaluate(()=>{window.fixture.delaySubmit=true;});
+  await page.evaluate(()=>{window.fixture.delaySubmit=1500;});
   await leave(page);
+  const finished=page.getByRole('alertdialog');
+  await finished.getByRole('heading',{name:'Prueba bloqueada',exact:true}).waitFor();
+  await finished.getByText('Enviando tus respuestas…',{exact:true}).waitFor();
+  assert(await finished.getByRole('button',{name:'Enviando…',exact:true}).isDisabled());
+  await finished.getByText('Entrega confirmada',{exact:true}).waitFor();
+  assert(await finished.getByText(/Se registraron tres salidas/).isVisible());
+  assert.equal(await finished.getByRole('timer').count(),0,'La pantalla final no ofrece otro plazo para regresar');
+  const finalBounds=await finished.boundingBox();
+  assert.equal(finalBounds.x,0);assert.equal(finalBounds.y,0);assert.equal(finalBounds.width,viewport.width);assert.equal(finalBounds.height,viewport.height);
+  await page.keyboard.press('Tab');
+  assert(await finished.getByRole('button',{name:'Ver entrega',exact:true}).evaluate(button=>button===document.activeElement));
+  const finalButtonBounds=await finished.getByRole('button',{name:'Ver entrega',exact:true}).boundingBox();
+  assert(finalButtonBounds.y>=0 && finalButtonBounds.y+finalButtonBounds.height<=size.height,'La acción final puede alcanzarse completa');
+  assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+  await page.screenshot({path:`artifacts/quiz-activity/bloqueo-${size.width}x${size.height}.png`,fullPage:false});
   await page.waitForFunction(()=>window.fixture.sent.length===1&&!document.querySelector('.quiz-player'));
   const sent=await page.evaluate(()=>window.fixture.sent[0]);
   assert.equal(sent.respuestas.q.a,'Respuestas al llegar a tres faltas');assert.equal(sent.auditoria.motivo_finalizacion,'limite_tres_faltas');
   assert(sent.actividad_intento_id);assert.equal(await page.evaluate(()=>window.fixture.sent.length),1);
+  await finished.getByRole('button',{name:'Ver entrega',exact:true}).click();
+  assert.equal(await page.getByRole('alertdialog').count(),0);
+  assert.equal(await page.getByRole('textbox').count(),0,'Ver la entrega no permite continuar respondiendo');
   assert.deepEqual(fixture.errors,[]);await fixture.context.close();
  }
  // Una ráfaga no duplica, recargar conserva contador y respuestas.
@@ -120,10 +138,14 @@ try{
  await page.evaluate(()=>{window.fixture.failSubmit=true;window.fixture.failActivity=true;});
  await leave(page);
  await page.waitForFunction(()=>Boolean(localStorage.getItem('histolab_sealed_quiz_fixture_sem_1')));
+ await page.getByRole('alertdialog').getByText('Entrega pendiente de confirmación',{exact:true}).waitFor();
+ assert(await page.getByRole('button',{name:'Reintentar envío',exact:true}).isEnabled());
+ assert.equal(await page.getByRole('dialog').count(),0,'El bloqueo sustituye el diálogo genérico de entrega pendiente');
  const saved=await page.evaluate(()=>JSON.parse(localStorage.getItem('histolab_sealed_quiz_fixture_sem_1')));
  assert.equal(saved.respuestas.q.a,'Borrador conservado');assert.equal(saved.auditoria.motivo_finalizacion,'limite_tres_faltas');
  await page.reload();
  await page.waitForFunction(()=>Boolean(window.fixture.submission));
+ await page.getByRole('alertdialog').getByText('Entrega confirmada',{exact:true}).waitFor();
  assert.equal(await page.evaluate(()=>window.fixture.submission.respuestas.q.a),'Borrador conservado');
  assert.deepEqual(fixture.errors,[]);await fixture.context.close();
  // Vencimiento real de diez segundos y restauración sin reiniciar el plazo.
@@ -131,6 +153,8 @@ try{
  await page.getByRole('textbox').fill('Respuesta antes de falta grave');
  await leave(page);await page.getByRole('alertdialog').waitFor();
  await page.waitForFunction(()=>window.fixture.sent.length===1,{},{timeout:15000});
+ await page.getByRole('alertdialog').getByRole('heading',{name:'Prueba bloqueada',exact:true}).waitFor();
+ assert(await page.getByRole('alertdialog').getByText(/Vencieron los 10 segundos/).isVisible());
  assert.equal(await page.evaluate(()=>window.fixture.sent[0].auditoria.motivo_finalizacion),'falta_grave_tiempo');
  assert.equal(await page.evaluate(()=>window.fixture.sent[0].respuestas.q.a),'Respuesta antes de falta grave');
  assert.deepEqual(fixture.errors,[]);await fixture.context.close();

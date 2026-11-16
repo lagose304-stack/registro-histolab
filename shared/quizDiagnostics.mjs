@@ -34,6 +34,8 @@ export function normalizeDiagnosticPayload(payload) {
       secuencia: number(sample.secuencia, 10000), pregunta_indice: number(sample.pregunta_indice, 999), faltas_observadas: number(sample.faltas_observadas, 3),
       visible: ["visible", "hidden", "prerender"].includes(sample.visible) ? sample.visible : "desconocida",
       foco: bool(sample.foco), online: bool(sample.online), campo_activo: bool(sample.campo_activo),
+      ...(typeof sample.campo_editable_activo === "boolean" ? {campo_editable_activo:sample.campo_editable_activo} : {}),
+      ...(typeof sample.escritura_reciente === "boolean" ? {escritura_reciente:sample.escritura_reciente} : {}),
       ancho: number(sample.ancho), alto: number(sample.alto), pantalla_ancho: number(sample.pantalla_ancho), pantalla_alto: number(sample.pantalla_alto),
       viewport_ancho: number(sample.viewport_ancho), viewport_alto: number(sample.viewport_alto), viewport_escala: number(sample.viewport_escala, 20),
       viewport_x: number(sample.viewport_x), viewport_y: number(sample.viewport_y),

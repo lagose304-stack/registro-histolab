@@ -1,5 +1,6 @@
 import QuizActivityConsent from "./QuizActivityConsent";
 import QuizActivityWarning from "./QuizActivityWarning";
+import QuizActivityFinished from "./QuizActivityFinished";
 import { useQuizActivity } from "../utils/useQuizActivity";
 import StudentQuizPlayer from "./StudentQuizPlayer";
 import StudentQuizzesView from "./StudentQuizzesView";
@@ -213,6 +214,10 @@ export default function StudentPortalView({ student, notify = () => {}, onActivi
   const [activityConsent, setActivityConsent] = useState(null);
   const [activityStarting, setActivityStarting] = useState(false);
   const [activityError, setActivityError] = useState("");
+  const [activityClosure, setActivityClosure] = useState(null);
+  const pendingActivityReason = pendingSubmissionPayload?.auditoria?.motivo_finalizacion;
+  const activityFinished = activityClosure || (["limite_tres_faltas", "falta_grave_tiempo"].includes(pendingActivityReason)
+    ? { reason: pendingActivityReason, title: activeQuizToTake?.titulo, confirmed: false } : null);
   const activitySubmitRef = useRef(null);
   const activity = useQuizActivity({
     quiz: activeQuizToTake, student, api: api.pruebas,
@@ -625,8 +630,10 @@ export default function StudentPortalView({ student, notify = () => {}, onActivi
       autoSubmitTriggeredRef.current = true;
 
       if (forcedReason?.motivo === "falta_grave_tiempo") {
+        setActivityClosure({ reason: forcedReason.motivo, title: targetQuiz?.titulo, confirmed: true });
         notify("Falta grave: vencieron los 10 segundos para regresar. Se enviaron tus respuestas existentes.", "warning");
       } else if (forcedReason?.motivo === "limite_tres_faltas") {
+        setActivityClosure({ reason: forcedReason.motivo, title: targetQuiz?.titulo, confirmed: true });
         notify("Falta 3 de 3. La prueba se finalizó y se enviaron las respuestas existentes.", "warning");
       } else if (forcedReason?.motivo === "tiempo_agotado") {
         notify("Tiempo concluido. Tu prueba ha sido enviada exitosamente.", "info");
@@ -676,6 +683,7 @@ export default function StudentPortalView({ student, notify = () => {}, onActivi
     // El servidor confirmó que este envío pertenece al intento retirado.
     // La entrega canónica anterior permanece en su archivo de reapertura.
     autoSubmitTriggeredRef.current = true;
+    setActivityClosure(null);
     clearActiveAttemptFromDisk(week);
     safeStorage.removeItem(getPendingSubmissionStorageKey(week));
     setActiveQuizToTake(null);
@@ -736,6 +744,9 @@ export default function StudentPortalView({ student, notify = () => {}, onActivi
     isSubmittingRef.current = true;
     autoSubmitTriggeredRef.current = true;
     setSubmittingQuiz(true);
+    if (["limite_tres_faltas", "falta_grave_tiempo"].includes(forcedReason?.motivo)) {
+      setActivityClosure({ reason: forcedReason.motivo, title: activeQuizToTake.titulo, confirmed: false });
+    }
     let secId = effectiveStudent?.seccion_id || effectiveStudent?.seccion?.id;
 
     const now = Date.now();
@@ -1644,7 +1655,7 @@ export default function StudentPortalView({ student, notify = () => {}, onActivi
   };
 
   return (
-    <div className="student-portal" data-taking-quiz={Boolean(activeQuizToTake)}
+    <div className="student-portal" data-taking-quiz={Boolean(activeQuizToTake)} inert={Boolean(activityFinished)}
       style={{
         "--student-accent": theme.primary,
         "--student-soft": theme.bg,
@@ -3136,6 +3147,10 @@ export default function StudentPortalView({ student, notify = () => {}, onActivi
         {activity.warning && !isExamSealedOffline && !submittingQuiz && !autoSubmitTriggeredRef.current && (
           <QuizActivityWarning strike={activity.state.attempt.faltas} seconds={activity.secondsLeft} onReturn={activity.returnToQuiz} />
         )}
+        {activityFinished && <QuizActivityFinished reason={activityFinished.reason} title={activityFinished.title}
+          confirmed={activityFinished.confirmed} busy={submittingQuiz || syncingOfflineSubmission}
+          error={submissionSyncError} onReview={() => { setActivityClosure(null); setActiveTab("pruebas"); }}
+          onRetry={dispatchPendingOfflineSubmission} />}
         {/* MODAL IN-APP DE CONFIRMACIÓN DE ENTREGA */}
         {confirmSubmitModalOpen && activeQuizToTake && (
           <div
@@ -3428,7 +3443,7 @@ export default function StudentPortalView({ student, notify = () => {}, onActivi
         )}
 
         {/* MODAL DE RESGUARDO Y SELLADO OFFLINE INMUTABLE */}
-        {isExamSealedOffline && (
+        {isExamSealedOffline && !activityFinished && (
           <div
             role="dialog"
             aria-modal="true"

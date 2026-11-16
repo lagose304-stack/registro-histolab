@@ -33,6 +33,7 @@ export default function QuizDiagnosticsReview({ section, week, account }) {
       <ul>{devices.map(device=><li key={device}>{device}</li>)}</ul>
       <p>Versión del detector en las muestras: {detectorVersions.join(", ")}. Las muestras antiguas conservan su versión original.</p>
       <p>Se guardan cambios de foco, visibilidad, tamaño, orientación y conexión, con muestras periódicas. La captura y los envíos tienen límites; el registro puede estar incompleto.</p>
+      <p>Las muestras nuevas distinguen campos de respuesta editables y conservan durante dos segundos el contexto reciente de escritura. No confirman que el teclado esté abierto. Un cambio de tamaño sin ese contexto tampoco demuestra una salida ni añade faltas.</p>
       <button type="button" onClick={download}>Descargar diagnóstico técnico</button>
     </>}
   </details>;
