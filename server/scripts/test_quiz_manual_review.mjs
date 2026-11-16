@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { manualQuickReviewQuestions } from '../../client/src/utils/quizQuickReview.mjs';
+import { manualQuickReviewQuestions, quickReviewSelections } from '../../client/src/utils/quizQuickReview.mjs';
 import { buildAutomaticQuizAssessment, resolveQuizAssessment, splitQuizPoints } from '../../shared/quizAutoGrading.mjs';
 
 const automaticItems = [
@@ -33,4 +33,13 @@ const result=resolveQuizAssessment(assessment,evaluations);
 assert.equal(result.pending,0);assert.equal(result.raw,6);assert.equal(result.official,5);
 assert.equal(result.evaluations.mixed___choice.origen,'automatica');
 assert.equal(result.evaluations.mixed___list___slot_2.puntos_obtenidos,splitQuizPoints(1,3)[2]);
-console.log('PASS revisión manual: seis tipos, preguntas mixtas, letras/índices y puntajes originales, casillas, automática conservada, legado y bonus.');
+const saved={A:{q___text:{estado:'mala',puntos_obtenidos:0}},B:{q___text:{estado:'mala',puntos_obtenidos:0},q___slot_0:{estado:'buena',puntos_obtenidos:1}}};
+const chosen={A:{q___text:true}};
+assert.deepEqual(quickReviewSelections(saved,chosen,'A'),saved.A);
+assert.deepEqual(quickReviewSelections(saved,chosen,'B'),{},'Ni la selección anterior ni las notas guardadas preseleccionan al siguiente alumno');
+chosen.B={q___slot_0:true};
+assert.deepEqual(quickReviewSelections(saved,chosen,'B'),{q___slot_0:saved.B.q___slot_0},'Cada casilla exige una elección propia');
+assert.deepEqual(quickReviewSelections(saved,chosen,'A'),saved.A,'Volver al alumno anterior recupera solo su elección');
+assert.deepEqual(quickReviewSelections(saved,{},'A'),{},'Reabrir una revisión comienza sin seleccionar');
+assert.equal(saved.B.q___text.estado,'mala','Mostrar una selección vacía no borra la nota anterior');
+console.log('PASS revisión manual: tipos, puntajes, automática y selección independiente por estudiante/casilla sin borrar notas guardadas.');

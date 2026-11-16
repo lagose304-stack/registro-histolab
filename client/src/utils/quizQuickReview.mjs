@@ -1,5 +1,12 @@
 import { isAutomaticQuizItem } from "../../../shared/quizAutoGrading.mjs";
 
+// Las notas guardadas se conservan para el envío, pero no preseleccionan una
+// nueva valoración. Solo se muestran elecciones de esta revisión y este alumno.
+export function quickReviewSelections(evaluations, selections, submissionId) {
+  return Object.fromEntries(Object.entries(evaluations[submissionId] || {})
+    .filter(([key]) => selections[submissionId]?.[key] === true));
+}
+
 // Proyección exclusiva de la vista: los índices originales mantienen la identidad
 // de preguntas/incisos, la posición guardada y el bonus histórico de la pregunta 6.
 export function manualQuickReviewQuestions(questions = []) {

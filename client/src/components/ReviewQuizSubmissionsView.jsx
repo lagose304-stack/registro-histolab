@@ -28,7 +28,7 @@ import {
 } from "lucide-react";
 import { api } from "../services/api";
 import QuizActivityReview from "./QuizActivityReview";
-import { manualQuickReviewQuestions } from "../utils/quizQuickReview.mjs";
+import { manualQuickReviewQuestions, quickReviewSelections } from "../utils/quizQuickReview.mjs";
 import "./ReviewQuizSubmissionsView.css";
 import { safeStorage } from "../utils/safeStorage";
 import {
@@ -86,6 +86,7 @@ export default function ReviewQuizSubmissionsView({
   const [quickQuestionIdx, setQuickQuestionIdx] = useState(0); // 0 a 5
   const [quickStudentIdx, setQuickStudentIdx] = useState(0); // 0 a entregasSemana.length - 1
   const [quickEvaluations, setQuickEvaluations] = useState({}); // { [entregaId]: { [evalKey]: {...} } }
+  const [quickSelections, setQuickSelections] = useState({});
   const [quickSaving, setQuickSaving] = useState(false);
   const [quickQuestionFinishedPrompt, setQuickQuestionFinishedPrompt] = useState(false);
   const [quickAllCompleted, setQuickAllCompleted] = useState(false);
@@ -597,6 +598,7 @@ export default function ReviewQuizSubmissionsView({
       initialMap[e.id] = { ...existing };
     });
     setQuickEvaluations(initialMap);
+    setQuickSelections({});
 
     const posKey = `histolab_quick_pos_${seccion?.id || seccion?.codigo || "sec"}_sem_${selectedSemana}`;
 
@@ -665,6 +667,7 @@ export default function ReviewQuizSubmissionsView({
 
     const key = itemId ? `${preguntaId}___${itemId}` : `${preguntaId}___direct`;
 
+    setQuickSelections(prev => ({ ...prev, [entregaId]: { ...prev[entregaId], [key]: true } }));
     setQuickEvaluations((prev) => {
       const studentMap = { ...(prev[entregaId] || {}) };
       studentMap[key] = {
@@ -693,6 +696,7 @@ export default function ReviewQuizSubmissionsView({
 
     const key = `${preguntaId}___${itemId}___slot_${slotIdx}`;
 
+    setQuickSelections(prev => ({ ...prev, [entregaId]: { ...prev[entregaId], [key]: true } }));
     setQuickEvaluations((prev) => {
       const studentMap = { ...(prev[entregaId] || {}) };
       delete studentMap[`${preguntaId}___${itemId}`];
@@ -753,7 +757,7 @@ export default function ReviewQuizSubmissionsView({
     if (!currentStudent) return;
 
     const studentEvals = quickEvaluations[currentStudent.id] || {};
-    if (!getQuestionEvaluationStatus(quickQuestions.find(question => question.reviewQuestionIndex === quickQuestionIdx), studentEvals).isComplete) return;
+    if (!getQuestionEvaluationStatus(quickQuestions.find(question => question.reviewQuestionIndex === quickQuestionIdx), quickReviewSelections(quickEvaluations, quickSelections, currentStudent.id)).isComplete) return;
     const totalRaw = Object.values(studentEvals).reduce(
       (sum, item) => sum + (Number(item?.puntos_obtenidos) || 0),
       0
@@ -2230,7 +2234,7 @@ export default function ReviewQuizSubmissionsView({
               <p>{quizSemanal?.titulo} · Preguntas con escritura: {quickQuestions.length} · {entregasSemana.length} entregas, sin aplicar los filtros del listado.</p>
             </div>
           </header>
-          <p className="quiz-quick__hint">Solo se muestran respuestas de escritura. Los incisos automáticos se omiten y sus calificaciones se conservan en la nota total. Las valoraciones se guardan al avanzar; al salir se conserva la posición.</p>
+          <p className="quiz-quick__hint">Cada estudiante comienza sin selección. Las notas anteriores y automáticas se conservan; elige la valoración de cada respuesta para guardarla y continuar. Al salir se conserva la posición.</p>
           {quickSaving && <p className="quiz-quick__saving" role="status">Guardando la revisión. Espera la confirmación antes de continuar…</p>}
           <fieldset className="quiz-quick__session" disabled={quickSaving} aria-label="Revisión por pregunta">
             {/* PANTALLA A: REVISIÓN RÁPIDA FINALIZADA (TODAS LAS PREGUNTAS LISTAS) */}
@@ -2419,7 +2423,7 @@ export default function ReviewQuizSubmissionsView({
               if (!currentQ || !currentStudent) return null;
 
               const isBonus = Boolean(currentQ.es_bonus || quickQuestionIdx === 5);
-              const currentStudentEvals = quickEvaluations[currentStudent.id] || {};
+              const currentStudentEvals = quickReviewSelections(quickEvaluations, quickSelections, currentStudent.id);
               const qStatus = getQuestionEvaluationStatus(currentQ, currentStudentEvals);
 
               const entregaRespuestas =
@@ -2428,7 +2432,7 @@ export default function ReviewQuizSubmissionsView({
                   : (currentStudent.respuestas || {});
 
               return (
-                <>
+                <React.Fragment key={`${currentStudent.id}:${currentQ.id}`}>
                   <div className="quiz-quick__context">
                     <div><span className="quiz-review__eyebrow">PREGUNTA EN REVISIÓN</span>
                       <h3>Pregunta {quickQuestionIdx + 1}{isBonus ? " · Bonus" : ""}</h3>
@@ -2539,6 +2543,7 @@ export default function ReviewQuizSubmissionsView({
                                       <button
                                         type="button"
                                         onClick={() => handleQuickEvaluateItem(currentStudent.id, currentQ.id, null, "buena", maxPts)}
+                                        aria-pressed={curEval?.estado === "buena"}
                                         style={{
                                           padding: "0.3rem 0.6rem",
                                           borderRadius: "0.4rem",
@@ -2555,6 +2560,7 @@ export default function ReviewQuizSubmissionsView({
                                       <button
                                         type="button"
                                         onClick={() => handleQuickEvaluateItem(currentStudent.id, currentQ.id, null, "regular", maxPts)}
+                                        aria-pressed={curEval?.estado === "regular"}
                                         style={{
                                           padding: "0.3rem 0.55rem",
                                           borderRadius: "0.4rem",
@@ -2571,6 +2577,7 @@ export default function ReviewQuizSubmissionsView({
                                       <button
                                         type="button"
                                         onClick={() => handleQuickEvaluateItem(currentStudent.id, currentQ.id, null, "mala", maxPts)}
+                                        aria-pressed={curEval?.estado === "mala"}
                                         style={{
                                           padding: "0.3rem 0.6rem",
                                           borderRadius: "0.4rem",
@@ -2643,6 +2650,7 @@ export default function ReviewQuizSubmissionsView({
                                         type="button"
                                         disabled={curEval?.origen === "automatica"}
                                         onClick={() => handleQuickEvaluateItem(currentStudent.id, currentQ.id, item.id, "buena", itemMaxPts)}
+                                        aria-pressed={curEval?.estado === "buena"}
                                         style={{
                                           padding: "0.25rem 0.55rem",
                                           borderRadius: "0.4rem",
@@ -2660,6 +2668,7 @@ export default function ReviewQuizSubmissionsView({
                                         type="button"
                                         disabled={curEval?.origen === "automatica"}
                                         onClick={() => handleQuickEvaluateItem(currentStudent.id, currentQ.id, item.id, "regular", itemMaxPts)}
+                                        aria-pressed={curEval?.estado === "regular"}
                                         style={{
                                           padding: "0.25rem 0.5rem",
                                           borderRadius: "0.4rem",
@@ -2677,6 +2686,7 @@ export default function ReviewQuizSubmissionsView({
                                         type="button"
                                         disabled={curEval?.origen === "automatica"}
                                         onClick={() => handleQuickEvaluateItem(currentStudent.id, currentQ.id, item.id, "mala", itemMaxPts)}
+                                        aria-pressed={curEval?.estado === "mala"}
                                         style={{
                                           padding: "0.25rem 0.55rem",
                                           borderRadius: "0.4rem",
@@ -2767,6 +2777,7 @@ export default function ReviewQuizSubmissionsView({
                                               type="button"
                                               disabled={slotEval?.origen === "automatica"}
                                               onClick={() => handleQuickEvaluateSlot(currentStudent.id, currentQ.id, item.id, slotIdx, "buena", slotPts)}
+                                              aria-pressed={slotEval?.estado === "buena"}
                                               style={{
                                                 padding: "0.2rem 0.5rem",
                                                 borderRadius: "0.35rem",
@@ -2784,6 +2795,7 @@ export default function ReviewQuizSubmissionsView({
                                               type="button"
                                               disabled={slotEval?.origen === "automatica"}
                                               onClick={() => handleQuickEvaluateSlot(currentStudent.id, currentQ.id, item.id, slotIdx, "regular", slotPts)}
+                                              aria-pressed={slotEval?.estado === "regular"}
                                               style={{
                                                 padding: "0.2rem 0.45rem",
                                                 borderRadius: "0.35rem",
@@ -2801,6 +2813,7 @@ export default function ReviewQuizSubmissionsView({
                                               type="button"
                                               disabled={slotEval?.origen === "automatica"}
                                               onClick={() => handleQuickEvaluateSlot(currentStudent.id, currentQ.id, item.id, slotIdx, "mala", slotPts)}
+                                              aria-pressed={slotEval?.estado === "mala"}
                                               style={{
                                                 padding: "0.2rem 0.5rem",
                                                 borderRadius: "0.35rem",
@@ -3054,7 +3067,7 @@ export default function ReviewQuizSubmissionsView({
                       </button>
                     </div>
                   </div>
-                </>
+                </React.Fragment>
               );
             })()}
           </fieldset>
