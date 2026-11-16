@@ -28,6 +28,7 @@ import {
 } from "lucide-react";
 import { api } from "../services/api";
 import QuizActivityReview from "./QuizActivityReview";
+import { manualQuickReviewQuestions } from "../utils/quizQuickReview.mjs";
 import "./ReviewQuizSubmissionsView.css";
 import { safeStorage } from "../utils/safeStorage";
 import {
@@ -61,6 +62,7 @@ export default function ReviewQuizSubmissionsView({
   const [sectionQuizzes, setSectionQuizzes] = useState([]);
   const [entregasSemana, setEntregasSemana] = useState([]);
   const [quizSemanal, setQuizSemanal] = useState(null);
+  const quickQuestions = useMemo(() => manualQuickReviewQuestions(quizSemanal?.preguntas || []), [quizSemanal]);
   const [asignaciones, setAsignaciones] = useState([]);
 
   const currentUser = currentInstructor || api.auth.getCurrentInstructor();
@@ -87,6 +89,7 @@ export default function ReviewQuizSubmissionsView({
   const [quickSaving, setQuickSaving] = useState(false);
   const [quickQuestionFinishedPrompt, setQuickQuestionFinishedPrompt] = useState(false);
   const [quickAllCompleted, setQuickAllCompleted] = useState(false);
+  const nextQuickQuestion = quickQuestions.find(question => question.reviewQuestionIndex > quickQuestionIdx);
 
   const [quickError, setQuickError] = useState("");
   const quickSaveLockRef = useRef(false);
@@ -579,6 +582,10 @@ export default function ReviewQuizSubmissionsView({
       notifyRef.current("No se encontraron las preguntas de la prueba para esta semana.", "warning");
       return;
     }
+    if (!quickQuestions.length) {
+      notifyRef.current("Esta prueba no tiene respuestas de escritura para revisar manualmente.", "info");
+      return;
+    }
 
     reviewTriggerRef.current = document.activeElement;
     listingScrollRef.current = window.scrollY;
@@ -591,10 +598,9 @@ export default function ReviewQuizSubmissionsView({
     });
     setQuickEvaluations(initialMap);
 
-    const totalQuestions = (quizSemanal?.preguntas || []).length || 6;
     const posKey = `histolab_quick_pos_${seccion?.id || seccion?.codigo || "sec"}_sem_${selectedSemana}`;
 
-    let targetQuestionIdx = 0;
+    let targetQuestionIdx = quickQuestions[0].reviewQuestionIndex;
     let targetStudentIdx = 0;
     let targetFinishedPrompt = false;
 
@@ -611,8 +617,10 @@ export default function ReviewQuizSubmissionsView({
     }
 
     // Validar límites de seguridad
-    if (!Number.isInteger(targetQuestionIdx) || targetQuestionIdx < 0 || targetQuestionIdx >= totalQuestions) {
-      targetQuestionIdx = 0;
+    if (!quickQuestions.some(question => question.reviewQuestionIndex === targetQuestionIdx)) {
+      targetQuestionIdx = (quickQuestions.find(question => question.reviewQuestionIndex >= targetQuestionIdx) || quickQuestions[0]).reviewQuestionIndex;
+      targetStudentIdx = 0;
+      targetFinishedPrompt = false;
     }
     if (!Number.isInteger(targetStudentIdx) || targetStudentIdx < 0 || targetStudentIdx >= entregasSemana.length) {
       targetStudentIdx = 0;
@@ -745,7 +753,7 @@ export default function ReviewQuizSubmissionsView({
     if (!currentStudent) return;
 
     const studentEvals = quickEvaluations[currentStudent.id] || {};
-    if (!getQuestionEvaluationStatus(quizSemanal?.preguntas?.[quickQuestionIdx], studentEvals).isComplete) return;
+    if (!getQuestionEvaluationStatus(quickQuestions.find(question => question.reviewQuestionIndex === quickQuestionIdx), studentEvals).isComplete) return;
     const totalRaw = Object.values(studentEvals).reduce(
       (sum, item) => sum + (Number(item?.puntos_obtenidos) || 0),
       0
@@ -815,8 +823,7 @@ export default function ReviewQuizSubmissionsView({
         } catch (_) {}
       } else {
         // Se terminaron de calificar todos los estudiantes para esta pregunta
-        const totalQuestions = (quizSemanal?.preguntas || []).length || 6;
-        if (quickQuestionIdx < totalQuestions - 1) {
+        if (nextQuickQuestion) {
           setQuickQuestionFinishedPrompt(true);
           try {
             const posKey = `histolab_quick_pos_${seccion?.id || seccion?.codigo || "sec"}_sem_${selectedSemana}`;
@@ -843,7 +850,7 @@ export default function ReviewQuizSubmissionsView({
 
   // Pasar a la siguiente pregunta tras completar a todos los estudiantes
   const handleQuickSelectQuestion = (nextQIdx, nextStudentIdx = 0) => {
-    if (quickSaveLockRef.current || !quizSemanal?.preguntas?.[nextQIdx]) return;
+    if (quickSaveLockRef.current || !quickQuestions.some(question => question.reviewQuestionIndex === nextQIdx)) return;
     setQuickError("");
     setQuickQuestionFinishedPrompt(false);
     setQuickAllCompleted(false);
@@ -858,7 +865,7 @@ export default function ReviewQuizSubmissionsView({
       }));
     } catch (_) {}
   };
-  const handleQuickNextQuestion = () => handleQuickSelectQuestion(quickQuestionIdx + 1);
+  const handleQuickNextQuestion = () => nextQuickQuestion && handleQuickSelectQuestion(nextQuickQuestion.reviewQuestionIndex);
 
   // Retroceder al estudiante anterior en la misma pregunta
   const handleQuickPrevious = () => {
@@ -881,8 +888,8 @@ export default function ReviewQuizSubmissionsView({
   const assignedName = getAssignedRecordForWeek(asignaciones,
     [SECTION_ROLES.PRUEBAS, SECTION_ROLES.PRUEBAS_LEGACY], selectedSemana)?.instructor_nombre;
   const progress = stats.total ? Math.round(stats.calificados / stats.total * 100) : 0;
-  const quickPending = quickAllCompleted && showQuickReviewModal ? (quizSemanal?.preguntas || []).flatMap((question, questionIdx) =>
-    entregasSemana.flatMap((submission, studentIdx) => getQuestionEvaluationStatus(question, evaluationsFor(submission)).isComplete ? [] : [{ questionIdx, studentIdx }])) : [];
+  const quickPending = quickAllCompleted && showQuickReviewModal ? quickQuestions.flatMap(question =>
+    entregasSemana.flatMap((submission, studentIdx) => getQuestionEvaluationStatus(question, evaluationsFor(submission)).isComplete ? [] : [{ questionIdx: question.reviewQuestionIndex, studentIdx }])) : [];
 
   return (
     <section className="user-directory quiz-review" aria-labelledby="quiz-review-title">
@@ -926,8 +933,8 @@ export default function ReviewQuizSubmissionsView({
           <div className="quiz-review__progress"><span>Avance de revisión <strong>{progress}%</strong></span><progress value={stats.calificados} max={stats.total || 1} aria-label="Avance de revisión" /></div>
           {entregasSemana.length > 0 && <aside className="quiz-review__quick">
             <div className="quiz-review__quick-icon"><Zap size={24} /></div>
-            <div><h3>Revisión rápida por pregunta</h3><p>Revisa la misma pregunta para todos los estudiantes y continúa con la siguiente, incluido el bonus.</p><small>Incluye las {stats.total} entregas de esta semana, sin aplicar los filtros del listado.</small></div>
-            <button type="button" className="user-button user-button--primary" disabled={!quizSemanal?.preguntas?.length} onClick={handleOpenQuickReview}>Iniciar revisión rápida<ChevronRight size={17} /></button>
+            <div><h3>Revisión rápida por pregunta</h3><p>{quickQuestions.length ? `Revisa las respuestas escritas de ${quickQuestions.length} ${quickQuestions.length === 1 ? "pregunta" : "preguntas"}. Se omiten los incisos de selección múltiple, verdadero/falso y términos pareados.` : "Esta prueba no tiene respuestas de escritura para revisión manual. Puedes consultar las calificaciones en la revisión individual."}</p><small>Incluye las {stats.total} entregas de esta semana, sin aplicar los filtros del listado.</small></div>
+            <button type="button" className="user-button user-button--primary" disabled={!quickQuestions.length} onClick={handleOpenQuickReview}>Iniciar revisión rápida<ChevronRight size={17} /></button>
           </aside>}
           <div className="quiz-review__filters">
             <label className="quiz-review__search" htmlFor="quiz-review-search"><span>Buscar estudiante</span><div><Search size={18} /><input id="quiz-review-search" type="search" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} placeholder="Nombre o número de cuenta" /></div></label>
@@ -2220,10 +2227,10 @@ export default function ReviewQuizSubmissionsView({
             <button type="button" className="user-button" onClick={handleCloseQuickReview} disabled={quickSaving}><ArrowLeft size={18} /> Volver a las entregas</button>
             <div><span className="quiz-review__eyebrow">SEMANA {selectedSemana} · SECCIÓN {seccion?.codigo} · {carrera}</span>
               <h2 id="quiz-quick-title" ref={reviewHeadingRef} tabIndex={-1}>Revisión rápida por pregunta</h2>
-              <p>{quizSemanal?.titulo} · {entregasSemana.length} entregas, sin aplicar los filtros del listado.</p>
+              <p>{quizSemanal?.titulo} · Preguntas con escritura: {quickQuestions.length} · {entregasSemana.length} entregas, sin aplicar los filtros del listado.</p>
             </div>
           </header>
-          <p className="quiz-quick__hint">Revisa la misma pregunta de cada estudiante. Las valoraciones se guardan al avanzar; al salir se conserva la posición para continuar después.</p>
+          <p className="quiz-quick__hint">Solo se muestran respuestas de escritura. Los incisos automáticos se omiten y sus calificaciones se conservan en la nota total. Las valoraciones se guardan al avanzar; al salir se conserva la posición.</p>
           {quickSaving && <p className="quiz-quick__saving" role="status">Guardando la revisión. Espera la confirmación antes de continuar…</p>}
           <fieldset className="quiz-quick__session" disabled={quickSaving} aria-label="Revisión por pregunta">
             {/* PANTALLA A: REVISIÓN RÁPIDA FINALIZADA (TODAS LAS PREGUNTAS LISTAS) */}
@@ -2268,7 +2275,7 @@ export default function ReviewQuizSubmissionsView({
                   <p style={{ margin: "0.5rem 0 0", fontSize: "0.92rem", color: "#475569", lineHeight: 1.55 }}>
                     {quickPending.length
                       ? `Quedan ${quickPending.length} revisiones de pregunta por estudiante sin completar. Puedes volver a la primera pendiente; las revisiones guardadas se conservan.`
-                      : `Las ${quizSemanal?.preguntas?.length || 0} preguntas de los ${entregasSemana.length} estudiantes están revisadas y guardadas. La nota oficial conserva el tope de 5.000 puntos y el puntaje bruto incluye el bonus.`}
+                      : `Las respuestas manuales de ${quickQuestions.length} preguntas de los ${entregasSemana.length} estudiantes están revisadas y guardadas. La nota total conserva las calificaciones automáticas y el bonus; la nota oficial mantiene el tope de 5.000 puntos.`}
                   </p>
                 </div>
 
@@ -2337,7 +2344,7 @@ export default function ReviewQuizSubmissionsView({
                     ¡Pregunta {quickQuestionIdx + 1} completada para todos los estudiantes!
                   </h2>
                   <p style={{ margin: "0.5rem 0 0", fontSize: "0.92rem", color: "#475569", lineHeight: 1.55 }}>
-                    Se han calificado las respuestas de los <strong>{entregasSemana.length} estudiantes</strong> para la Pregunta {quickQuestionIdx + 1}. Las notas han quedado asignadas en la ficha de cada estudiante sin mezclarse.
+                    Se guardaron los incisos manuales de los <strong>{entregasSemana.length} estudiantes</strong> para la Pregunta {quickQuestionIdx + 1}, conservando sus calificaciones automáticas.
                   </p>
                 </div>
 
@@ -2356,8 +2363,8 @@ export default function ReviewQuizSubmissionsView({
                     Siguiente paso:
                   </span>
                   <div style={{ fontSize: "0.95rem", fontWeight: 800, color: "#0f172a", marginTop: "0.15rem" }}>
-                    Pregunta {quickQuestionIdx + 2} de {(quizSemanal?.preguntas || []).length}
-                    {quickQuestionIdx + 1 === 5 && " • ⭐ Reactivo adicional"}
+                    Pregunta {(nextQuickQuestion?.reviewQuestionIndex ?? 0) + 1} · Revisión manual
+                    {(nextQuickQuestion?.es_bonus || nextQuickQuestion?.reviewQuestionIndex === 5) && " • ⭐ Bonus"}
                   </div>
                 </div>
 
@@ -2400,14 +2407,14 @@ export default function ReviewQuizSubmissionsView({
                       gap: "0.45rem"
                     }}
                   >
-                    <span>Continuar a Pregunta {quickQuestionIdx + 2}</span>
+                    <span>Continuar a Pregunta {(nextQuickQuestion?.reviewQuestionIndex ?? 0) + 1}</span>
                     <ChevronRight size={17} />
                   </button>
                 </div>
               </div>
             ) : (() => {
               /* PANTALLA C: EVALUACIÓN ACTIVA DEL ESTUDIANTE ACTUAL EN LA PREGUNTA ACTUAL */
-              const currentQ = (quizSemanal?.preguntas || [])[quickQuestionIdx];
+              const currentQ = quickQuestions.find(question => question.reviewQuestionIndex === quickQuestionIdx);
               const currentStudent = (entregasSemana || [])[quickStudentIdx];
               if (!currentQ || !currentStudent) return null;
 
@@ -2424,15 +2431,15 @@ export default function ReviewQuizSubmissionsView({
                 <>
                   <div className="quiz-quick__context">
                     <div><span className="quiz-review__eyebrow">PREGUNTA EN REVISIÓN</span>
-                      <h3>Pregunta {quickQuestionIdx + 1} de {quizSemanal.preguntas.length}{isBonus ? " · Bonus" : ""}</h3>
-                      <p>{Number(currentQ.puntos || 1).toFixed(3)} puntos · Estudiante {quickStudentIdx + 1} de {entregasSemana.length}</p>
+                      <h3>Pregunta {quickQuestionIdx + 1}{isBonus ? " · Bonus" : ""}</h3>
+                      <p>{currentQ.reviewManualPoints.toFixed(3)} puntos de revisión manual · Estudiante {quickStudentIdx + 1} de {entregasSemana.length}</p>
                     </div>
                     <div className="quiz-quick__position"><span>Posición en esta pregunta</span><progress value={quickStudentIdx + 1} max={entregasSemana.length} aria-label="Posición del estudiante en esta pregunta" /></div>
                   </div>
                   <nav className="quiz-quick__questions" aria-label="Cambiar pregunta en revisión rápida">
-                    {(quizSemanal?.preguntas || []).map((question, index) => <button key={question.id || index} type="button"
-                      aria-current={index === quickQuestionIdx ? "step" : undefined} onClick={() => handleQuickSelectQuestion(index)}>
-                      Pregunta {index + 1}{question.es_bonus || index === 5 ? " · Bonus" : ""}
+                    {quickQuestions.map(question => <button key={question.id || question.reviewQuestionIndex} type="button"
+                      aria-current={question.reviewQuestionIndex === quickQuestionIdx ? "step" : undefined} onClick={() => handleQuickSelectQuestion(question.reviewQuestionIndex)}>
+                      Pregunta {question.reviewQuestionIndex + 1}{question.es_bonus || question.reviewQuestionIndex === 5 ? " · Bonus" : ""}
                     </button>)}
                   </nav>
                   <div className="quiz-quick__prompt"><FileText size={21} /><div><strong>Enunciado</strong><p>{currentQ.enunciado || "Sin enunciado registrado."}</p></div></div>
@@ -2584,7 +2591,8 @@ export default function ReviewQuizSubmissionsView({
                             })()
                           ) : (
                             /* Caso con apartados configurados */
-                            currentQ.items.map((item, itemIdx) => {
+                            currentQ.items.map((item, filteredIndex) => {
+                              const itemIdx = item.reviewItemIndex ?? filteredIndex;
                               const studentAnswer =
                                 entregaRespuestas?.[currentQ.id]?.[item.id] ??
                                 entregaRespuestas?.[item.id] ??
@@ -2852,7 +2860,8 @@ export default function ReviewQuizSubmissionsView({
                               </div>
                             </div>
                           ) : (
-                            currentQ.items.map((item, itemIdx) => {
+                            currentQ.items.map((item, filteredIndex) => {
+                              const itemIdx = item.reviewItemIndex ?? filteredIndex;
                               const itemLabel = item.instruccion || item.etiqueta || `Apartado ${itemIdx + 1}`;
                             const displayCompletion = item.tipo === "completacion" ? item.texto_completar || "" : "";
                               const isList = isQuizItemMultiSlot(item);
