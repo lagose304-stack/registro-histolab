@@ -1,7 +1,6 @@
 import { buildAutomaticQuizAssessment, isAutomaticQuizItem, splitQuizPoints } from "../../../shared/quizAutoGrading.mjs";
 import { isQuizItemMultiSlot, quizItemSlotCount, quizItemLabel, quizSlotLabel } from "../../../shared/quizItems.mjs";
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { createPortal } from "react-dom";
 import {
   ArrowLeft,
   RefreshCw,
@@ -78,16 +77,7 @@ export default function ReviewQuizSubmissionsView({
   const reviewHeadingRef = useRef(null);
   const reviewTriggerRef = useRef(null);
   const listingScrollRef = useRef(0);
-  useEffect(() => {
-    if (selectedEntrega) {
-      reviewHeadingRef.current?.focus({ preventScroll: true });
-      reviewHeadingRef.current?.scrollIntoView({ block: "start" });
-    } else if (reviewTriggerRef.current) {
-      if (reviewTriggerRef.current.isConnected) reviewTriggerRef.current.focus({ preventScroll: true });
-      window.scrollTo({ top: listingScrollRef.current });
-      reviewTriggerRef.current = null;
-    }
-  }, [selectedEntrega?.id]);
+
 
   // Estado para Revisión Rápida (Reactivo por Reactivo a todos los estudiantes)
   const [showQuickReviewModal, setShowQuickReviewModal] = useState(false);
@@ -95,46 +85,21 @@ export default function ReviewQuizSubmissionsView({
   const [quickStudentIdx, setQuickStudentIdx] = useState(0); // 0 a entregasSemana.length - 1
   const [quickEvaluations, setQuickEvaluations] = useState({}); // { [entregaId]: { [evalKey]: {...} } }
   const [quickSaving, setQuickSaving] = useState(false);
-  const [quickStudentLoading, setQuickStudentLoading] = useState(null);
   const [quickQuestionFinishedPrompt, setQuickQuestionFinishedPrompt] = useState(false);
   const [quickAllCompleted, setQuickAllCompleted] = useState(false);
 
-  // La revisión rápida conserva su diálogo y el bloqueo de fondo.
+  const [quickError, setQuickError] = useState("");
+  const quickSaveLockRef = useRef(false);
   useEffect(() => {
-    if (showQuickReviewModal) {
-      const originalOverflow = document.body.style.overflow;
-      document.body.style.overflow = "hidden";
-      return () => {
-        document.body.style.overflow = originalOverflow;
-      };
+    if (selectedEntrega || showQuickReviewModal) {
+      reviewHeadingRef.current?.focus({ preventScroll: true });
+      reviewHeadingRef.current?.scrollIntoView({ block: "start" });
+    } else if (reviewTriggerRef.current) {
+      if (reviewTriggerRef.current.isConnected) reviewTriggerRef.current.focus({ preventScroll: true });
+      window.scrollTo({ top: listingScrollRef.current });
+      reviewTriggerRef.current = null;
     }
-  }, [showQuickReviewModal]);
-
-  const reviewOpen = showQuickReviewModal;
-  useEffect(() => {
-    if (!reviewOpen) return;
-    const previousFocus = document.activeElement;
-    const dialog = document.querySelector(".quiz-review-dialog");
-    dialog?.focus();
-    const trapFocus = event => {
-      if (event.key !== "Tab" || !dialog) return;
-      const controls = [...dialog.querySelectorAll('button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [tabindex="0"]')]
-        .filter(element => element.getClientRects().length > 0);
-      const first = controls[0];
-      const last = controls[controls.length - 1];
-      if (!first) { event.preventDefault(); dialog.focus(); return; }
-      if (event.shiftKey && (document.activeElement === first || document.activeElement === dialog)) {
-        event.preventDefault(); last.focus();
-      } else if (!event.shiftKey && (document.activeElement === last || document.activeElement === dialog)) {
-        event.preventDefault(); first.focus();
-      }
-    };
-    document.addEventListener("keydown", trapFocus);
-    return () => {
-      document.removeEventListener("keydown", trapFocus);
-      if (previousFocus?.isConnected) previousFocus.focus();
-    };
-  }, [reviewOpen]);
+  }, [selectedEntrega?.id, showQuickReviewModal, quickStudentIdx, quickQuestionIdx, quickQuestionFinishedPrompt, quickAllCompleted]);
 
   const carrera = seccion?.carrera || "Medicina";
 
@@ -615,6 +580,9 @@ export default function ReviewQuizSubmissionsView({
       return;
     }
 
+    reviewTriggerRef.current = document.activeElement;
+    listingScrollRef.current = window.scrollY;
+    setQuickError("");
     // Inicializar mapa de evaluaciones de todos los estudiantes pre-poblando lo ya calificado
     const initialMap = {};
     entregasSemana.forEach((e) => {
@@ -626,9 +594,9 @@ export default function ReviewQuizSubmissionsView({
     const totalQuestions = (quizSemanal?.preguntas || []).length || 6;
     const posKey = `histolab_quick_pos_${seccion?.id || seccion?.codigo || "sec"}_sem_${selectedSemana}`;
 
-    let targetQuestionIdx = quickQuestionIdx;
-    let targetStudentIdx = quickStudentIdx;
-    let targetFinishedPrompt = quickQuestionFinishedPrompt;
+    let targetQuestionIdx = 0;
+    let targetStudentIdx = 0;
+    let targetFinishedPrompt = false;
 
     try {
       const raw = safeStorage.getItem(posKey);
@@ -643,10 +611,10 @@ export default function ReviewQuizSubmissionsView({
     }
 
     // Validar límites de seguridad
-    if (targetQuestionIdx < 0 || targetQuestionIdx >= totalQuestions) {
+    if (!Number.isInteger(targetQuestionIdx) || targetQuestionIdx < 0 || targetQuestionIdx >= totalQuestions) {
       targetQuestionIdx = 0;
     }
-    if (targetStudentIdx < 0 || targetStudentIdx >= entregasSemana.length) {
+    if (!Number.isInteger(targetStudentIdx) || targetStudentIdx < 0 || targetStudentIdx >= entregasSemana.length) {
       targetStudentIdx = 0;
     }
 
@@ -664,6 +632,7 @@ export default function ReviewQuizSubmissionsView({
 
   // Cerrar Revisión Rápida
   const handleCloseQuickReview = () => {
+    if (quickSaveLockRef.current) return;
     try {
       const posKey = `histolab_quick_pos_${seccion?.id || seccion?.codigo || "sec"}_sem_${selectedSemana}`;
       safeStorage.setItem(posKey, JSON.stringify({
@@ -674,11 +643,11 @@ export default function ReviewQuizSubmissionsView({
     } catch (_) {}
 
     setShowQuickReviewModal(false);
-    setQuickStudentLoading(null);
   };
 
   // Evaluar ítem directo o texto corto en Revisión Rápida
   const handleQuickEvaluateItem = (entregaId, preguntaId, itemId, status, maxPoints) => {
+    if (quickSaveLockRef.current) return;
     if (quickEvaluations[entregaId]?.[`${preguntaId}___${itemId}`]?.origen === "automatica") return;
     const numMax = Number(maxPoints) || 0;
     let earned = 0;
@@ -706,6 +675,7 @@ export default function ReviewQuizSubmissionsView({
 
   // Evaluar casilla individual de listado en Revisión Rápida
   const handleQuickEvaluateSlot = (entregaId, preguntaId, itemId, slotIdx, status, slotMaxPoints) => {
+    if (quickSaveLockRef.current) return;
     if (quickEvaluations[entregaId]?.[`${preguntaId}___${itemId}___slot_${slotIdx}`]?.origen === "automatica") return;
     const numMax = Number(slotMaxPoints) || 0;
     let earned = 0;
@@ -770,10 +740,12 @@ export default function ReviewQuizSubmissionsView({
 
   // Guardar calificación del estudiante actual y avanzar al siguiente estudiante o siguiente pregunta
   const handleQuickAdvance = async () => {
+    if (quickSaveLockRef.current) return;
     const currentStudent = entregasSemana[quickStudentIdx];
     if (!currentStudent) return;
 
     const studentEvals = quickEvaluations[currentStudent.id] || {};
+    if (!getQuestionEvaluationStatus(quizSemanal?.preguntas?.[quickQuestionIdx], studentEvals).isComplete) return;
     const totalRaw = Object.values(studentEvals).reduce(
       (sum, item) => sum + (Number(item?.puntos_obtenidos) || 0),
       0
@@ -797,18 +769,13 @@ export default function ReviewQuizSubmissionsView({
     };
 
     const hasNextStudent = quickStudentIdx < entregasSemana.length - 1;
-    const nextStudent = hasNextStudent ? entregasSemana[quickStudentIdx + 1] : null;
-
+    quickSaveLockRef.current = true;
     setQuickSaving(true);
-    setQuickStudentLoading(hasNextStudent ? "Cargando siguiente estudiante..." : "Cargando...");
+    setQuickError("");
 
     try {
-      // Breve pausa para notar la transición de carga
-      const minDelay = new Promise((resolve) => setTimeout(resolve, 350));
-
       // Guardar en el servidor para este alumno específico
-      const apiPromise = api.pruebas.calificar(currentStudent.id, payload);
-      const [savedResponse] = await Promise.all([apiPromise, minDelay]);
+      const savedResponse = await api.pruebas.calificar(currentStudent.id, payload);
       if (!savedResponse?.success) throw new Error(savedResponse?.message || "No se pudo guardar la revisión.");
 
       // Actualizar en el estado local de entregas
@@ -866,40 +833,40 @@ export default function ReviewQuizSubmissionsView({
       }
     } catch (err) {
       console.error("Error al avanzar estudiante en revisión rápida:", err);
+      setQuickError(err.message || "No se pudo guardar la revisión. Las valoraciones se conservan; reintenta para continuar.");
       notifyRef.current("Error al sincronizar calificación del estudiante", "error");
     } finally {
+      quickSaveLockRef.current = false;
       setQuickSaving(false);
-      setQuickStudentLoading(null);
     }
   };
 
   // Pasar a la siguiente pregunta tras completar a todos los estudiantes
-  const handleQuickNextQuestion = async () => {
-    const nextQIdx = quickQuestionIdx + 1;
+  const handleQuickSelectQuestion = (nextQIdx, nextStudentIdx = 0) => {
+    if (quickSaveLockRef.current || !quizSemanal?.preguntas?.[nextQIdx]) return;
+    setQuickError("");
     setQuickQuestionFinishedPrompt(false);
-    setQuickStudentLoading("Cargando...");
-    await new Promise((r) => setTimeout(r, 300));
+    setQuickAllCompleted(false);
     setQuickQuestionIdx(nextQIdx);
-    setQuickStudentIdx(0);
-    setQuickStudentLoading(null);
+    setQuickStudentIdx(nextStudentIdx);
     try {
       const posKey = `histolab_quick_pos_${seccion?.id || seccion?.codigo || "sec"}_sem_${selectedSemana}`;
       safeStorage.setItem(posKey, JSON.stringify({
         questionIdx: nextQIdx,
-        studentIdx: 0,
+        studentIdx: nextStudentIdx,
         finishedPrompt: false
       }));
     } catch (_) {}
   };
+  const handleQuickNextQuestion = () => handleQuickSelectQuestion(quickQuestionIdx + 1);
 
   // Retroceder al estudiante anterior en la misma pregunta
-  const handleQuickPrevious = async () => {
+  const handleQuickPrevious = () => {
+    if (quickSaveLockRef.current) return;
     if (quickStudentIdx > 0) {
+      setQuickError("");
       const prevStudentIdx = quickStudentIdx - 1;
-      setQuickStudentLoading("Cargando...");
-      await new Promise((r) => setTimeout(r, 300));
       setQuickStudentIdx(prevStudentIdx);
-      setQuickStudentLoading(null);
       try {
         const posKey = `histolab_quick_pos_${seccion?.id || seccion?.codigo || "sec"}_sem_${selectedSemana}`;
         safeStorage.setItem(posKey, JSON.stringify({
@@ -914,10 +881,12 @@ export default function ReviewQuizSubmissionsView({
   const assignedName = getAssignedRecordForWeek(asignaciones,
     [SECTION_ROLES.PRUEBAS, SECTION_ROLES.PRUEBAS_LEGACY], selectedSemana)?.instructor_nombre;
   const progress = stats.total ? Math.round(stats.calificados / stats.total * 100) : 0;
+  const quickPending = quickAllCompleted && showQuickReviewModal ? (quizSemanal?.preguntas || []).flatMap((question, questionIdx) =>
+    entregasSemana.flatMap((submission, studentIdx) => getQuestionEvaluationStatus(question, evaluationsFor(submission)).isComplete ? [] : [{ questionIdx, studentIdx }])) : [];
 
   return (
     <section className="user-directory quiz-review" aria-labelledby="quiz-review-title">
-      <div hidden={Boolean(selectedEntrega)}>
+      <div hidden={Boolean(selectedEntrega || showQuickReviewModal)}>
       <header className="quiz-review__header">
         <div className="quiz-review__heading">
           {!hideBackButton && <button type="button" className="user-button" onClick={onClose} aria-label="Volver al panel de la sección"><ArrowLeft size={18} /></button>}
@@ -2243,72 +2212,23 @@ export default function ReviewQuizSubmissionsView({
       )}
 
       {/* =================================================================== */}
-      {/* 5. MODAL GLOBAL DE REVISIÓN RÁPIDA REACTIVO POR REACTIVO (PORTAL)   */}
+      {/* 5. REVISIÓN RÁPIDA POR PREGUNTA DENTRO DEL MÓDULO                  */}
       {/* =================================================================== */}
-      {showQuickReviewModal && createPortal(
-        <div
-          className="quiz-review-overlay animate-fade-in"
-          style={{
-            position: "fixed",
-            inset: 0,
-            width: "100vw",
-            height: "100vh",
-            zIndex: 9999999,
-            background: "rgba(15, 23, 42, 0.85)",
-            backdropFilter: "blur(6px)",
-            WebkitBackdropFilter: "blur(6px)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: "1rem",
-            boxSizing: "border-box"
-          }}
-        >
-          <div
-            className="quiz-review-dialog quiz-review-dialog--quick animate-scale-in"
-            role="dialog" aria-modal="true" aria-label="Revisión rápida por pregunta" tabIndex={-1}
-            style={{
-              background: "#ffffff",
-              borderRadius: "1.25rem",
-              width: "100%",
-              maxWidth: "1320px",
-              height: "92vh",
-              maxHeight: "92vh",
-              display: "flex",
-              flexDirection: "column",
-              boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.5)",
-              border: "1.5px solid #cbd5e1",
-              overflow: "hidden",
-              position: "relative"
-            }}
-          >
-            {/* PANTALLA DE CARGA SIMPLE ENTRE ESTUDIANTES */}
-            {quickStudentLoading && (
-              <div
-                style={{
-                  position: "absolute",
-                  inset: 0,
-                  zIndex: 9999,
-                  background: "rgba(255, 255, 255, 0.92)",
-                  backdropFilter: "blur(4px)",
-                  WebkitBackdropFilter: "blur(4px)",
-                  display: "flex",
-                  flexDirection: "column",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  gap: "0.85rem"
-                }}
-              >
-                <RefreshCw size={36} className="animate-spin" color="#0284c7" />
-                <span style={{ fontSize: "1rem", fontWeight: 800, color: "#334155" }}>
-                  {typeof quickStudentLoading === "string" ? quickStudentLoading : "Cargando..."}
-                </span>
-              </div>
-            )}
-
+      {showQuickReviewModal && (
+        <section className="quiz-quick" aria-labelledby="quiz-quick-title" aria-busy={quickSaving}>
+          <header className="quiz-review-workspace__header">
+            <button type="button" className="user-button" onClick={handleCloseQuickReview} disabled={quickSaving}><ArrowLeft size={18} /> Volver a las entregas</button>
+            <div><span className="quiz-review__eyebrow">SEMANA {selectedSemana} · SECCIÓN {seccion?.codigo} · {carrera}</span>
+              <h2 id="quiz-quick-title" ref={reviewHeadingRef} tabIndex={-1}>Revisión rápida por pregunta</h2>
+              <p>{quizSemanal?.titulo} · {entregasSemana.length} entregas, sin aplicar los filtros del listado.</p>
+            </div>
+          </header>
+          <p className="quiz-quick__hint">Revisa la misma pregunta de cada estudiante. Las valoraciones se guardan al avanzar; al salir se conserva la posición para continuar después.</p>
+          {quickSaving && <p className="quiz-quick__saving" role="status">Guardando la revisión. Espera la confirmación antes de continuar…</p>}
+          <fieldset className="quiz-quick__session" disabled={quickSaving} aria-label="Revisión por pregunta">
             {/* PANTALLA A: REVISIÓN RÁPIDA FINALIZADA (TODAS LAS PREGUNTAS LISTAS) */}
             {quickAllCompleted ? (
-              <div
+              <div className="quiz-quick__completion"
                 style={{
                   padding: "3.5rem 2rem",
                   display: "flex",
@@ -2340,17 +2260,20 @@ export default function ReviewQuizSubmissionsView({
 
                 <div>
                   <span style={{ fontSize: "0.82rem", fontWeight: 900, color: "#d97706", textTransform: "uppercase", letterSpacing: "1px" }}>
-                    ¡Proceso Concluido!
+                    {quickPending.length ? "Revisiones pendientes" : "Proceso concluido"}
                   </span>
                   <h2 style={{ margin: "0.3rem 0", fontSize: "1.75rem", fontWeight: 900, color: "#0f172a" }}>
-                    ¡Revisión Rápida Completada!
+                    {quickPending.length ? "Recorrido finalizado con pendientes" : "Revisión rápida completada"}
                   </h2>
                   <p style={{ margin: "0.5rem 0 0", fontSize: "0.92rem", color: "#475569", lineHeight: 1.55 }}>
-                    Has evaluado con éxito todas las 6 preguntas (incluyendo la pregunta Bonus) para los <strong>{entregasSemana.length} estudiantes</strong>. Todas las notas oficiales (tope 5.000 pts) y los puntajes de la prueba han sido guardados individualmente para cada alumno.
+                    {quickPending.length
+                      ? `Quedan ${quickPending.length} revisiones de pregunta por estudiante sin completar. Puedes volver a la primera pendiente; las revisiones guardadas se conservan.`
+                      : `Las ${quizSemanal?.preguntas?.length || 0} preguntas de los ${entregasSemana.length} estudiantes están revisadas y guardadas. La nota oficial conserva el tope de 5.000 puntos y el puntaje bruto incluye el bonus.`}
                   </p>
                 </div>
 
-                <div style={{ display: "flex", gap: "1rem", marginTop: "0.5rem", width: "100%", justifyContent: "center" }}>
+                <div style={{ display: "flex", gap: "1rem", marginTop: "0.5rem", width: "100%", justifyContent: "center", flexWrap: "wrap" }}>
+                  {quickPending.length > 0 && <button className="user-button user-button--primary" type="button" onClick={() => handleQuickSelectQuestion(quickPending[0].questionIdx, quickPending[0].studentIdx)}>Revisar pendientes</button>}
                   <button
                     type="button"
                     onClick={handleCloseQuickReview}
@@ -2376,7 +2299,7 @@ export default function ReviewQuizSubmissionsView({
               </div>
             ) : quickQuestionFinishedPrompt ? (
               /* PANTALLA B: PREGUNTA X COMPLETADA PARA TODOS LOS ALUMNOS (AVANCE A PREGUNTA X+1) */
-              <div
+              <div className="quiz-quick__completion"
                 style={{
                   padding: "3.5rem 2rem",
                   display: "flex",
@@ -2488,7 +2411,7 @@ export default function ReviewQuizSubmissionsView({
               const currentStudent = (entregasSemana || [])[quickStudentIdx];
               if (!currentQ || !currentStudent) return null;
 
-              const isBonus = quickQuestionIdx === 5;
+              const isBonus = Boolean(currentQ.es_bonus || quickQuestionIdx === 5);
               const currentStudentEvals = quickEvaluations[currentStudent.id] || {};
               const qStatus = getQuestionEvaluationStatus(currentQ, currentStudentEvals);
 
@@ -2499,158 +2422,22 @@ export default function ReviewQuizSubmissionsView({
 
               return (
                 <>
-                  {/* 1. CABECERA MODAL DE REVISIÓN RÁPIDA */}
-                  <div
-                    style={{
-                      padding: "1rem 1.5rem",
-                      background: isBonus
-                        ? "linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%)"
-                        : "linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)",
-                      borderBottom: isBonus ? "1.5px solid #fde68a" : "1.5px solid #e2e8f0",
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: "0.75rem"
-                    }}
-                  >
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "0.75rem" }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", flexWrap: "wrap" }}>
-                        <span
-                          style={{
-                            display: "inline-flex",
-                            alignItems: "center",
-                            gap: "0.3rem",
-                            fontSize: "0.74rem",
-                            fontWeight: 900,
-                            padding: "0.25rem 0.65rem",
-                            borderRadius: "0.45rem",
-                            background: isBonus ? "#d97706" : "#0284c7",
-                            color: "#ffffff",
-                            letterSpacing: "0.04em",
-                            textTransform: "uppercase"
-                          }}
-                        >
-                          <Zap size={13} />
-                          Revisión Rápida
-                        </span>
-
-                        <span style={{ fontSize: "0.82rem", fontWeight: 800, color: "#334155" }}>
-                          Semana {selectedSemana} • Sección {seccion?.codigo || ""}
-                        </span>
-
-                        {/* Pills de Preguntas (Navegables) */}
-                        <div className="quiz-review-dialog__questions" style={{ display: "flex", alignItems: "center", gap: "0.3rem", marginLeft: "0.5rem" }}>
-                          {(quizSemanal?.preguntas || []).map((q, idx) => {
-                            const isCur = idx === quickQuestionIdx;
-                            const isPast = idx < quickQuestionIdx;
-                            const isQBonus = idx === 5;
-                            return (
-                              <button
-                                key={q.id || idx}
-                                type="button"
-                                onClick={() => {
-                                  if (quickSaving) return;
-                                  setQuickQuestionFinishedPrompt(false);
-                                  setQuickAllCompleted(false);
-                                  setQuickQuestionIdx(idx);
-                                  setQuickStudentIdx(0);
-                                  try {
-                                    const posKey = `histolab_quick_pos_${seccion?.id || seccion?.codigo || "sec"}_sem_${selectedSemana}`;
-                                    safeStorage.setItem(posKey, JSON.stringify({
-                                      questionIdx: idx,
-                                      studentIdx: 0,
-                                      finishedPrompt: false
-                                    }));
-                                  } catch (_) {}
-                                }}
-                                title={`Ir a Pregunta ${idx + 1}`}
-                                style={{
-                                  fontSize: "0.72rem",
-                                  fontWeight: 800,
-                                  padding: "0.15rem 0.5rem",
-                                  borderRadius: "0.35rem",
-                                  background: isCur ? (isQBonus ? "#f59e0b" : "#0284c7") : isPast ? "#dcfce7" : "#e2e8f0",
-                                  color: isCur ? "#ffffff" : isPast ? "#15803d" : "#64748b",
-                                  border: isCur ? (isQBonus ? "1.5px solid #d97706" : "1.5px solid #0369a1") : "1px solid #cbd5e1",
-                                  cursor: "pointer",
-                                  transition: "all 0.15s ease"
-                                }}
-                              >
-                                {isPast ? "✓ " : ""}{isQBonus ? "⭐ Bonus" : `P${idx + 1}`}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={handleCloseQuickReview}
-                        style={{
-                          display: "inline-flex",
-                          alignItems: "center",
-                          gap: "0.3rem",
-                          padding: "0.35rem 0.75rem",
-                          borderRadius: "0.45rem",
-                          border: "1px solid #cbd5e1",
-                          background: "#ffffff",
-                          color: "#475569",
-                          fontSize: "0.8rem",
-                          fontWeight: 700,
-                          cursor: "pointer"
-                        }}
-                      >
-                        <X size={15} />
-                        <span>Salir de Revisión</span>
-                      </button>
+                  <div className="quiz-quick__context">
+                    <div><span className="quiz-review__eyebrow">PREGUNTA EN REVISIÓN</span>
+                      <h3>Pregunta {quickQuestionIdx + 1} de {quizSemanal.preguntas.length}{isBonus ? " · Bonus" : ""}</h3>
+                      <p>{Number(currentQ.puntos || 1).toFixed(3)} puntos · Estudiante {quickStudentIdx + 1} de {entregasSemana.length}</p>
                     </div>
-
-                    {/* Barra de progreso de alumnos en esta pregunta */}
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "0.6rem" }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: "0.6rem" }}>
-                        <h2 style={{ margin: 0, fontSize: "1.3rem", fontWeight: 900, color: "#0f172a" }}>
-                          {isBonus ? "⭐ PREGUNTA 6 (ADICIONAL)" : `PREGUNTA ${quickQuestionIdx + 1}`}
-                        </h2>
-                        <span
-                          style={{
-                            fontSize: "0.74rem",
-                            fontWeight: 800,
-                            padding: "0.15rem 0.5rem",
-                            borderRadius: "0.35rem",
-                            background: "#ffffff",
-                            color: "#0369a1",
-                            border: "1px solid #bae6fd"
-                          }}
-                        >
-                          Valor: {Number(currentQ.puntos || 1.0).toFixed(3)} pt
-                        </span>
-                      </div>
-
-                      {/* Contador de estudiantes */}
-                      <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
-                        <div style={{ textAlign: "right" }}>
-                          <span style={{ fontSize: "0.84rem", fontWeight: 900, color: "#0f172a" }}>
-                            Estudiante {quickStudentIdx + 1} de {entregasSemana.length}
-                          </span>
-                          <span style={{ fontSize: "0.72rem", color: "#64748b", display: "block" }}>
-                            {Math.round(((quickStudentIdx + 1) / Math.max(1, entregasSemana.length)) * 100)}% evaluado en esta pregunta
-                          </span>
-                        </div>
-                        <div style={{ width: "90px", height: "8px", background: "#cbd5e1", borderRadius: "9999px", overflow: "hidden" }}>
-                          <div
-                            style={{
-                              width: `${((quickStudentIdx + 1) / Math.max(1, entregasSemana.length)) * 100}%`,
-                              height: "100%",
-                              background: "linear-gradient(90deg, #0284c7 0%, #10b981 100%)",
-                              transition: "width 0.25s ease"
-                            }}
-                          />
-                        </div>
-                      </div>
-                    </div>
+                    <div className="quiz-quick__position"><span>Posición en esta pregunta</span><progress value={quickStudentIdx + 1} max={entregasSemana.length} aria-label="Posición del estudiante en esta pregunta" /></div>
                   </div>
-
-                  {/* 2. ÁREA CENTRAL SCROLLABLE: ENUNCIADO + PANEL DIVIDIDO EN 2 COLUMNAS */}
-                  <div
+                  <nav className="quiz-quick__questions" aria-label="Cambiar pregunta en revisión rápida">
+                    {(quizSemanal?.preguntas || []).map((question, index) => <button key={question.id || index} type="button"
+                      aria-current={index === quickQuestionIdx ? "step" : undefined} onClick={() => handleQuickSelectQuestion(index)}>
+                      Pregunta {index + 1}{question.es_bonus || index === 5 ? " · Bonus" : ""}
+                    </button>)}
+                  </nav>
+                  <div className="quiz-quick__prompt"><FileText size={21} /><div><strong>Enunciado</strong><p>{currentQ.enunciado || "Sin enunciado registrado."}</p></div></div>
+                  {/* Respuestas del estudiante y referencia docente */}
+                  <div className="quiz-quick__content"
                     style={{
                       flex: 1,
                       overflowY: "auto",
@@ -2681,7 +2468,7 @@ export default function ReviewQuizSubmissionsView({
                     )}
 
                     {/* CUERPO PRINCIPAL: 2 COLUMNAS (IZQUIERDA: ALUMNO | DERECHA: DOCENTE) */}
-                    <div
+                    <div className="quiz-quick__columns"
                       style={{
                         display: "grid",
                         gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 420px), 1fr))",
@@ -2690,7 +2477,7 @@ export default function ReviewQuizSubmissionsView({
                       }}
                     >
                       {/* COLUMNA IZQUIERDA: RESPUESTAS DEL ESTUDIANTE */}
-                      <div
+                      <div className="quiz-quick__student"
                         style={{
                           background: "#ffffff",
                           borderRadius: "0.9rem",
@@ -2741,7 +2528,7 @@ export default function ReviewQuizSubmissionsView({
                                     <span style={{ fontSize: "0.74rem", fontWeight: 800, color: "#64748b" }}>
                                       Calificar: {curEval ? `(+${curEval.puntos_obtenidos.toFixed(3)} pt)` : "(Pendiente)"}
                                     </span>
-                                    <div style={{ display: "flex", gap: "0.3rem" }}>
+                                    <div className="quiz-quick__evaluations" style={{ display: "flex", gap: "0.3rem" }}>
                                       <button
                                         type="button"
                                         onClick={() => handleQuickEvaluateItem(currentStudent.id, currentQ.id, null, "buena", maxPts)}
@@ -3032,7 +2819,7 @@ export default function ReviewQuizSubmissionsView({
                       </div>
 
                       {/* COLUMNA DERECHA: RESPUESTAS POSIBLES / MODELO DEL DOCENTE */}
-                      <div
+                      <div className="quiz-quick__reference"
                         style={{
                           background: "#ffffff",
                           borderRadius: "0.9rem",
@@ -3137,7 +2924,7 @@ export default function ReviewQuizSubmissionsView({
                   </div>
 
                   {/* 3. BARRA DE ACCIÓN INFERIOR */}
-                  <div
+                  <div className="quiz-quick__actions"
                     style={{
                       padding: "0.85rem 1.5rem",
                       background: "#ffffff",
@@ -3149,6 +2936,7 @@ export default function ReviewQuizSubmissionsView({
                       gap: "0.75rem"
                     }}
                   >
+                    {quickError && <p className="quiz-quick__error" role="alert">{quickError} Tus valoraciones se conservan. Reintenta el guardado para continuar.</p>}
                     {/* Indicador de estado para este alumno */}
                     <div>
                       {qStatus.isComplete ? (
@@ -3167,7 +2955,7 @@ export default function ReviewQuizSubmissionsView({
                           }}
                         >
                           <CheckCircle2 size={15} />
-                          Pregunta evaluada al 100% para {currentStudent.nombre_completo.split(" ")[0]}
+                          Valoración lista para guardar · {(currentStudent.nombre_completo || "Estudiante").split(" ")[0]}
                         </span>
                       ) : (
                         <span
@@ -3191,7 +2979,7 @@ export default function ReviewQuizSubmissionsView({
                     </div>
 
                     {/* Botones de Navegación */}
-                    <div className="quiz-review-dialog__navigation" style={{ display: "flex", alignItems: "center", gap: "0.6rem" }}>
+                    <div className="quiz-quick__navigation" style={{ display: "flex", alignItems: "center", gap: "0.6rem" }}>
                       <button
                         type="button"
                         onClick={handleQuickPrevious}
@@ -3211,7 +2999,7 @@ export default function ReviewQuizSubmissionsView({
                         }}
                       >
                         <ChevronLeft size={16} />
-                        <span>Anterior Alumno</span>
+                        <span>Estudiante anterior</span>
                       </button>
 
                       <button
@@ -3245,12 +3033,12 @@ export default function ReviewQuizSubmissionsView({
                           </>
                         ) : quickStudentIdx === entregasSemana.length - 1 ? (
                           <>
-                            <span>Finalizar Pregunta {quickQuestionIdx + 1}</span>
+                            <span>Guardar y finalizar pregunta {quickQuestionIdx + 1}</span>
                             <CheckCircle2 size={16} />
                           </>
                         ) : (
                           <>
-                            <span>Siguiente Estudiante</span>
+                            <span>Guardar y continuar</span>
                             <ChevronRight size={16} />
                           </>
                         )}
@@ -3260,9 +3048,8 @@ export default function ReviewQuizSubmissionsView({
                 </>
               );
             })()}
-          </div>
-        </div>,
-        document.body
+          </fieldset>
+        </section>
       )}
     </section>
   );
