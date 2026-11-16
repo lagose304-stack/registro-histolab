@@ -130,6 +130,12 @@
 .quiz-quick__columns { grid-template-columns:minmax(0,1fr) !important;gap:1rem !important; }
 .quiz-quick__student,.quiz-quick__reference { min-width:0;padding:1rem !important;border:1px solid #b6cbd9 !important;box-shadow:none !important;border-radius:.8rem !important; }
 .quiz-quick__reference { background:#fff !important;border-top:3px solid #438265 !important; }
+.quiz-quick__reference-items { display:grid;gap:1rem; }
+.quiz-quick__reference-item h4 { margin:0 0 .5rem;color:#245a40;font-size:.85rem;line-height:1.6; }
+.quiz-quick__valid-answers { padding:.8rem;border:1px solid #b4d9c1;border-radius:.6rem;background:#f0f9f3;color:#245a40;font-size:.88rem;line-height:1.65;overflow-wrap:anywhere; }
+.quiz-quick__valid-answers p { margin:0;white-space:pre-wrap; }
+.quiz-quick__valid-answers ul { margin:0;padding-left:1.1rem;display:grid;gap:.35rem; }
+.quiz-quick__valid-answers-empty { color:#637b6b;font-style:italic; }
 .quiz-quick__student { border-top:3px solid #246c8d !important; }
 .quiz-quick__student h3 { font-size:1.1rem !important;line-height:1.5; }
 .quiz-quick__student button { min-height:44px;flex:none;white-space:nowrap; }

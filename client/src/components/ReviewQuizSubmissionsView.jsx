@@ -39,6 +39,15 @@ import {
   SECTION_ROLES
 } from "../utils/sectionRoleUtils";
 
+function QuickValidAnswers({ item }) {
+  return <div className="quiz-quick__valid-answers">
+    {Array.isArray(item.respuestas_esperadas) && item.respuestas_esperadas.length > 0
+      ? <ul>{item.respuestas_esperadas.map((answer, index) => <li key={index}>{answer}</li>)}</ul>
+      : item.respuesta_modelo ? <p>{item.respuesta_modelo}</p>
+      : <p className="quiz-quick__valid-answers-empty">Sin respuestas válidas configuradas.</p>}
+  </div>;
+}
+
 export default function ReviewQuizSubmissionsView({
   seccion,
   currentInstructor,
@@ -2851,85 +2860,18 @@ export default function ReviewQuizSubmissionsView({
                           </h3>
                         </div>
 
-                        {/* Apartados configurados por el docente */}
-                        <div style={{ display: "flex", flexDirection: "column", gap: "0.85rem" }}>
-                          {(!currentQ.items || currentQ.items.length === 0) ? (
-                            <div style={{ padding: "0.85rem", borderRadius: "0.6rem", background: "#f0fdf4", border: "1px solid #bbf7d0" }}>
-                              <span style={{ fontSize: "0.72rem", fontWeight: 800, color: "#166534", textTransform: "uppercase", display: "block", marginBottom: "0.25rem" }}>
-                                Respuesta Modelo Docente:
-                              </span>
-                              <div style={{ fontSize: "0.9rem", fontWeight: 700, color: "#065f46" }}>
-                                {currentQ.respuesta_modelo || currentQ.respuestas_esperadas?.[0] || "(Sin respuesta modelo guardada)"}
-                              </div>
-                            </div>
-                          ) : (
-                            currentQ.items.map((item, filteredIndex) => {
+                        {/* Respuestas válidas directamente debajo de cada inciso */}
+                        <div className="quiz-quick__reference-items">
+                          {(!currentQ.items || currentQ.items.length === 0)
+                            ? <QuickValidAnswers item={currentQ} />
+                            : currentQ.items.map((item, filteredIndex) => {
                               const itemIdx = item.reviewItemIndex ?? filteredIndex;
                               const itemLabel = item.instruccion || item.etiqueta || `Apartado ${itemIdx + 1}`;
-                            const displayCompletion = item.tipo === "completacion" ? item.texto_completar || "" : "";
-                              const isList = isQuizItemMultiSlot(item);
-                              const cantSlots = isList ? quizItemSlotCount(item) : 1;
-
-                              return (
-                                <div
-                                  key={item.id}
-                                  style={{
-                                    padding: "0.85rem",
-                                    borderRadius: "0.65rem",
-                                    background: "#f0fdf4",
-                                    border: "1.5px solid #bbf7d0",
-                                    display: "flex",
-                                    flexDirection: "column",
-                                    gap: "0.5rem"
-                                  }}
-                                >
-                                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap" }}>
-                                    <strong style={{ fontSize: "0.82rem", color: "#166534" }}>
-                                      {String.fromCharCode(97 + itemIdx)}) {itemLabel}: {displayCompletion}
-                                    </strong>
-                                    <span style={{ fontSize: "0.72rem", fontWeight: 800, color: "#15803d", background: "#ffffff", padding: "0.1rem 0.45rem", borderRadius: "0.35rem", border: "1px solid #86efac" }}>
-                                      {quizItemLabel(item)}{isAutomaticQuizItem(item) && " · Automática"}
-                                    </span>
-                                  </div>
-
-                                  {/* Banco de opciones válidas o respuesta modelo */}
-                                  {Array.isArray(item.respuestas_esperadas) && item.respuestas_esperadas.length > 0 ? (
-                                    <div style={{ display: "flex", flexDirection: "column", gap: "0.35rem" }}>
-                                      <span style={{ fontSize: "0.74rem", fontWeight: 800, color: "#166534" }}>
-                                        Opciones válidas aceptadas ({item.respuestas_esperadas.length}):
-                                      </span>
-                                      <div style={{ display: "flex", flexWrap: "wrap", gap: "0.35rem" }}>
-                                        {item.respuestas_esperadas.map((ans, aIdx) => (
-                                          <span
-                                            key={aIdx}
-                                            style={{
-                                              background: "#ffffff",
-                                              border: "1.5px solid #86efac",
-                                              padding: "0.2rem 0.55rem",
-                                              borderRadius: "0.4rem",
-                                              fontWeight: 800,
-                                              fontSize: "0.78rem",
-                                              color: "#15803d"
-                                            }}
-                                          >
-                                            {ans}
-                                          </span>
-                                        ))}
-                                      </div>
-                                    </div>
-                                  ) : item.respuesta_modelo ? (
-                                    <div style={{ fontSize: "0.86rem", fontWeight: 700, color: "#065f46" }}>
-                                      {item.respuesta_modelo}
-                                    </div>
-                                  ) : (
-                                    <span style={{ fontSize: "0.76rem", color: "#94a3b8", fontStyle: "italic" }}>
-                                      Sin opciones modelo configuradas
-                                    </span>
-                                  )}
-                                </div>
-                              );
-                            })
-                          )}
+                              return <section className="quiz-quick__reference-item" key={item.id}>
+                                <h4>{String.fromCharCode(97 + itemIdx)}) {itemLabel}{item.tipo === "completacion" && item.texto_completar ? `: ${item.texto_completar}` : ""}</h4>
+                                <QuickValidAnswers item={item} />
+                              </section>;
+                            })}
                         </div>
                       </div>
                     </div>
