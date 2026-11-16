@@ -29,6 +29,7 @@ import {
 import { api } from "../services/api";
 import QuizActivityReview from "./QuizActivityReview";
 import { manualQuickReviewQuestions, quickReviewSelections } from "../utils/quizQuickReview.mjs";
+import { useQuickGradeSave } from "../utils/useQuickGradeSave";
 import "./ReviewQuizSubmissionsView.css";
 import { safeStorage } from "../utils/safeStorage";
 import {
@@ -87,21 +88,43 @@ export default function ReviewQuizSubmissionsView({
   const [quickStudentIdx, setQuickStudentIdx] = useState(0); // 0 a entregasSemana.length - 1
   const [quickEvaluations, setQuickEvaluations] = useState({}); // { [entregaId]: { [evalKey]: {...} } }
   const [quickSelections, setQuickSelections] = useState({});
-  const [quickSaving, setQuickSaving] = useState(false);
   const [quickQuestionFinishedPrompt, setQuickQuestionFinishedPrompt] = useState(false);
   const [quickAllCompleted, setQuickAllCompleted] = useState(false);
   const nextQuickQuestion = quickQuestions.find(question => question.reviewQuestionIndex > quickQuestionIdx);
 
   const [quickError, setQuickError] = useState("");
   const quickSaveLockRef = useRef(false);
+  const quickCursorRef = useRef(null);
+  const quickStudentHeadingRef = useRef(null);
+  const quickFocusRef = useRef(null);
+  const quickStorageKey = currentUser?.id && quizSemanal?.id && seccion?.id
+    ? `histolab_quick_grade_v1_${JSON.stringify([String(currentUser.id), String(seccion.id), selectedSemana, String(quizSemanal.id)])}` : null;
+  const quickGradeSave = useQuickGradeSave({ storageKey: quickStorageKey, api: api.pruebas,
+    onConfirmed: (record, data) => {
+      setEntregasSemana(prev => prev.map(row => row.id === record.submissionId ? {
+        ...row, ...record.payload, estado: "calificado",
+        auditoria: { ...row.auditoria, evaluaciones_incisos: record.payload.evaluaciones_incisos, nota_real: record.payload.nota_real },
+        ...(data || {})
+      } : row));
+      if (!record.durable || record.recovered) quickCursorRef.current?.(record.transition);
+    }
+  });
+  const quickSaving = quickGradeSave.saving;
+  const quickAwaiting = Boolean(quickGradeSave.pending);
+  quickSaveLockRef.current = quickAwaiting;
   useEffect(() => {
     if (selectedEntrega || showQuickReviewModal) {
-      reviewHeadingRef.current?.focus({ preventScroll: true });
-      reviewHeadingRef.current?.scrollIntoView({ block: "start" });
+      const focusKey = `${quickQuestionIdx}:${quickStudentIdx}`;
+      const heading = showQuickReviewModal && quickFocusRef.current && quickFocusRef.current !== focusKey && !quickQuestionFinishedPrompt && !quickAllCompleted
+        ? quickStudentHeadingRef.current : reviewHeadingRef.current;
+      heading?.focus({ preventScroll: true });
+      heading?.scrollIntoView({ block: "start" });
+      quickFocusRef.current = showQuickReviewModal ? focusKey : null;
     } else if (reviewTriggerRef.current) {
       if (reviewTriggerRef.current.isConnected) reviewTriggerRef.current.focus({ preventScroll: true });
       window.scrollTo({ top: listingScrollRef.current });
       reviewTriggerRef.current = null;
+      quickFocusRef.current = null;
     }
   }, [selectedEntrega?.id, showQuickReviewModal, quickStudentIdx, quickQuestionIdx, quickQuestionFinishedPrompt, quickAllCompleted]);
 
@@ -657,7 +680,7 @@ export default function ReviewQuizSubmissionsView({
 
   // Evaluar ítem directo o texto corto en Revisión Rápida
   const handleQuickEvaluateItem = (entregaId, preguntaId, itemId, status, maxPoints) => {
-    if (quickSaveLockRef.current) return;
+    if (quickGradeSave.pending && !quickGradeSave.pending.durable) return;
     if (quickEvaluations[entregaId]?.[`${preguntaId}___${itemId}`]?.origen === "automatica") return;
     const numMax = Number(maxPoints) || 0;
     let earned = 0;
@@ -686,7 +709,7 @@ export default function ReviewQuizSubmissionsView({
 
   // Evaluar casilla individual de listado en Revisión Rápida
   const handleQuickEvaluateSlot = (entregaId, preguntaId, itemId, slotIdx, status, slotMaxPoints) => {
-    if (quickSaveLockRef.current) return;
+    if (quickGradeSave.pending && !quickGradeSave.pending.durable) return;
     if (quickEvaluations[entregaId]?.[`${preguntaId}___${itemId}___slot_${slotIdx}`]?.origen === "automatica") return;
     const numMax = Number(slotMaxPoints) || 0;
     let earned = 0;
@@ -750,7 +773,18 @@ export default function ReviewQuizSubmissionsView({
     };
   };
 
-  // Guardar calificación del estudiante actual y avanzar al siguiente estudiante o siguiente pregunta
+  const applyQuickCursor = transition => {
+    if (!transition) return;
+    setQuickQuestionIdx(transition.questionIdx);
+    setQuickStudentIdx(transition.studentIdx);
+    setQuickQuestionFinishedPrompt(transition.finishedPrompt);
+    setQuickAllCompleted(transition.allCompleted);
+    const posKey = `histolab_quick_pos_${seccion?.id || seccion?.codigo || "sec"}_sem_${selectedSemana}`;
+    safeStorage.setItem(posKey, JSON.stringify(transition));
+  };
+  quickCursorRef.current = applyQuickCursor;
+
+  // Adelantar la vista solo tras resguardar la nota; la confirmación llega aparte.
   const handleQuickAdvance = async () => {
     if (quickSaveLockRef.current) return;
     const currentStudent = entregasSemana[quickStudentIdx];
@@ -781,74 +815,21 @@ export default function ReviewQuizSubmissionsView({
     };
 
     const hasNextStudent = quickStudentIdx < entregasSemana.length - 1;
-    quickSaveLockRef.current = true;
-    setQuickSaving(true);
-    setQuickError("");
-
+    const transition = { questionIdx: quickQuestionIdx,
+      studentIdx: hasNextStudent ? quickStudentIdx + 1 : quickStudentIdx,
+      finishedPrompt: !hasNextStudent && Boolean(nextQuickQuestion),
+      allCompleted: !hasNextStudent && !nextQuickQuestion };
     try {
-      // Guardar en el servidor para este alumno específico
-      const savedResponse = await api.pruebas.calificar(currentStudent.id, payload);
-      if (!savedResponse?.success) throw new Error(savedResponse?.message || "No se pudo guardar la revisión.");
-
-      // Actualizar en el estado local de entregas
-      setEntregasSemana((prev) =>
-        prev.map((it) =>
-          it.id === currentStudent.id
-            ? {
-                ...it,
-                nota_obtenida: cleanNotaOficial,
-                nota_real: cleanNotaReal,
-                nota_con_bonus: cleanNotaReal,
-                estado: "calificado",
-                calificado_por: instructorName,
-                evaluaciones_incisos: studentEvals,
-                auditoria: {
-                  ...(it.auditoria || {}),
-                  evaluaciones_incisos: studentEvals,
-                  nota_real: cleanNotaReal
-                },
-                ...(savedResponse.data || {})
-              }
-            : it
-        )
-      );
-
-      // Comprobar si aún quedan estudiantes en esta pregunta
-      if (hasNextStudent) {
-        const nextStudentIdx = quickStudentIdx + 1;
-        setQuickStudentIdx(nextStudentIdx);
-        try {
-          const posKey = `histolab_quick_pos_${seccion?.id || seccion?.codigo || "sec"}_sem_${selectedSemana}`;
-          safeStorage.setItem(posKey, JSON.stringify({
-            questionIdx: quickQuestionIdx,
-            studentIdx: nextStudentIdx,
-            finishedPrompt: false
-          }));
-        } catch (_) {}
-      } else {
-        // Se terminaron de calificar todos los estudiantes para esta pregunta
-        if (nextQuickQuestion) {
-          setQuickQuestionFinishedPrompt(true);
-          try {
-            const posKey = `histolab_quick_pos_${seccion?.id || seccion?.codigo || "sec"}_sem_${selectedSemana}`;
-            safeStorage.setItem(posKey, JSON.stringify({
-              questionIdx: quickQuestionIdx,
-              studentIdx: quickStudentIdx,
-              finishedPrompt: true
-            }));
-          } catch (_) {}
-        } else {
-          // Se completaron todas las preguntas para todos los alumnos
-          setQuickAllCompleted(true);
-        }
-      }
-    } catch (err) {
-      console.error("Error al avanzar estudiante en revisión rápida:", err);
-      setQuickError(err.message || "No se pudo guardar la revisión. Las valoraciones se conservan; reintenta para continuar.");
-      notifyRef.current("Error al sincronizar calificación del estudiante", "error");
-    } finally {
+      quickSaveLockRef.current = true;
+      setQuickError("");
+      const record = quickGradeSave.prepare({ submissionId: currentStudent.id,
+        studentName: currentStudent.nombre_completo || currentStudent.numero_cuenta,
+        payload, transition });
+      if (record.durable) applyQuickCursor(transition);
+      void quickGradeSave.retry();
+    } catch (error) {
       quickSaveLockRef.current = false;
-      setQuickSaving(false);
+      setQuickError(error.message || "No se pudo preparar el guardado.");
     }
   };
 
@@ -892,12 +873,20 @@ export default function ReviewQuizSubmissionsView({
   const assignedName = getAssignedRecordForWeek(asignaciones,
     [SECTION_ROLES.PRUEBAS, SECTION_ROLES.PRUEBAS_LEGACY], selectedSemana)?.instructor_nombre;
   const progress = stats.total ? Math.round(stats.calificados / stats.total * 100) : 0;
-  const quickPending = quickAllCompleted && showQuickReviewModal ? quickQuestions.flatMap(question =>
+  const quickPending = quickAllCompleted && showQuickReviewModal && !quickAwaiting ? quickQuestions.flatMap(question =>
     entregasSemana.flatMap((submission, studentIdx) => getQuestionEvaluationStatus(question, evaluationsFor(submission)).isComplete ? [] : [{ questionIdx: question.reviewQuestionIndex, studentIdx }])) : [];
 
   return (
     <section className="user-directory quiz-review" aria-labelledby="quiz-review-title">
-      <div hidden={Boolean(selectedEntrega || showQuickReviewModal)}>
+      {quickGradeSave.error && !quickGradeSave.pending && <p className="quiz-quick__error" role="alert">{quickGradeSave.error} Comprueba las notas guardadas antes de repetir la revisión.</p>}
+      {quickGradeSave.pending && <div className="quiz-review__save-status" role={quickGradeSave.error ? "alert" : "status"}>
+        <div><strong>{quickSaving ? "Guardando" : "Guardado pendiente"}: {quickGradeSave.pending.studentName}</strong>
+          <p>{quickGradeSave.error || (quickGradeSave.pending.durable
+            ? "Puedes valorar la respuesta siguiente mientras se confirma esta nota. El próximo envío espera esa confirmación."
+            : "Este navegador no permitió resguardar la nota. Espera la confirmación antes de avanzar o cerrar la página.")}</p></div>
+        {!quickSaving && <button type="button" className="user-button" onClick={quickGradeSave.retry}>Reintentar guardado</button>}
+      </div>}
+      <div hidden={Boolean(selectedEntrega || showQuickReviewModal)} inert={quickAwaiting}>
       <header className="quiz-review__header">
         <div className="quiz-review__heading">
           {!hideBackButton && <button type="button" className="user-button" onClick={onClose} aria-label="Volver al panel de la sección"><ArrowLeft size={18} /></button>}
@@ -2226,17 +2215,16 @@ export default function ReviewQuizSubmissionsView({
       {/* 5. REVISIÓN RÁPIDA POR PREGUNTA DENTRO DEL MÓDULO                  */}
       {/* =================================================================== */}
       {showQuickReviewModal && (
-        <section className="quiz-quick" aria-labelledby="quiz-quick-title" aria-busy={quickSaving}>
+        <section className="quiz-quick" aria-labelledby="quiz-quick-title">
           <header className="quiz-review-workspace__header">
-            <button type="button" className="user-button" onClick={handleCloseQuickReview} disabled={quickSaving}><ArrowLeft size={18} /> Volver a las entregas</button>
+            <button type="button" className="user-button" onClick={handleCloseQuickReview} disabled={quickAwaiting}><ArrowLeft size={18} /> Volver a las entregas</button>
             <div><span className="quiz-review__eyebrow">SEMANA {selectedSemana} · SECCIÓN {seccion?.codigo} · {carrera}</span>
               <h2 id="quiz-quick-title" ref={reviewHeadingRef} tabIndex={-1}>Revisión rápida por pregunta</h2>
               <p>{quizSemanal?.titulo} · Preguntas con escritura: {quickQuestions.length} · {entregasSemana.length} entregas, sin aplicar los filtros del listado.</p>
             </div>
           </header>
-          <p className="quiz-quick__hint">Cada estudiante comienza sin selección. Las notas anteriores y automáticas se conservan; elige la valoración de cada respuesta para guardarla y continuar. Al salir se conserva la posición.</p>
-          {quickSaving && <p className="quiz-quick__saving" role="status">Guardando la revisión. Espera la confirmación antes de continuar…</p>}
-          <fieldset className="quiz-quick__session" disabled={quickSaving} aria-label="Revisión por pregunta">
+          <p className="quiz-quick__hint">Cada estudiante comienza sin selección. Al guardar se muestra al siguiente y la nota se confirma en segundo plano. Las notas anteriores y automáticas se conservan.</p>
+          <fieldset className="quiz-quick__session" disabled={Boolean(quickAwaiting && (!quickGradeSave.pending.durable || quickQuestionFinishedPrompt || quickAllCompleted))} aria-label="Revisión por pregunta">
             {/* PANTALLA A: REVISIÓN RÁPIDA FINALIZADA (TODAS LAS PREGUNTAS LISTAS) */}
             {quickAllCompleted ? (
               <div className="quiz-quick__completion"
@@ -2271,13 +2259,13 @@ export default function ReviewQuizSubmissionsView({
 
                 <div>
                   <span style={{ fontSize: "0.82rem", fontWeight: 900, color: "#d97706", textTransform: "uppercase", letterSpacing: "1px" }}>
-                    {quickPending.length ? "Revisiones pendientes" : "Proceso concluido"}
+                    {quickAwaiting ? "Guardado pendiente" : quickPending.length ? "Revisiones pendientes" : "Proceso concluido"}
                   </span>
                   <h2 style={{ margin: "0.3rem 0", fontSize: "1.75rem", fontWeight: 900, color: "#0f172a" }}>
-                    {quickPending.length ? "Recorrido finalizado con pendientes" : "Revisión rápida completada"}
+                    {quickAwaiting ? "Confirmando el último guardado" : quickPending.length ? "Recorrido finalizado con pendientes" : "Revisión rápida completada"}
                   </h2>
                   <p style={{ margin: "0.5rem 0 0", fontSize: "0.92rem", color: "#475569", lineHeight: 1.55 }}>
-                    {quickPending.length
+                    {quickAwaiting ? "Las valoraciones están preparadas. La revisión terminará cuando el servidor confirme el último guardado." : quickPending.length
                       ? `Quedan ${quickPending.length} revisiones de pregunta por estudiante sin completar. Puedes volver a la primera pendiente; las revisiones guardadas se conservan.`
                       : `Las respuestas manuales de ${quickQuestions.length} preguntas de los ${entregasSemana.length} estudiantes están revisadas y guardadas. La nota total conserva las calificaciones automáticas y el bonus; la nota oficial mantiene el tope de 5.000 puntos.`}
                   </p>
@@ -2345,10 +2333,11 @@ export default function ReviewQuizSubmissionsView({
                     Reactivo Concluido
                   </span>
                   <h2 style={{ margin: "0.3rem 0", fontSize: "1.65rem", fontWeight: 900, color: "#0f172a" }}>
-                    ¡Pregunta {quickQuestionIdx + 1} completada para todos los estudiantes!
+                    {quickAwaiting ? `Confirmando la pregunta ${quickQuestionIdx + 1}` : `¡Pregunta ${quickQuestionIdx + 1} completada para todos los estudiantes!`}
                   </h2>
                   <p style={{ margin: "0.5rem 0 0", fontSize: "0.92rem", color: "#475569", lineHeight: 1.55 }}>
-                    Se guardaron los incisos manuales de los <strong>{entregasSemana.length} estudiantes</strong> para la Pregunta {quickQuestionIdx + 1}, conservando sus calificaciones automáticas.
+                    {quickAwaiting ? "Espera la confirmación del último guardado antes de continuar a la siguiente pregunta."
+                      : <>Se guardaron los incisos manuales de los <strong>{entregasSemana.length} estudiantes</strong> para la Pregunta {quickQuestionIdx + 1}, conservando sus calificaciones automáticas.</>}
                   </p>
                 </div>
 
@@ -2442,6 +2431,7 @@ export default function ReviewQuizSubmissionsView({
                   </div>
                   <nav className="quiz-quick__questions" aria-label="Cambiar pregunta en revisión rápida">
                     {quickQuestions.map(question => <button key={question.id || question.reviewQuestionIndex} type="button"
+                      disabled={quickAwaiting}
                       aria-current={question.reviewQuestionIndex === quickQuestionIdx ? "step" : undefined} onClick={() => handleQuickSelectQuestion(question.reviewQuestionIndex)}>
                       Pregunta {question.reviewQuestionIndex + 1}{question.es_bonus || question.reviewQuestionIndex === 5 ? " · Bonus" : ""}
                     </button>)}
@@ -2506,7 +2496,7 @@ export default function ReviewQuizSubmissionsView({
                             <span style={{ fontSize: "0.72rem", fontWeight: 800, color: "#0284c7", textTransform: "uppercase" }}>
                               ✍️ Estudiante en evaluación:
                             </span>
-                            <h3 style={{ margin: "0.15rem 0 0", fontSize: "1.1rem", fontWeight: 900, color: "#0f172a" }}>
+                            <h3 ref={quickStudentHeadingRef} tabIndex={-1} style={{ margin: "0.15rem 0 0", fontSize: "1.1rem", fontWeight: 900, color: "#0f172a", scrollMarginTop: "1rem" }}>
                               {currentStudent.nombre_completo}
                             </h3>
                             <span style={{ fontSize: "0.76rem", color: "#64748b", fontWeight: 700 }}>
@@ -2959,6 +2949,10 @@ export default function ReviewQuizSubmissionsView({
                     }}
                   >
                     {quickError && <p className="quiz-quick__error" role="alert">{quickError} Tus valoraciones se conservan. Reintenta el guardado para continuar.</p>}
+                    {quickGradeSave.error && quickGradeSave.pending && <div className="quiz-quick__error">
+                      <p>No se confirmó la nota de {quickGradeSave.pending.studentName}. {quickGradeSave.pending.submissionId !== currentStudent.id ? "La respuesta visible pertenece a otro estudiante. " : ""}Tus selecciones se conservan.</p>
+                      <button type="button" className="user-button" onClick={quickGradeSave.retry} disabled={quickSaving}>Reintentar guardado pendiente</button>
+                    </div>}
                     {/* Indicador de estado para este alumno */}
                     <div>
                       {qStatus.isComplete ? (
@@ -3005,7 +2999,7 @@ export default function ReviewQuizSubmissionsView({
                       <button
                         type="button"
                         onClick={handleQuickPrevious}
-                        disabled={quickStudentIdx === 0 || quickSaving}
+                        disabled={quickStudentIdx === 0 || quickAwaiting}
                         style={{
                           display: "inline-flex",
                           alignItems: "center",
@@ -3017,7 +3011,7 @@ export default function ReviewQuizSubmissionsView({
                           color: quickStudentIdx === 0 ? "#94a3b8" : "#334155",
                           fontSize: "0.85rem",
                           fontWeight: 700,
-                          cursor: quickStudentIdx === 0 || quickSaving ? "not-allowed" : "pointer"
+                          cursor: quickStudentIdx === 0 || quickAwaiting ? "not-allowed" : "pointer"
                         }}
                       >
                         <ChevronLeft size={16} />
@@ -3027,7 +3021,7 @@ export default function ReviewQuizSubmissionsView({
                       <button
                         type="button"
                         onClick={handleQuickAdvance}
-                        disabled={!qStatus.isComplete || quickSaving}
+                        disabled={!qStatus.isComplete || quickAwaiting}
                         style={{
                           display: "inline-flex",
                           alignItems: "center",
@@ -3035,7 +3029,7 @@ export default function ReviewQuizSubmissionsView({
                           padding: "0.6rem 1.4rem",
                           borderRadius: "0.6rem",
                           border: "none",
-                          background: !qStatus.isComplete || quickSaving
+                          background: !qStatus.isComplete || quickAwaiting
                             ? "#cbd5e1"
                             : quickStudentIdx === entregasSemana.length - 1
                             ? "linear-gradient(135deg, #10b981 0%, #059669 100%)"
@@ -3043,15 +3037,15 @@ export default function ReviewQuizSubmissionsView({
                           color: "#ffffff",
                           fontSize: "0.9rem",
                           fontWeight: 900,
-                          cursor: !qStatus.isComplete || quickSaving ? "not-allowed" : "pointer",
-                          boxShadow: !qStatus.isComplete || quickSaving ? "none" : "0 4px 14px rgba(2, 132, 199, 0.35)",
+                          cursor: !qStatus.isComplete || quickAwaiting ? "not-allowed" : "pointer",
+                          boxShadow: !qStatus.isComplete || quickAwaiting ? "none" : "0 4px 14px rgba(2, 132, 199, 0.35)",
                           transition: "all 0.15s ease"
                         }}
                       >
-                        {quickSaving ? (
+                        {quickAwaiting ? (
                           <>
                             <RefreshCw size={16} className="animate-spin" />
-                            <span>Guardando...</span>
+                            <span>Esperando guardado anterior…</span>
                           </>
                         ) : quickStudentIdx === entregasSemana.length - 1 ? (
                           <>
