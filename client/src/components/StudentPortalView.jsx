@@ -3145,7 +3145,8 @@ export default function StudentPortalView({ student, notify = () => {}, onActivi
         )}
 
         {activity.warning && !isExamSealedOffline && !submittingQuiz && !autoSubmitTriggeredRef.current && (
-          <QuizActivityWarning strike={activity.state.attempt.faltas} seconds={activity.secondsLeft} onReturn={activity.returnToQuiz} />
+          <QuizActivityWarning strike={activity.state.attempt.faltas} seconds={activity.secondsLeft} onReturn={activity.returnToQuiz} windowBlocked={activity.windowBlocked}
+            reducedWindow={activity.state.attempt.eventos?.some(event => event.episodio_id === activity.state.attempt.episodio_abierto && event.senales?.includes("ventana_reducida"))} />
         )}
         {activityFinished && <QuizActivityFinished reason={activityFinished.reason} title={activityFinished.title}
           confirmed={activityFinished.confirmed} busy={submittingQuiz || syncingOfflineSubmission}

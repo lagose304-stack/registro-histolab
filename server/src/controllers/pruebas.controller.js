@@ -498,7 +498,7 @@ export const startQuizActivity = async (req, res) => {
     if (previous && (previous.estado !== "borrador" || !previous.auditoria?.reapertura)) return res.status(409).json({ success: false, message: "Esta prueba ya tiene una entrega registrada." });
     const live = await getLiveQuizEvidence(seccion_id, Number(semana));
     if (!(quiz.publicada === true || String(quiz.publicada) === "true" || quiz.estado === "publicada") || String(quiz.id) !== String(req.body.quiz_id) || !["lobby", "en_pregunta", "esperando_siguiente"].includes(live.estado)) return res.status(409).json({ success: false, message: "La prueba no está disponible para iniciar." });
-    const attempt = await beginQuizActivity(seccion_id, semana, req.student, quiz, req.body.hora_cliente, previous?.auditoria?.reapertura?.fecha, req.body.diagnostico_version);
+    const attempt = await beginQuizActivity(seccion_id, semana, req.student, quiz, req.body.hora_cliente, previous?.auditoria?.reapertura?.fecha, req.body.diagnostico_version, req.body.ventana_version);
     return res.json({ success: true, data: attempt });
   } catch (error) { console.error("Inicio de actividad:", error.message); return res.status(503).json({ success: false, message: "No se pudo registrar el inicio. Reintenta sin cerrar esta pantalla." }); }
 };

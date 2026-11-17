@@ -21,3 +21,18 @@ for(const scenario of ['ready','missing','denied']){
  else{const attempt=await start();assert.equal(attempt.diagnostico_version,scenario==='ready'?1:undefined);assert.equal(insertions.length,scenario==='ready'?1:2);assert.equal(attempt.faltas,0);}
 }
 console.log('PASS publicación: diagnóstico activo con migración, inicio compatible sin su columna y errores de permisos sin fallback inseguro.');
+
+for(const scenario of ['new','legacy','missing']) {
+ let row=scenario==='legacy'?{id:'legacy',quiz_id:'quiz',faltas:2,episodio_abierto:'episode'}:null;
+ const insertions=[];
+ const database={from(){let insert;const query={select:()=>query,match:()=>query,is:()=>query,eq:()=>query,order:()=>Promise.resolve({data:[]}),maybeSingle:()=>Promise.resolve({data:row}),insert:value=>{insert=value;insertions.push(value);return query;},single:async()=>{
+  if(scenario==='missing')return {error:{code:'PGRST204',message:"Could not find the 'ventana_version' column"}};
+  row={...insert};return {data:row};
+ }};return query;}};
+ const module={exports:{}};
+ vm.runInNewContext(bundle.outputFiles[0].text,{module,exports:module.exports,database,console,process:{cwd:()=>path.resolve('server')},require:key=>{if(key==='node:path')return path;if(key==='node:url')return {fileURLToPath};if(key==='node:crypto')return {randomUUID:()=> '00000000-0000-4000-8000-000000000001'};throw Error(key);}});
+ const start=()=>module.exports.beginQuizActivity('s',1,{id:'student',numero_cuenta:'A'},{id:'quiz'},new Date().toISOString(),null,1,1);
+ if(scenario==='missing'){await assert.rejects(start());assert.equal(insertions.length,1,'No inicia sin persistir la aceptación de la regla');}
+ else {const attempt=await start();assert.equal(attempt.ventana_version,scenario==='new'?1:undefined);assert.equal(attempt.faltas,scenario==='new'?0:2);assert.equal(insertions.length,scenario==='new'?1:0);}
+}
+console.log('PASS ancho: aceptación persistida en intentos nuevos, antiguos sin cambio de reglas ni contador y migración requerida explícitamente.');

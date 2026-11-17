@@ -1,10 +1,13 @@
 import { QUIZ_ACTIVITY_LIMIT } from "../../../shared/quizActivity.mjs";
+import { createQuizWindowGuard } from "./quizWindowGuard.mjs";
 
 // Revisión del algoritmo, independiente de la versión de la política de faltas.
-export const QUIZ_ACTIVITY_OBSERVER_VERSION = 3;
+export const QUIZ_ACTIVITY_OBSERVER_VERSION = 4;
 
 // Observa señales del navegador. No intercepta teclas, navegación ni permisos.
-export function observeQuizActivity({ window, document, getState, onEvent, isActive, explicitReturn = false, makeId = () => crypto.randomUUID(), now = () => new Date().toISOString() }) {
+export function observeQuizActivity({ window, document, getState, onEvent, isActive, explicitReturn = false, onWindowStatus = () => {}, makeId = () => crypto.randomUUID(), now = () => new Date().toISOString(), nowMs = () => Date.now() }) {
+  const guard = createQuizWindowGuard(window, nowMs);
+  const windowStatus = () => guard.check(getState()?.ventana_version === 1);
   let returnTimer;
   let stopped = false;
   const recheckTimers = new Set();
@@ -18,11 +21,11 @@ export function observeQuizActivity({ window, document, getState, onEvent, isAct
   const returned = () => {
     if (explicitReturn) return;
     clearTimeout(returnTimer);
-    if (!here()) return;
+    if (!here() || windowStatus().blocked) return;
     // Agrupar la transición focus/visibility del regreso, sin rearmar entre eventos.
     returnTimer = window.setTimeout(() => {
       const state = getState();
-      if (isActive() && here() && state.episodio_abierto) onEvent({ id: makeId(), episodio_id: state.episodio_abierto, tipo: "regreso", hora_cliente: now(), senales: [] });
+      if (isActive() && here() && !windowStatus().blocked && state.episodio_abierto) onEvent({ id: makeId(), episodio_id: state.episodio_abierto, tipo: "regreso", hora_cliente: now(), senales: [] });
     }, 150);
   };
   const visibility = () => document.visibilityState === "hidden" ? departure("pagina_oculta") : returned();
@@ -34,11 +37,14 @@ export function observeQuizActivity({ window, document, getState, onEvent, isAct
   window.addEventListener("pageshow", returned);
   document.addEventListener("visibilitychange", visibility);
   // Algunos navegadores cambian el estado sin emitir blur/visibilitychange.
-  // El tamaño de ventana, el teclado y la rotación no deciden una falta.
+  // El ancho reducido solo aplica a intentos que aceptaron la regla nueva.
   const checkState = () => {
     if (stopped || !isActive()) return;
+    const size = windowStatus();
+    onWindowStatus(size.blocked);
     if (document.visibilityState === "hidden") departure("pagina_oculta");
     else if (!document.hasFocus()) departure("ventana_sin_foco");
+    else if (size.departure) departure("ventana_reducida");
     else if (getState().episodio_abierto) returned();
   };
   // Volver a consultar cuando la transición del navegador ya se haya asentado.
@@ -62,11 +68,12 @@ export function observeQuizActivity({ window, document, getState, onEvent, isAct
   for (const type of ["focusin", "focusout", "pointercancel", "resume"]) listen(document, type);
   for (const type of ["focus", "pageshow", "resize", "orientationchange"]) listen(window, type);
   listen(window.visualViewport, "resize");
+  listen(window.screen?.orientation, "change");
   const stateTimer = window.setInterval(checkState, 500);
   if (document.visibilityState === "hidden") departure("pagina_oculta");
   else if (!document.hasFocus()) departure("ventana_sin_foco");
   else returned();
-  return () => {
+  const cleanup = () => {
     stopped = true;
     for (const remove of removers) remove();
     for (const timer of recheckTimers) window.clearTimeout(timer);
@@ -79,4 +86,6 @@ export function observeQuizActivity({ window, document, getState, onEvent, isAct
     window.removeEventListener("pageshow", returned);
     document.removeEventListener("visibilitychange", visibility);
   };
+  cleanup.canReturn = () => !windowStatus().blocked;
+  return cleanup;
 }

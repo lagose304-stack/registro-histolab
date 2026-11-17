@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { safeStorage } from "./safeStorage";
 import { observeQuizActivity } from "./quizActivityObserver.mjs";
+import { quizWindowStatus } from "./quizWindowGuard.mjs";
 import { startQuizDiagnostics } from "./quizDiagnosticsTransport.mjs";
 import { appendLocalActivity, QUIZ_ACTIVITY_POLICY, quizReturnDeadline } from "../../../shared/quizActivity.mjs";
 
@@ -8,6 +9,8 @@ export function useQuizActivity({ quiz, student, api, active, getQuestion, onLim
   const [state, setState] = useState(null);
   const [error, setError] = useState("");
   const [secondsLeft, setSecondsLeft] = useState(10);
+  const [windowBlocked, setWindowBlocked] = useState(false);
+  const observer = useRef(null);
   const current = useRef(null);
   const syncing = useRef(false);
   const callbacks = useRef({});
@@ -19,9 +22,10 @@ export function useQuizActivity({ quiz, student, api, active, getQuestion, onLim
     current.current = value;
     setState(value);
   }, []);
-  const initialize = useCallback(async target => {
+  const initialize = useCallback(async (target, { checkWindow = true } = {}) => {
+    if (checkWindow && quizWindowStatus(window).reduced) throw new Error("Amplía Safari hasta ocupar todo el ancho de la pantalla antes de comenzar. Cierra la vista dividida o la ventana flotante.");
     const section = student?.seccion_id || student?.seccion?.id;
-    const result = await api.startActivity(section, target.numero_semana, { quiz_id: target.id, politica: QUIZ_ACTIVITY_POLICY, hora_cliente: new Date().toISOString(), diagnostico_version: 1 });
+    const result = await api.startActivity(section, target.numero_semana, { quiz_id: target.id, politica: QUIZ_ACTIVITY_POLICY, hora_cliente: new Date().toISOString(), diagnostico_version: 1, ventana_version: 1 });
     if (!result?.success) throw new Error(result?.message || "No se pudo registrar la aceptación.");
     const key = keyFor(target);
     let saved;
@@ -76,6 +80,7 @@ export function useQuizActivity({ quiz, student, api, active, getQuestion, onLim
     if (!attempt?.episodio_abierto || !callbacks.current.active()) return;
     if (Date.now() >= quizReturnDeadline(attempt)) { callbacks.current.onLimit("falta_grave_tiempo"); return; }
     if (document.visibilityState === "hidden" || !document.hasFocus()) return;
+    if (attempt.ventana_version === 1 && (quizWindowStatus(window).reduced || !observer.current?.canReturn())) { setWindowBlocked(true); return; }
     recordEvent({ id: crypto.randomUUID(), episodio_id: attempt.episodio_abierto, tipo: "regreso", hora_cliente: new Date().toISOString(), senales: [] });
   }, [recordEvent]);
   const deadline = ready ? quizReturnDeadline(state.attempt) : null;
@@ -93,7 +98,7 @@ export function useQuizActivity({ quiz, student, api, active, getQuestion, onLim
     return () => { clearInterval(timer); window.removeEventListener("focus", tick); document.removeEventListener("visibilitychange", tick); };
   }, [deadline]);
   useEffect(() => {
-    if (ready) initialize(quiz).catch(() => setError("No se pudo verificar el contador del servidor. Se reintentará al sincronizar."));
+    if (ready) initialize(quiz, { checkWindow: false }).catch(() => setError("No se pudo verificar el contador del servidor. Se reintentará al sincronizar."));
   }, [quiz?.id, ready]);
   useEffect(() => {
     if (!ready) return;
@@ -104,12 +109,15 @@ export function useQuizActivity({ quiz, student, api, active, getQuestion, onLim
   }, [ready, sync]);
   useEffect(() => {
     if (!ready) return;
-    return observeQuizActivity({ window, document,
+    const cleanup = observeQuizActivity({ window, document,
       explicitReturn: true,
+      onWindowStatus: setWindowBlocked,
       isActive: () => callbacks.current.active(),
       getState: () => current.current.attempt,
       onEvent: recordEvent
     });
+    observer.current = cleanup;
+    return () => { cleanup(); observer.current = null; };
   }, [ready, recordEvent]);
   // Diagnóstico independiente, únicamente para intentos con el aviso nuevo aceptado.
   useEffect(() => {
@@ -132,5 +140,5 @@ export function useQuizActivity({ quiz, student, api, active, getQuestion, onLim
     if (!quiz || value?.quizId !== quiz.id || value.attempt?.politica !== QUIZ_ACTIVITY_POLICY) return {};
     return { actividad_intento_id: value.attempt.id, actividad_eventos_pendientes: value.pending || [] };
   };
-  return { ready, state, error, initialize, leave, returnToQuiz, secondsLeft, warning: Boolean(ready && state.attempt.episodio_abierto && state.attempt.faltas < 3), payload };
+  return { ready, state, error, initialize, leave, returnToQuiz, secondsLeft, windowBlocked, warning: Boolean(ready && state.attempt.episodio_abierto && state.attempt.faltas < 3), payload };
 }

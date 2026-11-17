@@ -31,11 +31,12 @@ function saveLocal(rows) {
 const scope = (section, week, student) => ({ seccion_id: String(section), numero_semana: Number(week), alumno_id: String(student.id), numero_cuenta: String(student.numero_cuenta) });
 const belongs = (row, where) => Object.entries(where).every(([key, value]) => row[key] === value);
 
-export async function beginQuizActivity(section, week, student, quiz, clientTime, notBefore = null, diagnosticVersion = null) {
+export async function beginQuizActivity(section, week, student, quiz, clientTime, notBefore = null, diagnosticVersion = null, windowVersion = null) {
   const where = { ...scope(section, week, student), quiz_id: String(quiz.id) };
   const date = new Date(clientTime);
   if (!Number.isFinite(date.getTime())) throw new Error("Hora de aceptación inválida.");
   const row = { id: crypto.randomUUID(), ...where, nombre_completo: student.nombre_completo || "", politica: QUIZ_ACTIVITY_POLICY, aceptado_at: new Date().toISOString(), aceptado_cliente_at: date.toISOString(), faltas: 0, episodio_abierto: null, finalizado_at: null, reemplazado_at: null, ...(diagnosticVersion === 1 ? {diagnostico_version:1} : {}) };
+  if (windowVersion === 1) row.ventana_version = 1;
   if (isSupabaseConfigured && supabase) {
     let { data, error } = await supabase.from("quiz_activity_attempts").select("*").match(where).is("reemplazado_at", null).maybeSingle();
     if (error) throw error;

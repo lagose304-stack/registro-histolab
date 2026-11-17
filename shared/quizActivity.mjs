@@ -6,6 +6,7 @@ export function quizReturnDeadline(attempt) {
   return departure ? new Date(departure.hora_cliente).getTime() + QUIZ_RETURN_SECONDS * 1000 : null;
 }
 export const QUIZ_ACTIVITY_SIGNALS = {
+  ventana_reducida: "La ventana de la prueba mantuvo un ancho inferior al permitido",
   pagina_oculta: "La página dejó de estar visible",
   ventana_sin_foco: "La ventana perdió el foco",
   documento_abandonado: "Se abandonó o recargó el documento",
@@ -36,6 +37,7 @@ export function appendLocalActivity(attempt, events, now = () => new Date().toIS
     if (next.finalizado_at) continue;
     if (event.tipo === "salida") {
       if (next.faltas >= QUIZ_ACTIVITY_LIMIT || next.episodio_abierto) continue;
+      if (event.senales.includes("ventana_reducida") && next.ventana_version !== 1) throw new Error("El intento no aceptó el control de ancho.");
       next.faltas += 1;
       next.episodio_abierto = event.episodio_id;
     } else {

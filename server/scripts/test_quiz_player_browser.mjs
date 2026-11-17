@@ -30,7 +30,7 @@ const compiled = await build({
           getBySeccion:()=>ok([f().quiz]),getBySemana:()=>ok(f().quiz),getLiveState:()=>ok(f().live),
           getMiEntrega:()=>ok(f().submission||null),getActiveLiveSession:()=>Promise.resolve({success:true,activa:false}),
           startActivity:async(section,week,payload)=>{
-            if(!f().activity){f().activity=JSON.parse(localStorage.getItem('fixture-server-activity')||'null')||{id:'00000000-0000-4000-8000-000000000001',quiz_id:f().quiz.id,politica:policy,aceptado_at:new Date().toISOString(),faltas:0,episodio_abierto:null,eventos:[]};}
+            if(!f().activity){f().activity=JSON.parse(localStorage.getItem('fixture-server-activity')||'null')||{id:'00000000-0000-4000-8000-000000000001',quiz_id:f().quiz.id,politica:policy,ventana_version:payload.ventana_version,aceptado_at:new Date().toISOString(),faltas:0,episodio_abierto:null,eventos:[]};}
             return ok(structuredClone(f().activity));
           },
           saveActivity:async(section,week,id,events)=>{
@@ -48,7 +48,7 @@ const compiled = await build({
 const js = compiled.outputFiles.find(file => file.path.endsWith('.js')).text;
 const css = compiled.outputFiles.find(file => file.path.endsWith('.css'))?.text || '';
 const browser = await chromium.launch({ headless: false, ...(process.env.HISTOLAB_CHROMIUM_PATH ? { executablePath: process.env.HISTOLAB_CHROMIUM_PATH } : {}) });
-async function setup({ size = { width: 390, height: 844 }, phase = 'en_pregunta', restore = false, deny = false, review = false, reviewAttempts = null, reviewFallback = null, failReview = false } = {}) {
+async function setup({ size = { width: 390, height: 844 }, ipad = false, phase = 'en_pregunta', restore = false, deny = false, review = false, reviewAttempts = null, reviewFallback = null, failReview = false } = {}) {
   const context = await browser.newContext({ viewport: size });
   const page = await context.newPage(); const errors = [];
   page.on('pageerror', error => { errors.push(error.message); console.error('Portal fixture:', error.message); });
@@ -56,7 +56,14 @@ async function setup({ size = { width: 390, height: 844 }, phase = 'en_pregunta'
     if (route.request().url() !== TARGET_URL) throw Error(`Unexpected network: ${route.request().url()}`);
     await route.fulfill({ contentType: 'text/html', body: `<html><meta name="viewport" content="width=device-width,initial-scale=1"><style>${css}</style><body style="margin:0"><div id="root"></div><script>${js.replaceAll('</script', '<\\/script')}</script></body></html>` });
   });
-  await page.addInitScript(({ student, quiz, live, restore, deny, review, reviewAttempts, reviewFallback, failReview }) => {
+  await page.addInitScript(({ student, quiz, live, restore, deny, review, reviewAttempts, reviewFallback, failReview, ipad, size }) => {
+    if (ipad) {
+      Object.defineProperty(navigator,'platform',{configurable:true,get:()=> 'MacIntel'});
+      Object.defineProperty(navigator,'maxTouchPoints',{configurable:true,get:()=>5});
+      Object.defineProperty(screen,'width',{configurable:true,get:()=>820});
+      Object.defineProperty(screen,'height',{configurable:true,get:()=>1180});
+      Object.defineProperty(screen.orientation,'type',{configurable:true,get:()=>size.width === 820 ? 'portrait-primary' : 'landscape-primary'});
+    }
     window.fixture = { student, quiz, live, notices: [], sent: [], heartbeats: [], fullscreenRequests: 0, deny, review, reviewAttempts, reviewFallback, failReview };
     
     Element.prototype.requestFullscreen = function () { window.fixture.fullscreenRequests++;return Promise.reject(Error('fullscreen must not be requested')); };
@@ -65,7 +72,7 @@ async function setup({ size = { width: 390, height: 844 }, phase = 'en_pregunta'
       localStorage.setItem('histolab_active_quiz_session_fixture', JSON.stringify({ quiz, liveSess: live }));
       localStorage.setItem('histolab_active_quiz_fixture_sem_1', JSON.stringify({ quiz, quizAnswers: { q: { a: 'Respuesta conservada' } }, strikes: 3, incidents: [{tipo:'perdida_de_foco'}], startTime: Date.now(), endTime: Date.now() + 90000 }));
     }
-  }, { student, quiz, live: { ...live, estado: phase }, restore, deny, review, reviewAttempts, reviewFallback, failReview });
+  }, { student, quiz, live: { ...live, estado: phase }, restore, deny, review, reviewAttempts, reviewFallback, failReview, ipad, size });
   await page.goto(TARGET_URL);
   async function start() {
     await page.getByRole('button', { name: 'Pruebas semanales', exact: true }).click();
@@ -82,6 +89,46 @@ async function leave(page){await page.evaluate(()=>{window.dispatchEvent(new Eve
 async function back(page){await page.evaluate(()=>{Object.defineProperty(document,'visibilityState',{configurable:true,get:()=> 'visible'});document.dispatchEvent(new Event('visibilitychange'));window.dispatchEvent(new Event('focus'));});await page.getByRole('button',{name:'Regresar a la prueba',exact:true}).click();await page.waitForFunction(()=>!window.fixture.activity?.episodio_abierto);}
 try{
  await mkdir('artifacts/quiz-activity',{recursive:true});
+ // Contrato de iPad simulado: no afirma validar el WebKit de un dispositivo físico.
+ for (const size of [{width:1180,height:820},{width:820,height:1180}]) {
+  const f=await setup({ipad:true,size});const {page}=f;
+  await f.start();await playable(page);await page.getByRole('textbox').fill('Respuesta al reducir Safari');
+  await page.setViewportSize({width:375,height:640});
+  await page.getByRole('alertdialog').getByText('Falta 1 de 3',{exact:true}).waitFor();
+  await page.getByText('Se detectó una ventana reducida.',{exact:true}).waitFor();
+  await page.getByRole('button',{name:'Regresar a la prueba',exact:true}).click({force:true});
+  assert.equal(await page.evaluate(()=>window.fixture.activity.faltas),1);
+  assert(await page.evaluate(()=>Boolean(window.fixture.activity.episodio_abierto)),'No permite volver con ventana pequeña');
+  await page.screenshot({path:`artifacts/quiz-activity/ipad-reducido-${size.width}.png`});
+  const overflow=await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth);assert.equal(overflow,false);
+  await page.setViewportSize(size);await back(page);await playable(page);
+  assert.equal(await page.getByRole('textbox').inputValue(),'Respuesta al reducir Safari');
+  await page.setViewportSize({width:524,height:681});
+  await page.getByRole('alertdialog').getByText('Falta 2 de 3',{exact:true}).waitFor();
+  await page.reload();await page.getByRole('alertdialog').getByText('Falta 2 de 3',{exact:true}).waitFor();
+  await page.setViewportSize(size);await back(page);await playable(page);
+  await page.setViewportSize({width:600,height:750});
+  await page.getByRole('alertdialog').getByText('Prueba bloqueada',{exact:true}).waitFor();
+  await page.waitForFunction(()=>window.fixture.sent.length===1);
+  assert.equal(await page.evaluate(()=>window.fixture.sent[0].respuestas.q.a),'Respuesta al reducir Safari');
+  assert.equal(f.errors.length,0);await f.context.close();
+ }
+ {
+  const f=await setup({ipad:true,size:{width:375,height:640}});await f.start();
+  await f.page.getByRole('alert').filter({hasText:'Amplía Safari hasta ocupar todo el ancho'}).waitFor();
+  assert.equal(await f.page.evaluate(()=>Boolean(window.fixture.activity)),false,'No crea un intento ni falta al empezar reducido');
+  await f.context.close();
+ }
+ {
+  const f=await setup({ipad:true,size:{width:1180,height:820}});const {page}=f;
+  await f.start();await playable(page);await page.getByRole('textbox').fill('Respuestas conservadas al vencer');
+  await page.setViewportSize({width:375,height:640});await page.getByRole('alertdialog').waitFor();
+  await page.waitForFunction(()=>window.fixture.sent.length===1,{},{timeout:15000});
+  assert.equal(await page.evaluate(()=>window.fixture.sent[0].auditoria.motivo_finalizacion),'falta_grave_tiempo');
+  assert.equal(await page.evaluate(()=>window.fixture.sent[0].respuestas.q.a),'Respuestas conservadas al vencer');
+  assert.equal(await page.evaluate(()=>window.fixture.activity.faltas),1,'El vencimiento no fabrica tres faltas');
+  assert.deepEqual(f.errors,[]);await f.context.close();
+ }
  for(const size of [{width:320,height:640},{width:640,height:360},{width:768,height:1024},{width:1024,height:768}]){
   const fixture=await setup({size});const {page}=fixture;
   await fixture.start();await playable(page);
