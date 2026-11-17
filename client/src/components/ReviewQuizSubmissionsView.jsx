@@ -2644,7 +2644,7 @@ export default function ReviewQuizSubmissionsView({
                                     </div>
 
                                     {/* Botones de Calificación */}
-                                    <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.3rem", paddingTop: "0.35rem", borderTop: "1px dashed #cbd5e1" }}>
+                                    <div className="quiz-quick__evaluations" style={{ display: "flex", justifyContent: "flex-end", gap: "0.3rem", paddingTop: "0.35rem", borderTop: "1px dashed #cbd5e1" }}>
                                       <button
                                         type="button"
                                         disabled={curEval?.origen === "automatica"}
@@ -2771,7 +2771,7 @@ export default function ReviewQuizSubmissionsView({
                                             </span>
                                           </div>
 
-                                          <div style={{ display: "flex", alignItems: "center", gap: "0.25rem" }}>
+                                          <div className="quiz-quick__evaluations" style={{ display: "flex", alignItems: "center", gap: "0.25rem" }}>
                                             <button
                                               type="button"
                                               disabled={slotEval?.origen === "automatica"}
