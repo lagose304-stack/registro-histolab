@@ -2,7 +2,9 @@ export const ABSENCE_MESSAGE = "Tienes una falta injustificada en esta práctica
 
 export function practiceAbsent(student, week, makeup = null) {
   const attendance = student?.asistencias || {};
-  const baseAbsent = [`asistencia_${Number(week)}`, `semana_${Number(week)}`]
-    .some(key => attendance[key] === "Falta injustificada");
+  const number = Number(week);
+  const canonical = `asistencia_${number}`;
+  const state = Object.hasOwn(attendance, canonical) ? attendance[canonical] : attendance[`semana_${number}`];
+  const baseAbsent = state === "Falta injustificada";
   return baseAbsent || makeup?.asistencia_reposicion === "Falta injustificada";
 }

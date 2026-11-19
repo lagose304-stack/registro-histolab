@@ -20,7 +20,7 @@ import { supabase, isSupabaseConfigured } from "../db/supabase.js";
 import { assertStudentAccountAvailable, assertLocalStudentAccountAvailable, DUPLICATE_ACCOUNT_MESSAGE } from "../services/studentEnrollment.js";
 import { normalizeAccountEmail, validAccountEmail } from "../../../shared/accountActivation.mjs";
 import { deleteStudentAccount } from "../services/studentAccountDeletion.js";
-import { studentMakeups, destinationMakeup } from "../services/studentMakeups.js";
+import { studentMakeups, destinationMakeup, loadOriginMakeups } from "../services/studentMakeups.js";
 
 export async function hasPracticeAbsence(section, account, career, week, attendance) {
   const makeup = await destinationMakeup(section, account, week);
@@ -37,26 +37,35 @@ export async function hasPracticeAbsence(section, account, career, week, attenda
   return practiceAbsent(student, week, requests.find(row => Number(row.numero_semana) === Number(week)));
 }
 
-async function assertAttendanceGrades(section, account, career, notes, attendance) {
-  if (!notes) return;
-  let { topics } = getLocalAcademicSettings(career);
+async function loadAttendanceTopics(career) {
   if (isSupabaseConfigured && supabase) {
     const result = await supabase.from("temario").select("*");
     if (result.error) throw result.error;
-    topics = result.data.filter(topic => normalizeSectionCareer(topic.carrera) === normalizeSectionCareer(career));
+    return result.data.filter(topic => normalizeSectionCareer(topic.carrera) === normalizeSectionCareer(career));
   }
+  return getLocalAcademicSettings(career).topics;
+}
+
+function positivePracticeWeeks(notes, topics) {
   const weeks = new Set();
   for (const [key, value] of Object.entries(notes)) {
     if (!(Number(value) > 0)) continue;
-    const quiz = key.match(/^(?:prueba_|examencito_)(\d+)(?:_real)?$/) || key.match(/^Prueba de la semana (\d+)$/);
+    const quiz = key.match(/^(?:prueba_|examencito_)(\d+)(?:_real)?$/) || key.match(/^(?:Prueba|Examencito) de la semana (\d+)$/);
     if (quiz) weeks.add(Number(quiz[1]));
     const topic = topics.find(topic => [`manual_${topic.id}`, `manual_tema_${topic.numero_tema}`, `Manual de ${topic.titulo}`, String(topic.id)].includes(key));
-    if (topic) weeks.add(Number(topic.semana));
+    if (topic && Number(topic.semana) > 0) weeks.add(Number(topic.semana));
   }
-  for (const week of weeks) if (await hasPracticeAbsence(section, account, career, week, attendance)) {
-    const error = new Error("No puedes registrar notas positivas con falta injustificada en esta práctica.");
-    error.status = 409;
-    throw error;
+  return weeks;
+}
+
+function attendanceGradeConflict(week) {
+  return Object.assign(new Error(`No puedes registrar notas positivas con falta injustificada en la práctica de la semana ${week}.`), { status: 409 });
+}
+
+async function assertAttendanceGrades(section, account, career, notes, attendance) {
+  if (!notes || !Object.values(notes).some(value => Number(value) > 0)) return;
+  for (const week of positivePracticeWeeks(notes, await loadAttendanceTopics(career))) {
+    if (await hasPracticeAbsence(section, account, career, week, attendance)) throw attendanceGradeConflict(week);
   }
 }
 
@@ -747,7 +756,6 @@ export const updateBatchGrades = async (req, res) => {
     const tableName = await getTableForSeccion(seccion_id, carrera);
 
     const accounts = updates.map(item => String(item.numero_cuenta ?? "").trim());
-    for (const item of updates) await assertAttendanceGrades(seccion_id, item.numero_cuenta, carrera, item.notas, item.asistencias);
     if (accounts.some(account => !account) || new Set(accounts).size !== accounts.length) {
       return res.status(400).json({success:false,message:"Cada actualización debe identificar una cuenta distinta."});
     }
@@ -760,7 +768,7 @@ export const updateBatchGrades = async (req, res) => {
     };
     let rows;
     if (isSupabaseConfigured && supabase) {
-      const loaded = await supabase.from(tableName).select("id,numero_cuenta,updated_at")
+      const loaded = await supabase.from(tableName).select("id,numero_cuenta,updated_at,notas,asistencias")
         .eq("seccion_id", seccion_id).in("numero_cuenta", accounts);
       if (loaded.error) return res.status(503).json({success:false,message:"No pudimos verificar las matrículas antes de guardar."});
       rows = loaded.data || [];
@@ -770,19 +778,54 @@ export const updateBatchGrades = async (req, res) => {
     if (rows.length !== accounts.length || accounts.some(account => rows.filter(row => String(row.numero_cuenta) === account).length !== 1)) {
       return res.status(409).json({success:false,message:"La matrícula cambió. Actualiza la lista de estudiantes antes de guardar."});
     }
+    const rowsByAccount = new Map(rows.map(row => [String(row.numero_cuenta), row]));
     for (let index = 0; index < updates.length; index++) {
-      const item = updates[index], row = rows.find(row => String(row.numero_cuenta) === accounts[index]);
+      const item = updates[index], row = rowsByAccount.get(accounts[index]);
       if ((item.id && String(item.id) !== String(row.id)) ||
           (item.expected_updated_at !== undefined && item.expected_updated_at !== row.updated_at)) {
         return res.status(409).json({success:false,message:"Las notas o la matrícula cambiaron en otra sesión. Actualiza la lista antes de guardar."});
       }
     }
+    const gradeChanges = updates.flatMap((item, index) => {
+      if (!item.notas) return [];
+      const account = accounts[index];
+      const row = rowsByAccount.get(account);
+      const previous = sanitizeNotasPayload(row.notas);
+      const changed = Object.fromEntries(Object.entries(item.notas).filter(([key, value]) =>
+        Number(value) > 0 && Number(value) !== Number(previous[key])));
+      const attendance = item.asistencias === undefined ? row : item;
+      const newAbsences = Object.keys(item.asistencias || {}).flatMap(key => {
+        const week = Number(/^(?:asistencia|semana)_(\d+)$/.exec(key)?.[1]);
+        return week && practiceAbsent(attendance, week) && !practiceAbsent(row, week) ? [week] : [];
+      });
+      return Object.keys(changed).length || newAbsences.length ? [{ account, item, attendance, changed, newAbsences }] : [];
+    });
+    if (gradeChanges.length) {
+      let topics, makeups;
+      try {
+        [topics, makeups] = await Promise.all([
+          loadAttendanceTopics(tableName.replace("estudiantes_", "")),
+          loadOriginMakeups(seccion_id, gradeChanges.map(change => change.account))
+        ]);
+      } catch (error) {
+        console.error("Error al verificar asistencia del lote:", error);
+        return res.status(503).json({ success: false, message: "No se pudo verificar la asistencia antes de guardar las calificaciones. Vuelve a intentarlo." });
+      }
+      for (const { account, item, attendance, changed, newAbsences } of gradeChanges) {
+        const introducedConflict = [...positivePracticeWeeks(item.notas, topics)].find(week => newAbsences.includes(week));
+        if (introducedConflict) throw attendanceGradeConflict(introducedConflict);
+        for (const week of positivePracticeWeeks(changed, topics)) {
+          const makeup = makeups.find(row => String(row.numero_cuenta) === account && Number(row.numero_semana) === week);
+          if (practiceAbsent(attendance, week, makeup)) throw attendanceGradeConflict(week);
+        }
+      }
+    }
     if (isSupabaseConfigured && supabase) {
       const results = await Promise.all(updates.map((item,index) => {
-        const row = rows.find(row => String(row.numero_cuenta) === accounts[index]);
+        const row = rowsByAccount.get(accounts[index]);
         let query = withGradeActor(supabase.from(tableName).update(gradePayload(item)), req.instructor)
           .eq("seccion_id",seccion_id).eq("numero_cuenta",accounts[index]).eq("id",row.id);
-        if (item.expected_updated_at !== undefined) query = item.expected_updated_at === null ? query.is("updated_at",null) : query.eq("updated_at",item.expected_updated_at);
+        query = row.updated_at == null ? query.is("updated_at", null) : query.eq("updated_at", row.updated_at);
         return query.select("id,numero_cuenta,updated_at");
       }));
       const updatedCount = results.filter(result => !result.error && result.data?.length === 1).length;

@@ -19,7 +19,7 @@ const seed=()=>[
   {id:"a2",numero_cuenta:"A",seccion_id:"s2",carrera:"Medicina",activo:true,notas:{prueba_1:2},updated_at:"2026-11-01T00:00:00Z"}
 ];
 function setup(configured=true, gradeHistory=[], now=null){
- const fixture={configured,rows:Object.fromEntries(tables.map(t=>[t,[]])),fileWrites:0,dbWrites:0,offline:false,failAccount:null,conflictAccount:null};
+ const fixture={configured,rows:Object.fromEntries(tables.map(t=>[t,[]])),reads:{},fileWrites:0,dbWrites:0,offline:false,failAccount:null,conflictAccount:null};
  fixture.rows.estudiantes_medicina=seed();fixture.rows.secciones=[{id:"s1",carrera:"Medicina"},{id:"s2",carrera:"Medicina"}];
  fixture.rows.historial_notas=gradeHistory;
  fixture.local={gradeHistory:{entries:gradeHistory},estudiantes_medicina:[{...seed()[0],id:"stale-local-id",notas:{prueba_1:99}}]};
@@ -33,6 +33,8 @@ function setup(configured=true, gradeHistory=[], now=null){
   ilike(key,pattern){const text=pattern.slice(1,-1).replace(/\\([\\%_])/g,"$1").toLowerCase();filters.push(row=>row[key].toLowerCase().includes(text));return q;},
   maybeSingle(){single=true;return q;},update(value){operation="update";payload=value;return q;},
   then(resolve,reject){return Promise.resolve().then(()=>{
+   if(operation==="read")fixture.reads[table]=(fixture.reads[table]||0)+1;
+   if(operation==="read"&&table===fixture.failRead)return {error:{code:"READ_FAILED"}};
    if(fixture.offline)return {error:{code:"OFFLINE"}};
    let selected=(fixture.rows[table]||[]).filter(row=>filters.every(f=>f(row)));
    if(descending)selected.sort((a,b)=>b[descending]-a[descending]);
@@ -182,17 +184,43 @@ for(const notes of [{prueba_1:5},{prueba_1_real:6},{manual_topic1:1},{manual_tem
 assert.equal((await call(api.updateBatchGrades,batch([{numero_cuenta:'A',notas:{prueba_1:0,prueba_1_real:0,prueba_2:5,manual_topic2:1}}]))).status,200);
 assert.equal(juan.notas.prueba_1,0);assert.equal(juan.notas.prueba_2,5);
 juan.asistencias.asistencia_2='Falta injustificada';
-assert.equal((await call(api.updateBatchGrades,batch([{numero_cuenta:'A',notas:{prueba_1:0,prueba_2:5}}]))).status,409);
+assert.equal((await call(api.updateBatchGrades,batch([{numero_cuenta:'A',notas:{prueba_1:0,prueba_2:4}}]))).status,409);
 await assert.rejects(api.updateEstudianteGradeDirect('s1','A','Medicina','prueba_2',5,true),/falta injustificada/);
 juan.asistencias.asistencia_2='Falta justificada';
+juan.asistencias.semana_2='Falta injustificada'; // Alias antiguo antes de corregir el registro principal.
 fixture.rows.reposiciones_estudiantes=[{id:'makeup',seccion_origen_id:'s1',seccion_destino_id:'host',numero_cuenta:'A',numero_semana:2,estado:'asignada',asistencia_reposicion:'Asistio'}];
 assert.equal((await call(api.updateBatchGrades,batch([{numero_cuenta:'A',notas:{prueba_1:0,prueba_2:4,manual_topic2:1}}]))).status,200);
 fixture.rows.reposiciones_estudiantes[0].asistencia_reposicion='Falta injustificada';
-assert.equal((await call(api.updateBatchGrades,batch([{numero_cuenta:'A',notas:{prueba_2:4}}]))).status,409);
-assert.equal((await call(api.updateBatchGrades,batch([{numero_cuenta:'A',notas:{manual_topic2:1}}]))).status,409);
+assert.equal((await call(api.updateBatchGrades,batch([{numero_cuenta:'A',notas:{prueba_2:5}}]))).status,409);
+assert.equal((await call(api.updateBatchGrades,batch([{numero_cuenta:'A',notas:{manual_topic2:0.5}}]))).status,409);
 assert.equal(await api.hasPracticeAbsence('host','A','Medicina',2),true);
 assert.equal(juan.asistencias.asistencia_2,'Falta justificada');
 console.log('PASS asistencia y notas: semana de contenido, manuales por ID y alias, dos faltas, reposición asistida y ausente, calificación directa y matrícula original.');
+
+({api,fixture}=setup());
+const studentWithOldGrade=fixture.rows.estudiantes_medicina[0];
+studentWithOldGrade.asistencias={semana_1:'Falta injustificada'};
+result=await call(api.updateBatchGrades,batch([
+  {numero_cuenta:'A',notas:{prueba_1:1,prueba_2:5},asistencias:studentWithOldGrade.asistencias},
+  {numero_cuenta:'B',notas:{prueba_1:3,prueba_2:2}}
+]));
+assert.equal(result.status,200);
+assert.equal(studentWithOldGrade.notas.prueba_1,1);
+assert.equal(fixture.reads.estudiantes_medicina,1);
+assert.equal(fixture.reads.temario,1);
+assert.equal(fixture.reads.reposiciones_estudiantes,1);
+result=await call(api.updateBatchGrades,batch([
+  {numero_cuenta:'A',notas:{prueba_1:1,prueba_2:5},asistencias:{...studentWithOldGrade.asistencias,asistencia_2:'Falta injustificada'}}
+]));
+assert.equal(result.status,409);
+assert.match(result.body.message,/semana 2/);
+assert.equal(studentWithOldGrade.asistencias.asistencia_2,undefined);
+fixture.failRead='reposiciones_estudiantes';
+result=await call(api.updateBatchGrades,batch([{numero_cuenta:'A',notas:{prueba_1:1,prueba_2:3}}]));
+assert.equal(result.status,503);
+assert.match(result.body.message,/verificar la asistencia/);
+assert.equal(studentWithOldGrade.notas.prueba_2,5);
+console.log('PASS validación por lote: comparte consultas, conserva notas anteriores y detiene el guardado si no puede verificar la asistencia.');
 
 ({api,fixture}=setup(true,[],"2026-11-06T17:30:00Z"));
 fixture.rows.secciones[0]={id:'s1',carrera:'Medicina',dia:'Viernes',hora_inicio:'11:00',hora_fin:'13:00'};
