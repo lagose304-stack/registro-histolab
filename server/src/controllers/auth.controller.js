@@ -10,11 +10,6 @@ dotenv.config();
 
 const JWT_SECRET = process.env.JWT_SECRET;
 const INSTRUCTOR_SESSION_SECONDS = 7 * 24 * 60 * 60;
-const MAX_FAILED_ATTEMPTS = 5;
-const LOCKOUT_MINUTES = 5;
-
-// Cache en memoria para bloqueos temporales por intentos fallidos
-const failedAttemptsMap = new Map();
 
 function generateToken(instructor, sessionId) {
   return jwt.sign(
@@ -102,7 +97,7 @@ export const loginInstructor = async (req, res) => {
     const userInput = email.trim();
     let targetEmail = userInput.toLowerCase();
 
-    // 1. Si el usuario ingresó su Número de Cuenta en lugar de un correo:
+    // Resolver el correo cuando se ingresa un número de cuenta.
     if (!userInput.includes("@")) {
       const { data: profileByAccount, error: accError } = await supabase
         .from("instructores")
@@ -119,49 +114,22 @@ export const loginInstructor = async (req, res) => {
       targetEmail = profileByAccount.correo.toLowerCase();
     }
 
-    // 2. Control de Fuerza Bruta / Bloqueo Temporal
-    const attemptRecord = failedAttemptsMap.get(targetEmail);
-    if (attemptRecord && attemptRecord.lockedUntil && attemptRecord.lockedUntil > Date.now()) {
-      const remainingMinutes = Math.ceil((attemptRecord.lockedUntil - Date.now()) / (60 * 1000));
-      return res.status(429).json({
-        success: false,
-        message: `Cuenta bloqueada temporalmente por intentos fallidos. Intenta de nuevo en ${remainingMinutes} minuto(s).`
-      });
-    }
-
-    // 3. Autenticación contra Supabase Auth (auth.users)
+    // Autenticación contra Supabase Auth (auth.users).
     const { data: authData, error: authError } = await createSupabaseLoginClient().auth.signInWithPassword({
       email: targetEmail,
       password: password
     });
 
     if (authError || !authData?.user) {
-      const currentAttempts = (attemptRecord?.count || 0) + 1;
-      let lockedUntil = null;
-      if (currentAttempts >= MAX_FAILED_ATTEMPTS) {
-        lockedUntil = Date.now() + LOCKOUT_MINUTES * 60 * 1000;
-      }
-      failedAttemptsMap.set(targetEmail, { count: currentAttempts, lockedUntil });
-
-      if (currentAttempts >= MAX_FAILED_ATTEMPTS) {
-        return res.status(429).json({
-          success: false,
-          message: `Has superado el límite de intentos fallidos. Acceso bloqueado por ${LOCKOUT_MINUTES} minutos por seguridad.`
-        });
-      }
-
       return res.status(401).json({
         success: false,
         message: "Credenciales inválidas. Verifica tu correo/número de cuenta y contraseña."
       });
     }
 
-    // Resetear intentos fallidos
-    failedAttemptsMap.delete(targetEmail);
-
     const userId = authData.user.id;
 
-    // 4. Obtener los datos del instructor desde la tabla public.instructores
+    // Obtener los datos del instructor desde la tabla public.instructores.
     const { data: instructorProfile, error: profileError } = await supabase
       .from("instructores")
       .select("*")
