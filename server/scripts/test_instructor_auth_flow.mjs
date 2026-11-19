@@ -15,6 +15,10 @@ const module={exports:{}};vm.runInNewContext(bundle.outputFiles[0].text,{module,
 async function login(email,password='test-password'){let status=200,payload;await module.exports.loginInstructor({body:{email,password},headers:{},socket:{remoteAddress:'192.0.2.1'}},{status(value){status=value;return this},json(value){payload=value;return this}});return {status,payload};}
 async function authenticate(token){let status=200,accepted=false;await module.exports.authenticateInstructor({headers:{authorization:'Bearer '+token}},{status(value){status=value;return this},json(){return this}},()=>accepted=true);return {status,accepted};}
 for(const profile of profiles){const first=await login(profile.correo);assert.equal(first.status,200);assert.equal(first.payload.instructor.rol,profile.rol);assert((await authenticate(first.payload.token)).accepted);const second=await login(profile.numero_cuenta);assert.equal(second.status,200);assert((await authenticate(second.payload.token)).accepted);if(profile.rol==='Creador')assert((await authenticate(first.payload.token)).accepted,'El creador conserva sesiones simultáneas');else assert.equal((await authenticate(first.payload.token)).status,401,'La sesión anterior se revoca para otros roles');}
-assert.equal((await login(profiles[0].correo,'bad')).status,401);
+for (let attempt = 0; attempt < 6; attempt++) {
+  const identifier = attempt % 2 ? profiles[0].numero_cuenta : profiles[0].correo;
+  assert.equal((await login(identifier, 'bad')).status, 401);
+}
+assert.equal((await login(profiles[0].numero_cuenta)).status, 200, 'La contraseña correcta permite entrar de inmediato tras varios fallos');
 profiles[0].activo=false;assert.equal((await login(profiles[0].correo)).status,403);
 console.log('PASS: login por correo/cuenta, JWT, sesiones y reemplazo para Instructor/Coordinador, sesiones simultáneas del Creador y rechazo de credenciales/cuenta inactiva.');
