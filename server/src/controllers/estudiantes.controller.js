@@ -1,6 +1,5 @@
 import { gradeInstructorName, localGradeSnapshot, withGradeActor } from "../services/gradeHistory.js";
 import { getAttendanceKeys, getAttendanceWindow } from "../../../shared/attendanceWindow.mjs";
-import { practiceAbsent } from "../../../shared/practiceAttendance.mjs";
 import { canViewSection, isInstructorTitular, isSectionAssignedToInstructor, matchesInstructor } from "../../../shared/sectionAccess.mjs";
 import { hasAdministrationAccess } from "../../../shared/instructorRoles.mjs";
 import { normalizeSectionCareer } from "../../../shared/sectionCode.mjs";
@@ -20,54 +19,6 @@ import { supabase, isSupabaseConfigured } from "../db/supabase.js";
 import { assertStudentAccountAvailable, assertLocalStudentAccountAvailable, DUPLICATE_ACCOUNT_MESSAGE } from "../services/studentEnrollment.js";
 import { normalizeAccountEmail, validAccountEmail } from "../../../shared/accountActivation.mjs";
 import { deleteStudentAccount } from "../services/studentAccountDeletion.js";
-import { studentMakeups, destinationMakeup, loadOriginMakeups } from "../services/studentMakeups.js";
-
-export async function hasPracticeAbsence(section, account, career, week, attendance) {
-  const makeup = await destinationMakeup(section, account, week);
-  if (makeup) return practiceAbsent(null, week, makeup);
-  const table = await getTableForSeccion(section, career);
-  let student = (inMemoryEstudiantes[table] || []).find(row => String(row.seccion_id) === String(section) && String(row.numero_cuenta) === String(account));
-  if (isSupabaseConfigured && supabase) {
-    const result = await supabase.from(table).select("*").eq("seccion_id", section).eq("numero_cuenta", account).maybeSingle();
-    if (result.error) throw result.error;
-    student = result.data;
-  }
-  const requests = await studentMakeups(section, account);
-  if (attendance !== undefined && student) student = { ...student, asistencias: attendance };
-  return practiceAbsent(student, week, requests.find(row => Number(row.numero_semana) === Number(week)));
-}
-
-async function loadAttendanceTopics(career) {
-  if (isSupabaseConfigured && supabase) {
-    const result = await supabase.from("temario").select("*");
-    if (result.error) throw result.error;
-    return result.data.filter(topic => normalizeSectionCareer(topic.carrera) === normalizeSectionCareer(career));
-  }
-  return getLocalAcademicSettings(career).topics;
-}
-
-function positivePracticeWeeks(notes, topics) {
-  const weeks = new Set();
-  for (const [key, value] of Object.entries(notes)) {
-    if (!(Number(value) > 0)) continue;
-    const quiz = key.match(/^(?:prueba_|examencito_)(\d+)(?:_real)?$/) || key.match(/^(?:Prueba|Examencito) de la semana (\d+)$/);
-    if (quiz) weeks.add(Number(quiz[1]));
-    const topic = topics.find(topic => [`manual_${topic.id}`, `manual_tema_${topic.numero_tema}`, `Manual de ${topic.titulo}`, String(topic.id)].includes(key));
-    if (topic && Number(topic.semana) > 0) weeks.add(Number(topic.semana));
-  }
-  return weeks;
-}
-
-function attendanceGradeConflict(week) {
-  return Object.assign(new Error(`No puedes registrar notas positivas con falta injustificada en la práctica de la semana ${week}.`), { status: 409 });
-}
-
-async function assertAttendanceGrades(section, account, career, notes, attendance) {
-  if (!notes || !Object.values(notes).some(value => Number(value) > 0)) return;
-  for (const week of positivePracticeWeeks(notes, await loadAttendanceTopics(career))) {
-    if (await hasPracticeAbsence(section, account, career, week, attendance)) throw attendanceGradeConflict(week);
-  }
-}
 
 const publicStudent = row => { if(!row)return row;const {contrasena,current_session_token,auth_user_id,...safe}=row;return safe; };
 const conflictMessage = error => /correo|email/i.test(error?.message||"") ? "Este correo ya está registrado en otra cuenta activa." : DUPLICATE_ACCOUNT_MESSAGE;
@@ -544,7 +495,6 @@ export const updateEstudiante = async (req, res) => {
 
     // Sanitizar canónicamente el objeto notas
     const sanitizedNotas = notas ? sanitizeNotasPayload(notas) : undefined;
-    await assertAttendanceGrades(seccion_id, numero_cuenta, carrera, sanitizedNotas, asistencias);
 
     // Validación de reglas académicas de calificaciones:
     // Manuales: máximo 1.000 punto | Pruebas: máximo 5.000 puntos
@@ -768,7 +718,7 @@ export const updateBatchGrades = async (req, res) => {
     };
     let rows;
     if (isSupabaseConfigured && supabase) {
-      const loaded = await supabase.from(tableName).select("id,numero_cuenta,updated_at,notas,asistencias")
+      const loaded = await supabase.from(tableName).select("id,numero_cuenta,updated_at")
         .eq("seccion_id", seccion_id).in("numero_cuenta", accounts);
       if (loaded.error) return res.status(503).json({success:false,message:"No pudimos verificar las matrículas antes de guardar."});
       rows = loaded.data || [];
@@ -784,40 +734,6 @@ export const updateBatchGrades = async (req, res) => {
       if ((item.id && String(item.id) !== String(row.id)) ||
           (item.expected_updated_at !== undefined && item.expected_updated_at !== row.updated_at)) {
         return res.status(409).json({success:false,message:"Las notas o la matrícula cambiaron en otra sesión. Actualiza la lista antes de guardar."});
-      }
-    }
-    const gradeChanges = updates.flatMap((item, index) => {
-      if (!item.notas) return [];
-      const account = accounts[index];
-      const row = rowsByAccount.get(account);
-      const previous = sanitizeNotasPayload(row.notas);
-      const changed = Object.fromEntries(Object.entries(item.notas).filter(([key, value]) =>
-        Number(value) > 0 && Number(value) !== Number(previous[key])));
-      const attendance = item.asistencias === undefined ? row : item;
-      const newAbsences = Object.keys(item.asistencias || {}).flatMap(key => {
-        const week = Number(/^(?:asistencia|semana)_(\d+)$/.exec(key)?.[1]);
-        return week && practiceAbsent(attendance, week) && !practiceAbsent(row, week) ? [week] : [];
-      });
-      return Object.keys(changed).length || newAbsences.length ? [{ account, item, attendance, changed, newAbsences }] : [];
-    });
-    if (gradeChanges.length) {
-      let topics, makeups;
-      try {
-        [topics, makeups] = await Promise.all([
-          loadAttendanceTopics(tableName.replace("estudiantes_", "")),
-          loadOriginMakeups(seccion_id, gradeChanges.map(change => change.account))
-        ]);
-      } catch (error) {
-        console.error("Error al verificar asistencia del lote:", error);
-        return res.status(503).json({ success: false, message: "No se pudo verificar la asistencia antes de guardar las calificaciones. Vuelve a intentarlo." });
-      }
-      for (const { account, item, attendance, changed, newAbsences } of gradeChanges) {
-        const introducedConflict = [...positivePracticeWeeks(item.notas, topics)].find(week => newAbsences.includes(week));
-        if (introducedConflict) throw attendanceGradeConflict(introducedConflict);
-        for (const week of positivePracticeWeeks(changed, topics)) {
-          const makeup = makeups.find(row => String(row.numero_cuenta) === account && Number(row.numero_semana) === week);
-          if (practiceAbsent(attendance, week, makeup)) throw attendanceGradeConflict(week);
-        }
       }
     }
     if (isSupabaseConfigured && supabase) {
@@ -968,7 +884,6 @@ export const updateEstudianteGradeDirect = async (seccion_id, numero_cuenta, car
   }
 
   if (!currentEst) { if (strict) throw new Error("No se encontró el estudiante para sincronizar la nota."); return false; }
-  if (Number(value) > 0) await assertAttendanceGrades(seccion_id, numero_cuenta, carrera, { [key]: value });
 
   const currentNotas = { ...(currentEst.notas || {}) };
   if (currentNotas[key] === value) return true;
@@ -1083,7 +998,7 @@ export const saveWeeklyAttendance = async (req, res) => {
     const accounts = updates.map(item => String(item.numero_cuenta));
     let rows = inMemoryEstudiantes[tableName] || [];
     if (isSupabaseConfigured && supabase) {
-      const result = await supabase.from(tableName).select("numero_cuenta,asistencias,notas")
+      const result = await supabase.from(tableName).select("numero_cuenta,asistencias")
         .eq("seccion_id", seccion_id).in("numero_cuenta", accounts);
       if (result.error) throw result.error;
       rows = result.data;
@@ -1097,19 +1012,14 @@ export const saveWeeklyAttendance = async (req, res) => {
       const value = updates.find(item => String(item.numero_cuenta) === String(row.numero_cuenta)).estado;
       return { row, asistencias: { ...(row.asistencias || {}), ...Object.fromEntries(attendanceKeys.map(key => [key, value])) } };
     });
-    // La clave corresponde al contenido de esta práctica, nunca a la semana de rendición.
-    const regularWeek = !window.isExam;
-    const absenceNotes = change => regularWeek && practiceAbsent(change, weekNumber)
-      ? { notas: sanitizeNotasPayload({ ...(change.row.notas || {}), [`prueba_${weekNumber}`]: 0, [`prueba_${weekNumber}_real`]: 0 }) } : {};
     if (isSupabaseConfigured && supabase) {
       for (const { row, asistencias } of changes) {
         if (!getAttendanceWindow(section, weeks, weekNumber, new Date(), attendanceEvents).isOpen) {
           return res.status(403).json({ message: "El horario para pasar lista terminó durante el guardado. Actualiza la lista para comprobar los registros." });
         }
-        let query = withGradeActor(supabase.from(tableName).update({ asistencias, ...absenceNotes({row, asistencias}), updated_at: new Date().toISOString() }), req.instructor)
+        let query = withGradeActor(supabase.from(tableName).update({ asistencias, updated_at: new Date().toISOString() }), req.instructor)
           .eq("seccion_id", seccion_id).eq("numero_cuenta", row.numero_cuenta);
         query = row.asistencias === null ? query.is("asistencias", null) : query.eq("asistencias", JSON.stringify(row.asistencias));
-        if (regularWeek && practiceAbsent({asistencias}, weekNumber)) query = row.notas == null ? query.is("notas", null) : query.eq("notas", JSON.stringify(row.notas));
         const result = await query.select("numero_cuenta");
         if (result.error) throw result.error;
         if (!result.data?.length) {
@@ -1119,7 +1029,7 @@ export const saveWeeklyAttendance = async (req, res) => {
     } else {
       const nextRows = (inMemoryEstudiantes[tableName] || []).map(row => {
         const change = row.seccion_id === seccion_id && changes.find(item => item.row === row);
-        return change ? { ...row, asistencias: change.asistencias, ...absenceNotes(change), updated_at: new Date().toISOString() } : row;
+        return change ? { ...row, asistencias: change.asistencias, updated_at: new Date().toISOString() } : row;
       });
       savePersistentEstudiantes({ ...inMemoryEstudiantes, [tableName]: nextRows }, true);
       inMemoryEstudiantes[tableName] = nextRows;
@@ -1168,14 +1078,6 @@ export const saveWeeklyManuals = async (req, res) => {
       rows = results[2].data;
     }
     const allowed = topics.filter(topic => Number(topic.semana) === number && topic.tiene_manual !== false);
-    for (const update of updates) {
-      if (update.manuales.some(manual => manual.nota > 0) && await hasPracticeAbsence(seccion_id, update.numero_cuenta, schedule.section.carrera, number)) {
-        return res.status(409).json({ message: "No puedes registrar una nota de manual con falta injustificada en esta práctica o su reposición." });
-      }
-    }
-    if (rows.some(row => practiceAbsent(row, number) && updates.find(item => String(item.numero_cuenta) === String(row.numero_cuenta))?.manuales.some(manual => manual.nota > 0))) {
-      return res.status(409).json({ message: "No puedes registrar una nota de manual con falta injustificada en esta práctica." });
-    }
     if (rows.length !== updates.length) return res.status(404).json({ message: "Actualiza la lista de estudiantes antes de guardar." });
     if (updates.some(item => item.manuales.some(manual => !allowed.some(topic => String(topic.id) === String(manual.tema_id))))) {
       return res.status(400).json({ message: "Algún manual no pertenece a la semana seleccionada." });

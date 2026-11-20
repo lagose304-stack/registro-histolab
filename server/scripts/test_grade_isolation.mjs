@@ -172,63 +172,34 @@ rankFixture.fixture.offline = true;
 assert.equal((await myRank("a1")).status, 503);
 console.log("PASS clasificación individual: solo el puesto de la sesión, sección aislada, cero registrado y ausencia de datos.");
 
-// La semana de contenido conserva la asistencia aunque la evaluación se rinda después.
+// Las notas y la asistencia se pueden registrar juntas e independientemente.
 ({api,fixture}=setup());
-fixture.rows.temario=[{id:'topic1',numero_tema:1,titulo:'Práctica uno',semana:1,carrera:'Medicina'},
-  {id:'topic2',numero_tema:2,titulo:'Práctica dos',semana:2,carrera:'Medicina'}];
-const juan=fixture.rows.estudiantes_medicina.find(row=>row.id==='a1');
-juan.asistencias={asistencia_1:'Falta injustificada',asistencia_2:'Asistio'};
-for(const notes of [{prueba_1:5},{prueba_1_real:6},{manual_topic1:1},{manual_tema_1:1},{'Manual de Práctica uno':1}]) {
-  assert.equal((await call(api.updateBatchGrades,batch([{numero_cuenta:'A',notas:notes}]))).status,409);
-}
-assert.equal((await call(api.updateBatchGrades,batch([{numero_cuenta:'A',notas:{prueba_1:0,prueba_1_real:0,prueba_2:5,manual_topic2:1}}]))).status,200);
-assert.equal(juan.notas.prueba_1,0);assert.equal(juan.notas.prueba_2,5);
-juan.asistencias.asistencia_2='Falta injustificada';
-assert.equal((await call(api.updateBatchGrades,batch([{numero_cuenta:'A',notas:{prueba_1:0,prueba_2:4}}]))).status,409);
-await assert.rejects(api.updateEstudianteGradeDirect('s1','A','Medicina','prueba_2',5,true),/falta injustificada/);
-juan.asistencias.asistencia_2='Falta justificada';
-juan.asistencias.semana_2='Falta injustificada'; // Alias antiguo antes de corregir el registro principal.
-fixture.rows.reposiciones_estudiantes=[{id:'makeup',seccion_origen_id:'s1',seccion_destino_id:'host',numero_cuenta:'A',numero_semana:2,estado:'asignada',asistencia_reposicion:'Asistio'}];
-assert.equal((await call(api.updateBatchGrades,batch([{numero_cuenta:'A',notas:{prueba_1:0,prueba_2:4,manual_topic2:1}}]))).status,200);
-fixture.rows.reposiciones_estudiantes[0].asistencia_reposicion='Falta injustificada';
-assert.equal((await call(api.updateBatchGrades,batch([{numero_cuenta:'A',notas:{prueba_2:5}}]))).status,409);
-assert.equal((await call(api.updateBatchGrades,batch([{numero_cuenta:'A',notas:{manual_topic2:0.5}}]))).status,409);
-assert.equal(await api.hasPracticeAbsence('host','A','Medicina',2),true);
-assert.equal(juan.asistencias.asistencia_2,'Falta justificada');
-console.log('PASS asistencia y notas: semana de contenido, manuales por ID y alias, dos faltas, reposición asistida y ausente, calificación directa y matrícula original.');
-
-({api,fixture}=setup());
-const studentWithOldGrade=fixture.rows.estudiantes_medicina[0];
-studentWithOldGrade.asistencias={semana_1:'Falta injustificada'};
-result=await call(api.updateBatchGrades,batch([
-  {numero_cuenta:'A',notas:{prueba_1:1,prueba_2:5},asistencias:studentWithOldGrade.asistencias},
-  {numero_cuenta:'B',notas:{prueba_1:3,prueba_2:2}}
-]));
+const absent = "Falta injustificada";
+const student = fixture.rows.estudiantes_medicina[0];
+fixture.failRead = "reposiciones_estudiantes";
+result = await call(api.updateBatchGrades,batch([{
+  numero_cuenta:"A", notas:{prueba_1:4,prueba_1_real:6,manual_t1:0.875},
+  asistencias:{asistencia_1:absent, reposicion_1:"No repuso"}
+}]));
 assert.equal(result.status,200);
-assert.equal(studentWithOldGrade.notas.prueba_1,1);
-assert.equal(fixture.reads.estudiantes_medicina,1);
-assert.equal(fixture.reads.temario,1);
-assert.equal(fixture.reads.reposiciones_estudiantes,1);
-result=await call(api.updateBatchGrades,batch([
-  {numero_cuenta:'A',notas:{prueba_1:1,prueba_2:5},asistencias:{...studentWithOldGrade.asistencias,asistencia_2:'Falta injustificada'}}
-]));
-assert.equal(result.status,409);
-assert.match(result.body.message,/semana 2/);
-assert.equal(studentWithOldGrade.asistencias.asistencia_2,undefined);
-fixture.failRead='reposiciones_estudiantes';
-result=await call(api.updateBatchGrades,batch([{numero_cuenta:'A',notas:{prueba_1:1,prueba_2:3}}]));
-assert.equal(result.status,503);
-assert.match(result.body.message,/verificar la asistencia/);
-assert.equal(studentWithOldGrade.notas.prueba_2,5);
-console.log('PASS validación por lote: comparte consultas, conserva notas anteriores y detiene el guardado si no puede verificar la asistencia.');
+assert.equal(student.notas.manual_t1,0.875);
+assert.equal(student.notas.prueba_1,4);
+assert.equal(student.asistencias.asistencia_1,absent);
+assert.equal(fixture.reads.reposiciones_estudiantes,undefined);
+await api.updateEstudianteGradeDirect("s1","A","Medicina","prueba_1",5,true);
+assert.equal(student.notas.prueba_1,5);
+assert.equal(student.asistencias.asistencia_1,absent);
+console.log("PASS: notas positivas y asistencia se guardan de forma independiente.");
 
 ({api,fixture}=setup(true,[],"2026-11-06T17:30:00Z"));
 fixture.rows.secciones[0]={id:'s1',carrera:'Medicina',dia:'Viernes',hora_inicio:'11:00',hora_fin:'13:00'};
 fixture.rows.configuracion_semanas=[{carrera:'Medicina',numero_semana:1,fecha_inicio:'2026-11-02',fecha_fin:'2026-11-08'}];
 const attendanceStudent=fixture.rows.estudiantes_medicina.find(row=>row.id==='a1');
-attendanceStudent.asistencias={};attendanceStudent.notas={prueba_2:4};
+attendanceStudent.asistencias={};attendanceStudent.notas={prueba_1:3,prueba_1_real:6,prueba_2:4,manual_t1:0.75};
 const attendanceResult=await call(api.saveWeeklyAttendance,{instructor:{id:'admin',rol:'Coordinador'},params:{seccion_id:'s1',semana:'1'},body:{updates:[{numero_cuenta:'A',estado:'Falta injustificada'}]}});
 assert.equal(attendanceResult.status,200,JSON.stringify(attendanceResult.body));
-assert.equal(attendanceStudent.notas.prueba_1,0);assert.equal(attendanceStudent.notas.prueba_1_real,0);
+assert.equal(attendanceStudent.notas.prueba_1,3);assert.equal(attendanceStudent.notas.prueba_1_real,6);
+assert.equal(attendanceStudent.notas.manual_t1,0.75);
+assert.equal(attendanceStudent.asistencias.asistencia_1,absent);
 assert.equal(attendanceStudent.notas.prueba_2,4);
-console.log('PASS: pasar lista guarda cero de la práctica ausente sin abrir el portal ni alterar otra prueba.');
+console.log("PASS: registrar faltas conserva las notas de la misma semana y la siguiente.");

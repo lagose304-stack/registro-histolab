@@ -228,7 +228,7 @@ export default function SectionDataMigrationView({
   };
 
   // =========================================================================
-  // 1. GESTIÓN DE MANUALES (SIN RESTRICCIÓN - ASOCIACIÓN INMUTABLE POR UUID)
+  // 1. GESTIÓN DE MANUALES (ASOCIACIÓN INMUTABLE POR UUID)
   // =========================================================================
   const getStudentManualGrade = (est, tema) => {
     if (!est) return "";
@@ -247,6 +247,8 @@ export default function SectionDataMigrationView({
           const currentNotas = { ...(est.notas || {}) };
           delete currentNotas[`manual_${tema.id}`];
           delete currentNotas[`manual_tema_${tema.numero_tema}`];
+          delete currentNotas[`Manual de ${tema.titulo}`];
+          delete currentNotas[tema.id];
           const nextTotal = recalculateTotal(est, currentNotas);
           return { ...est, notas: currentNotas, total: nextTotal };
         })
@@ -362,7 +364,9 @@ export default function SectionDataMigrationView({
           if (est.numero_cuenta !== numero_cuenta) return est;
           const currentNotas = { ...(est.notas || {}) };
           delete currentNotas[quizKey];
+          delete currentNotas[`${quizKey}_real`];
           delete currentNotas[`examencito_${selectedSemana}`];
+          delete currentNotas[`examencito_${selectedSemana}_real`];
           delete currentNotas[`Prueba de la semana ${selectedSemana}`];
           delete currentNotas[`Examencito de la semana ${selectedSemana}`];
           const nextTotal = recalculateTotal(est, currentNotas);
@@ -549,7 +553,8 @@ export default function SectionDataMigrationView({
   const attendanceKey = `asistencia_${selectedSemana}`;
 
   const getStudentAttendance = (est) => {
-    return est?.asistencias?.[attendanceKey] || "";
+    const attendance = est.asistencias || {};
+    return (Object.hasOwn(attendance, attendanceKey) ? attendance[attendanceKey] : attendance[`semana_${selectedSemana}`]) || "";
   };
 
   const handleAttendanceChange = (numero_cuenta, status) => {
@@ -557,7 +562,7 @@ export default function SectionDataMigrationView({
       prev.map((est) => {
         if (est.numero_cuenta !== numero_cuenta) return est;
         const currentAsist = est.asistencias || {};
-        const currentVal = currentAsist[attendanceKey];
+        const currentVal = getStudentAttendance(est);
         const nextVal = currentVal === status ? "" : status;
 
         const updatedAsist = {
@@ -661,17 +666,17 @@ export default function SectionDataMigrationView({
     setSaveMessage("");
 
     try {
-      const updates = estudiantes.map((est) => ({
-        id: est.id,
-        expected_updated_at: est.updated_at,
-        numero_cuenta: est.numero_cuenta,
-        notas: est.notas || {},
-        asistencias: est.asistencias || {},
-        primer_examen: est.primer_examen !== "" && est.primer_examen !== undefined ? Number(est.primer_examen) : 0,
-        segundo_examen: est.segundo_examen !== "" && est.segundo_examen !== undefined ? Number(est.segundo_examen) : 0,
-        tercer_examen: est.tercer_examen !== "" && est.tercer_examen !== undefined ? Number(est.tercer_examen) : 0,
-        total: est.total ?? 0
-      }));
+      const savedByAccount = new Map(savedStudentsRef.current.map(est => [est.numero_cuenta, est]));
+      const updates = estudiantes.filter(est => editedAccounts.has(est.numero_cuenta)).map(est => {
+        const previous = savedByAccount.get(est.numero_cuenta);
+        const update = { id: est.id, expected_updated_at: est.updated_at, numero_cuenta: est.numero_cuenta };
+        if (est.asistencias !== previous?.asistencias) update.asistencias = est.asistencias || {};
+        if (est.notas !== previous?.notas) update.notas = est.notas || {};
+        for (const field of ["primer_examen", "segundo_examen", "tercer_examen", "total"]) {
+          if (est[field] !== previous?.[field]) update[field] = Number(est[field] || 0);
+        }
+        return update;
+      });
 
       const response = await api.estudiantes.saveMigration(seccion.id, updates, carrera);
       if (response?.success === false) throw new Error(response.message || "No se pudieron guardar los datos.");
