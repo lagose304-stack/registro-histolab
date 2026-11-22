@@ -8,6 +8,9 @@ import { build } from "esbuild";
 import { createRequire } from "node:module";
 const require=createRequire(import.meta.url);
 const quizzes=[{id:'manual',seccion_id:'s',numero_semana:1,publicada:true,preguntas:[{id:'q',puntos:1,items:[]}]},{id:'auto',seccion_id:'s',numero_semana:2,publicada:true,preguntas:[{id:'q',items:[{id:'a',tipo:'verdadero_falso',instruccion:'Demo',puntos:1,respuesta_correcta:'Verdadero'}]}]}];
+quizzes.push({ id:"related", seccion_id:"s", numero_semana:3, publicada:true, preguntas:[
+  { id:"q", items:[{ id:"r", tipo:"respuestas_relacionadas", instruccion:"Explica la relación", grupos:1, campos:["Caso","Causa","Evidencia"], puntos:1 }] }
+] });
 let failGradeWrite=false,failSubmissionWrite=false,failDelete=false;const gradeUpdates=[];const rows=[];let live={estado:'en_pregunta'};
 const database={rpc(name,args){
   assert(["delete_quiz_submission_with_grade","reopen_quiz_submission"].includes(name));
@@ -25,7 +28,7 @@ const activityRows=new Map();let failActivity=false;
 const recordActivity=async(section,week,student,id,events=[])=>{
  if(failActivity)throw Error('ACTIVITY_WRITE_FAILED');
  const account=student.numero_cuenta;
- const row=activityRows.get(account)||{id,quiz_id:week===1?'manual':'auto',politica:'salidas-tres-faltas-v1',faltas:0,episodio_abierto:null,eventos:[],aceptado_at:new Date().toISOString()};
+ const row=activityRows.get(account)||{id,quiz_id:quizzes.find(quiz=>quiz.numero_semana===week)?.id,politica:'salidas-tres-faltas-v1',faltas:0,episodio_abierto:null,eventos:[],aceptado_at:new Date().toISOString()};
  const next=appendLocalActivity(row,events);activityRows.set(account,next);return next;
 };
 const compiled=await build({entryPoints:[fileURLToPath(new URL('../src/controllers/pruebas.controller.js',import.meta.url))],platform:'node',format:'cjs',bundle:true,write:false,logLevel:'silent',plugins:[{name:'isolation',setup(b){b.onResolve({filter:/services\/quizActivity\.js$/},()=>({path:'activity',namespace:'isolate'}));b.onResolve({filter:/db\/supabase\.js$/},()=>({path:'db',namespace:'isolate'}));b.onResolve({filter:/estudiantes\.controller\.js$/},()=>({path:'grades',namespace:'isolate'}));b.onResolve({filter:/liveQuiz\.controller\.js$/},()=>({path:'live',namespace:'isolate'}));b.onResolve({filter:/^node:fs$/},()=>({path:'fs',namespace:'isolate'}));b.onLoad({filter:/.*/,namespace:'isolate'},args=>({contents:args.path==='activity'?'export const recordQuizActivity=(...args)=>globalThis.recordActivity(...args);export const finishQuizActivity=async()=>{};export const beginQuizActivity=async()=>{};export const listQuizActivity=async()=>[];export const findCurrentQuizActivity=(section,week,student,quizId)=>globalThis.findAccepted(student,quizId);':args.path==='db'?'export const isSupabaseConfigured=true,supabase=globalThis.database;':args.path==='grades'?'export const updateEstudianteGradeDirect=async(...args)=>globalThis.recordGrade(args);':args.path==='live'?'export const getLiveQuizEvidence=async()=>globalThis.getLive();':'export default {existsSync:()=>false,mkdirSync(){},writeFileSync(){}};',loader:'js'}))}}]});
@@ -90,6 +93,26 @@ assert(gradeUpdates.some(args=>args[1]==='manual'&&args[3]==='prueba_1'&&args[4]
 graded=await grade('auto',5,{evaluaciones_incisos:{q___a:{estado:'mala',puntos_obtenidos:0}}});assert.equal(graded.nota_obtenida,1,'Las correcciones automáticas no se reemplazan al guardar la revisión');
 assert(gradeUpdates.some(args=>args[1]==='auto'&&args[3]==='prueba_2'&&args[4]===1));
 console.log('PASS: revisión del instructor guarda comentario y milésimas, sincroniza notas y conserva la corrección automática.');
+
+const relatedSubmission = await submit("related", 3, { q:{ r:["Caso A", "", "Evidencia A"] } });
+assert.equal(relatedSubmission.status, 200);
+assert.equal(relatedSubmission.payload.data.estado, "enviado");
+assert.deepEqual(rows.find(row => row.numero_cuenta === "related").respuestas.q.r, ["Caso A", "", "Evidencia A"]);
+const firstField = { estado:"buena", puntos_obtenidos:0 };
+graded = await grade("related", 5, { evaluaciones_incisos:{ q___r___slot_0:firstField } });
+assert.equal(graded.estado, "enviado");
+assert.equal(graded.nota_obtenida, null);
+assert.equal(graded.evaluaciones_incisos.q___r___slot_0.puntos_obtenidos, .334);
+assert(!gradeUpdates.some(args => args[1] === "related"));
+graded = await grade("related", 5, { evaluaciones_incisos:{
+  q___r___slot_0:firstField,
+  q___r___slot_1:{ estado:"mala", puntos_obtenidos:1 },
+  q___r___slot_2:{ estado:"regular", puntos_obtenidos:1 }
+} });
+assert.equal(graded.estado, "calificado");
+assert.equal(graded.nota_obtenida, .501);
+assert(gradeUpdates.some(args => args[1] === "related" && args[3] === "prueba_3" && args[4] === .501));
+console.log("PASS respuestas relacionadas: entrega con huecos, revisión parcial, pesos del servidor y nota final.");
 
 async function gradeFailure(){let status=200,payload;const row=rows.find(item=>item.numero_cuenta==='manual');await module.exports.calificarEntrega({params:{entrega_id:row.id},body:{nota_obtenida:.5}},{status(value){status=value;return this;},json(value){payload=value;return this;}});return {status,payload};}
 const writesBeforeFailure=gradeUpdates.length;

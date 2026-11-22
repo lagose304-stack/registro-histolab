@@ -141,6 +141,11 @@
 .quiz-quick__student button { min-height:44px;flex:none;white-space:nowrap; }
 .quiz-quick__evaluations { display:grid !important;grid-template-columns:repeat(3,minmax(0,1fr));width:100%;flex:1 0 100%;gap:.4rem !important; }
 .quiz-quick__evaluations button { display:flex;align-items:center;justify-content:center;width:100%;min-width:0;min-height:46px;padding:.65rem .2rem !important;font-size:clamp(.72rem,2.5vw,.85rem) !important; }
+.quiz-review-related-answer { overflow-wrap: anywhere; white-space: pre-wrap; }
+.quiz-review-related-answer > span:first-child { display: none; }
+.quiz-review-related-answer strong { display: block; margin-bottom: .2rem; color: #334155; }
+.quiz-review-related-answer strong small { font-size: inherit; font-weight: 500; }
+.quiz-review-model-answer { white-space: pre-wrap; overflow-wrap: anywhere; }
 .quiz-quick__actions { padding:1rem !important;border:1px solid #b6cbd9 !important;border-radius:.8rem;gap:1rem !important; }
 .quiz-quick__actions > div:first-of-type { flex:1 1 18rem; }
 .quiz-quick__actions > div:first-of-type > span { line-height:1.6; }

@@ -3,7 +3,10 @@ import QuizAnswerCountInput from "./QuizAnswerCountInput";
 import { isAutomaticQuizItem } from "../../../shared/quizAutoGrading.mjs";
 import React, { useId } from "react";
 import { Plus, Trash2 } from "lucide-react";
-import { QUIZ_ITEM_TYPES, createQuizItem, quizItemIssues, completionBlankCount } from "../../../shared/quizItems.mjs";
+import {
+  QUIZ_ITEM_TYPES, RELATED_QUIZ_ITEM, RELATED_FIELDS_MIN, RELATED_FIELDS_MAX, RELATED_GROUPS_MAX, RELATED_LABEL_MAX,
+  createQuizItem, quizItemIssues, completionBlankCount, quizItemSlotCount, quizRelatedFieldCount, quizRelatedGroupCount
+} from "../../../shared/quizItems.mjs";
 
 const newId = prefix => `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
 export default function QuizItemEditor({ item, index, onChange, onRemove }) {
@@ -25,7 +28,24 @@ export default function QuizItemEditor({ item, index, onChange, onRemove }) {
       <label className="user-field">Puntos del apartado<GradeInput max={1} value={item.puntos ?? 1} onValueChange={value => patch({ puntos:value === "" ? 0 : Number(value) })} /><small>La suma de la pregunta puede llegar hasta 1 punto.</small></label>
     </div>
     <label className="user-field">{item.tipo === "verdadero_falso" ? "Afirmación para el estudiante" : "Instrucción para el estudiante"}<textarea aria-label={item.tipo === "verdadero_falso" ? "Afirmación para el estudiante" : "Instrucción para el estudiante"} rows={2} value={item.instruccion || item.etiqueta || ""} placeholder={item.tipo === "verdadero_falso" ? "Ej. El epitelio carece de vasos sanguíneos." : "Explica claramente qué debe responder el estudiante."} onChange={event => patch({ instruccion:event.target.value, etiqueta:event.target.value })} /></label>
-    {item.tipo === "seleccion_multiple" ? <div className="quiz-item-editor__answer-key">
+    {item.tipo === RELATED_QUIZ_ITEM ? <>
+      <div className="quiz-item-editor__basics">
+        <QuizAnswerCountInput label="Número de grupos" value={quizRelatedGroupCount(item)} max={RELATED_GROUPS_MAX} onChange={grupos => patch({ grupos })} />
+        <QuizAnswerCountInput label="Campos por grupo" value={quizRelatedFieldCount(item)} min={RELATED_FIELDS_MIN} max={RELATED_FIELDS_MAX}
+          onChange={count => patch({ campos: Array.from({ length: count }, (_, fieldIndex) => item.campos?.[fieldIndex] ?? "") })} />
+      </div>
+      <div className="quiz-item-editor__basics">
+        {item.campos.map((field, fieldIndex) => <label className="user-field" key={fieldIndex}>Etiqueta del campo {fieldIndex + 1}
+          <input type="text" value={field} maxLength={RELATED_LABEL_MAX} onChange={event => patch({
+            campos: item.campos.map((label, index) => index === fieldIndex ? event.target.value : label)
+          })} />
+        </label>)}
+      </div>
+      <p className="quiz-item-editor__related-summary">{quizItemSlotCount(item)} campos en total. El puntaje del apartado se reparte entre todos los campos y cada uno se califica por separado.</p>
+      <label className="user-field quiz-item-editor__answer-key">Guía de revisión opcional · Solo docente
+        <textarea rows={3} value={item.respuesta_modelo || ""} onChange={event => patch({ respuesta_modelo: event.target.value })} />
+      </label>
+    </> : item.tipo === "seleccion_multiple" ? <div className="quiz-item-editor__answer-key">
       <h5>Opciones y respuesta correcta · Solo docente</h5><p>Escribe entre 2 y 8 opciones. Marca el círculo de la única respuesta correcta.</p>
       {options.map((option, optionIndex) => <div className="quiz-item-editor__option" key={option.id} data-correct={item.respuesta_correcta === option.id}>
         <label className="quiz-item-editor__correct"><input type="radio" name={name} checked={item.respuesta_correcta === option.id} onChange={() => patch({ respuesta_correcta:option.id })} aria-label={`Marcar opción ${optionIndex + 1} como correcta`} /><span>{String.fromCharCode(65 + optionIndex)}</span></label>

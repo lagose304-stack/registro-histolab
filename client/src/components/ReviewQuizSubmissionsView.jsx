@@ -1,5 +1,5 @@
 import { buildAutomaticQuizAssessment, isAutomaticQuizItem, splitQuizPoints } from "../../../shared/quizAutoGrading.mjs";
-import { isQuizItemMultiSlot, quizItemSlotCount, quizItemLabel, quizSlotLabel } from "../../../shared/quizItems.mjs";
+import { isQuizItemMultiSlot, quizItemSlotCount, quizItemLabel, quizSlotLabel, RELATED_QUIZ_ITEM } from "../../../shared/quizItems.mjs";
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   ArrowLeft,
@@ -43,7 +43,7 @@ function QuickValidAnswers({ item }) {
   return <div className="quiz-quick__valid-answers">
     {Array.isArray(item.respuestas_esperadas) && item.respuestas_esperadas.length > 0
       ? <ul>{item.respuestas_esperadas.map((answer, index) => <li key={index}>{answer}</li>)}</ul>
-      : item.respuesta_modelo ? <p>{item.respuesta_modelo}</p>
+      : item.respuesta_modelo ? <p className="quiz-review-model-answer">{item.respuesta_modelo}</p>
       : <p className="quiz-quick__valid-answers-empty">Sin respuestas válidas configuradas.</p>}
   </div>;
 }
@@ -1838,6 +1838,7 @@ export default function ReviewQuizSubmissionsView({
                                 )}
 
                                 {/* Listado de Casillas con evaluación individual */}
+                                {item.tipo === RELATED_QUIZ_ITEM && item.respuesta_modelo && <QuickValidAnswers item={item} />}
                                 <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
                                   {Array.from({ length: cantSlots }).map((_, rIdx) => {
                                     const slotPts = splitQuizPoints(itemMaxPts, cantSlots)[rIdx];
@@ -1851,6 +1852,8 @@ export default function ReviewQuizSubmissionsView({
                                     return (
                                       <div
                                         key={rIdx}
+                                        role={item.tipo === RELATED_QUIZ_ITEM ? "group" : undefined}
+                                        aria-label={item.tipo === RELATED_QUIZ_ITEM ? quizSlotLabel(item, rIdx) : undefined}
                                         style={{
                                           display: "flex",
                                           alignItems: "center",
@@ -1880,10 +1883,10 @@ export default function ReviewQuizSubmissionsView({
                                         }}
                                       >
                                         {/* Respuesta del estudiante para esta casilla */}
-                                        <div style={{ display: "flex", flexDirection: "column", gap: "0.15rem", flex: 1, minWidth: "200px" }}>
-                                          <div style={{ display: "flex", alignItems: "center", gap: "0.45rem" }}>
+                                        <div style={{ display: "flex", flexDirection: "column", gap: "0.15rem", flex: 1, minWidth: item.tipo === RELATED_QUIZ_ITEM ? 0 : "200px" }}>
+                                          <div className={item.tipo === RELATED_QUIZ_ITEM ? "quiz-review-related-answer" : undefined} style={{ display: "flex", alignItems: "center", gap: "0.45rem" }}>
                                             <span style={{ fontSize: "0.82rem", fontWeight: 900, color: "#64748b", width: "20px" }}>
-                                              {rIdx + 1}.
+                                              {item.tipo !== RELATED_QUIZ_ITEM && `${rIdx + 1}.`}
                                             </span>
                                             <span
                                               style={{
@@ -1892,6 +1895,7 @@ export default function ReviewQuizSubmissionsView({
                                                 color: rowVal && String(rowVal).trim() ? "#0f172a" : "#94a3b8"
                                               }}
                                             >
+                                              {item.tipo === RELATED_QUIZ_ITEM && <strong>{quizSlotLabel(item, rIdx)}</strong>}
                                               {item.tipo === "terminos_pareados" && <strong>{quizSlotLabel(item,rIdx)} → </strong>}{rowVal && String(rowVal).trim() ? String(rowVal) : "— (Sin respuesta) —"}
                                             </span>
                                           </div>
@@ -1932,6 +1936,7 @@ export default function ReviewQuizSubmissionsView({
                                             type="button"
                                             disabled={slotEval?.origen === "automatica"}
                                             onClick={() => handleEvaluateSlot(pregunta.id, item.id, rIdx, "buena", slotPts)}
+                                            aria-pressed={slotEval?.estado === "buena"}
                                             style={{
                                               display: "inline-flex",
                                               alignItems: "center",
@@ -1954,6 +1959,7 @@ export default function ReviewQuizSubmissionsView({
                                             type="button"
                                             disabled={slotEval?.origen === "automatica"}
                                             onClick={() => handleEvaluateSlot(pregunta.id, item.id, rIdx, "regular", slotPts)}
+                                            aria-pressed={slotEval?.estado === "regular"}
                                             style={{
                                               display: "inline-flex",
                                               alignItems: "center",
@@ -1974,6 +1980,7 @@ export default function ReviewQuizSubmissionsView({
                                             type="button"
                                             disabled={slotEval?.origen === "automatica"}
                                             onClick={() => handleEvaluateSlot(pregunta.id, item.id, rIdx, "mala", slotPts)}
+                                            aria-pressed={slotEval?.estado === "mala"}
                                             style={{
                                               display: "inline-flex",
                                               alignItems: "center",
@@ -2736,6 +2743,8 @@ export default function ReviewQuizSubmissionsView({
                                       return (
                                         <div
                                           key={slotIdx}
+                                          role={item.tipo === RELATED_QUIZ_ITEM ? "group" : undefined}
+                                          aria-label={item.tipo === RELATED_QUIZ_ITEM ? quizSlotLabel(item, slotIdx) : undefined}
                                           style={{
                                             display: "flex",
                                             alignItems: "center",
@@ -2762,11 +2771,12 @@ export default function ReviewQuizSubmissionsView({
                                                 : "1.5px solid #e2e8f0"
                                           }}
                                         >
-                                          <div style={{ display: "flex", alignItems: "center", gap: "0.45rem", flex: 1, minWidth: "160px" }}>
+                                          <div className={item.tipo === RELATED_QUIZ_ITEM ? "quiz-review-related-answer" : undefined} style={{ display: "flex", alignItems: "center", gap: "0.45rem", flex: 1, minWidth: item.tipo === RELATED_QUIZ_ITEM ? 0 : "160px" }}>
                                             <span style={{ fontSize: "0.8rem", fontWeight: 900, color: "#64748b", width: "18px" }}>
-                                              {slotIdx + 1}.
+                                              {item.tipo !== RELATED_QUIZ_ITEM && `${slotIdx + 1}.`}
                                             </span>
                                             <span style={{ fontSize: "0.86rem", fontWeight: 700, color: rowVal && String(rowVal).trim() ? "#0f172a" : "#94a3b8" }}>
+                                              {item.tipo === RELATED_QUIZ_ITEM && <strong>{quizSlotLabel(item, slotIdx)} <small>· {slotPts.toFixed(3)} pt</small></strong>}
                                               {item.tipo === "terminos_pareados" && <strong>{quizSlotLabel(item,slotIdx)} → </strong>}{rowVal && String(rowVal).trim() ? String(rowVal) : "— (Vacío) —"}
                                             </span>
                                           </div>

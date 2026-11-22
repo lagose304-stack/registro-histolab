@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { studentQuiz } from "../src/middlewares/quizPrivacy.mjs";
+import { RELATED_QUIZ_ITEM, quizSlotLabel, normalizeRelatedQuizAnswers } from "../../shared/quizItems.mjs";
 import { createQuizItem, syncQuizItemAnswerKey, quizItemIssues, quizPublicationIssues, quizItemSlotCount, isQuizItemMultiSlot, quizMatchingOptions, completionBlankCount, quizItemLabel } from "../../shared/quizItems.mjs";
 const short = createQuizItem("texto_corto","short");
 const list = {...createQuizItem("listado","list"), cantidad:4};
@@ -76,3 +77,26 @@ for (let count=2;count<=10;count++) {
   }
 }
 console.log("Términos pareados: 1800 configuraciones sin coincidencias de posición y con orden estable verificadas.");
+
+const relatedDraft = createQuizItem(RELATED_QUIZ_ITEM, "related");
+assert.deepEqual(quizItemIssues(relatedDraft, false), []);
+assert(quizItemIssues(relatedDraft).length);
+const related = { ...relatedDraft, grupos: 2, campos: [" Caso ", "Causa", "Evidencia"], instruccion: "Relaciona cada caso con su causa y evidencia.", respuesta_modelo: "Referencia privada." };
+assert.deepEqual(quizItemIssues(related), []);
+for (const changes of [{ grupos: 11 }, { campos: ["Único"] }, { campos: ["Caso", " caso "] }, { campos: ["Caso", {}] }, { campos: ["Caso", "x".repeat(81)] }]) {
+  assert(quizItemIssues({ ...related, ...changes }).length);
+}
+const savedRelated = syncQuizItemAnswerKey(related);
+assert.equal(savedRelated.cantidad, 6);
+assert.deepEqual(savedRelated.campos, ["Caso", "Causa", "Evidencia"]);
+assert.equal(quizSlotLabel(savedRelated, 4), "Grupo 2 · Causa");
+const question = { id: "question", items: [savedRelated, truth] };
+const publicRelated = studentQuiz({ publicada: true, preguntas: [question] }).preguntas[0].items[0];
+assert.equal(publicRelated.grupos, 2);
+assert.deepEqual(publicRelated.campos, savedRelated.campos);
+assert(!Object.hasOwn(publicRelated, "respuesta_modelo"));
+const answers = { question: { related: ["Caso A", "", "Evidencia A", "Caso B", null, "", "extra"], truth: "Falso" } };
+assert.deepEqual(normalizeRelatedQuizAnswers([question], answers), {
+  question: { related: ["Caso A", "", "Evidencia A", "Caso B", "", ""], truth: "Falso" }
+});
+console.log("Respuestas relacionadas: grupos, etiquetas públicas, guía privada y posiciones de entrega verificados.");

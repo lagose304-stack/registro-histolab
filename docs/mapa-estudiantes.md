@@ -25,7 +25,7 @@ El ingreso se confirma después de guardar y releer `current_session_token`. Un 
 
 Los grupos del libro de calificaciones corresponden a los parciales configurados en las semanas de la carrera. Cada grupo muestra todos sus exámenes, identificados por semana y leídos mediante `getCanonicalExamGrade`; sus notas se suman una sola vez en el subtotal. No se limita la presentación a tres parciales ni a un examen por parcial. Las notas históricas de los tres primeros exámenes siguen siendo compatibles.
 
-Los apartados de pruebas se responden con `QuizItemResponse.jsx`: texto corto, numeración, completación, una opción de selección múltiple, verdadero/falso y selección de definición para cada término pareado. El portal mantiene el autoguardado, el bloqueo al finalizar el tiempo y la misma estructura de respuestas por pregunta y apartado. El resultado conserva la revisión docente de respuestas únicas o casillas, según corresponda.
+Los apartados de pruebas se responden con `QuizItemResponse.jsx`: texto corto, numeración, completación, una opción de selección múltiple, verdadero/falso, selección de definición para cada término pareado y respuestas relacionadas. El portal mantiene el autoguardado y el bloqueo al finalizar el tiempo. En respuestas relacionadas, el estudiante escribe en grupos de campos etiquetados. El borrador, la entrega y la vista de resultados conservan el orden y las posiciones vacías.
 
 Selección múltiple, verdadero/falso y términos pareados se califican automáticamente al entregar. Una prueba compuesta únicamente por esos tipos queda calificada en ese momento; si incluye apartados manuales, permanece pendiente hasta que el docente termine de revisarlos. La entrega conserva el estado de calificación devuelto por el servidor.
 

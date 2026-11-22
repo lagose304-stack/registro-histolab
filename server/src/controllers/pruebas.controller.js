@@ -9,7 +9,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import crypto from "node:crypto";
 import { buildAutomaticQuizAssessment, resolveQuizAssessment } from "../../../shared/quizAutoGrading.mjs";
-import { quizItemIssues, syncQuizItemAnswerKey } from "../../../shared/quizItems.mjs";
+import { QUIZ_ITEM_TYPES, quizItemIssues, syncQuizItemAnswerKey, normalizeRelatedQuizAnswers } from "../../../shared/quizItems.mjs";
 import { supabase, isSupabaseConfigured } from "../db/supabase.js";
 import { updateEstudianteGradeDirect } from "./estudiantes.controller.js";
 
@@ -285,7 +285,7 @@ export const savePruebaSemanal = async (req, res) => {
       : [];
     for (const [questionIndex, question] of rawPreguntas.entries()) {
       for (const [itemIndex, item] of (question.items || []).entries()) {
-        if (!["texto_corto", "listado", "seleccion_multiple", "verdadero_falso", "terminos_pareados", "completacion"].includes(item?.tipo)) continue;
+        if (!QUIZ_ITEM_TYPES.some(type => type.id === item?.tipo)) continue;
         const issues = quizItemIssues(item, isPublicada);
         if (issues.length) return res.status(400).json({ success: false, message: `Pregunta ${questionIndex + 1}, apartado ${itemIndex + 1}: ${issues.join(" ")}` });
       }
@@ -527,9 +527,9 @@ export const submitPruebaEstudiante = async (req,res) => {
     if (!numero_cuenta || !Number.isInteger(Number(numero_semana)) || Number(numero_semana)<1) return res.status(400).json({success:false,message:"Número de cuenta y semana son obligatorios para la entrega."});
     const numSemana=Number(numero_semana);
     if (!(isSupabaseConfigured && supabase)) releaseLocalLock=await lockLocalSubmission(JSON.stringify([seccion_id,numSemana,String(numero_cuenta)]));
-    const answers=typeof respuestas === "string" ? JSON.parse(respuestas) : respuestas;
+    const submittedAnswers=typeof respuestas === "string" ? JSON.parse(respuestas) : respuestas;
     const clientAudit=typeof auditoria === "string" ? JSON.parse(auditoria) : auditoria;
-    if (!answers || typeof answers!=="object" || Array.isArray(answers)) return res.status(400).json({success:false,message:"Las respuestas no tienen un formato válido."});
+    if (!submittedAnswers || typeof submittedAnswers!=="object" || Array.isArray(submittedAnswers)) return res.status(400).json({success:false,message:"Las respuestas no tienen un formato válido."});
     let existing;
     if (isSupabaseConfigured && supabase) {
       const {data,error}=await supabase.from("entregas_pruebas").select("*").eq("seccion_id",seccion_id).eq("numero_semana",numSemana).eq("numero_cuenta",String(numero_cuenta)).maybeSingle();
@@ -545,6 +545,7 @@ export const submitPruebaEstudiante = async (req,res) => {
       return res.json({success:true,message:"La entrega ya está registrada. Sus respuestas originales se conservan.",data:publicSubmission(existing)});
     }
     const quiz=await loadQuizForAssessment(seccion_id,numSemana);
+    const answers = normalizeRelatedQuizAnswers(quiz.preguntas, submittedAnswers);
     if (existing?.estado === "borrador" && !req.student) return res.status(403).json({success:false,message:"La prueba reabierta debe ser entregada por el estudiante."});
     let activity;
     let activityId = req.body.actividad_intento_id;
@@ -587,7 +588,9 @@ export const submitPruebaEstudiante = async (req,res) => {
     if (existing?.auditoria?.reaperturas) trustedAudit.reaperturas = existing.auditoria.reaperturas;
     if (activity) trustedAudit.actividad = { intento_id: activity.id, politica: activity.politica, faltas: activity.faltas, aceptado_at: activity.aceptado_at, eventos: activity.eventos, origen: "senales_declaradas_por_navegador" };
     if (activity && clientAudit.motivo_finalizacion === "falta_grave_tiempo") trustedAudit.actividad.falta_grave = { motivo: "plazo_regreso_agotado", episodio_id: activity.episodio_abierto, plazo_segundos: 10, declarado_cliente: true, confirmado_at: trustedAudit.hora_recepcion_servidor };
-    if (result.automaticCount) Object.assign(trustedAudit,{calificacion_automatica:assessment,evaluaciones_incisos:result.evaluations,puntos_automaticos:result.automaticScore,apartados_pendientes:result.pending,...(result.complete?{nota_real:result.raw,nota_con_bonus:result.raw}:{})});
+    if (result.automaticCount || assessment.manuales.some(slot => slot.campo_relacionado)) {
+      Object.assign(trustedAudit,{calificacion_automatica:assessment,evaluaciones_incisos:result.evaluations,puntos_automaticos:result.automaticScore,apartados_pendientes:result.pending,...(result.complete?{nota_real:result.raw,nota_con_bonus:result.raw}:{})});
+    }
     const submission={id:existing?.id || crypto.randomUUID(),quiz_id:quiz.id,seccion_id,carrera:quiz.carrera || carrera || "Medicina",numero_semana:numSemana,numero_cuenta:String(numero_cuenta),nombre_completo:nombre_completo || existing?.nombre_completo || "",respuestas:answers,estado:result.complete?"calificado":"enviado",nota_obtenida:result.complete?result.official:null,comentarios:"",auditoria:trustedAudit,fecha_envio:new Date().toISOString(),updated_at:new Date().toISOString(),...(result.complete?{nota_real:result.raw,nota_con_bonus:result.raw,calificado_por:"Sistema · Calificación automática"}:{})};
     if (isSupabaseConfigured && supabase) {
       // Insertar conserva el sello de respuestas si dos solicitudes llegan al mismo tiempo.
@@ -834,14 +837,14 @@ export const calificarEntrega = async (req, res) => {
       assessment=buildAutomaticQuizAssessment(quiz.preguntas,sub.respuestas || {});
     }
     const automaticResult=resolveQuizAssessment(assessment,evaluaciones_incisos || sub.evaluaciones_incisos || sub.auditoria?.evaluaciones_incisos || {});
-    const hasAutomatic=automaticResult.automaticCount>0;
-    const finalEvaluations=hasAutomatic?automaticResult.evaluations:evaluaciones_incisos;
-    if (hasAutomatic) {cleanNota=automaticResult.official;cleanRealNota=automaticResult.raw;}
+    const usesSealedAssessment = automaticResult.automaticCount > 0 || assessment.manuales.some(slot => slot.campo_relacionado);
+    const finalEvaluations=usesSealedAssessment?automaticResult.evaluations:evaluaciones_incisos;
+    if (usesSealedAssessment) {cleanNota=automaticResult.official;cleanRealNota=automaticResult.raw;}
     sub.nota_obtenida = cleanNota;
     sub.nota_real = cleanRealNota;
     sub.nota_con_bonus = cleanRealNota;
     sub.comentarios = comentarios || "";
-    sub.estado = hasAutomatic && !automaticResult.complete ? "enviado" : "calificado";
+    sub.estado = usesSealedAssessment && !automaticResult.complete ? "enviado" : "calificado";
     sub.calificado_por = gradeInstructorName(req.instructor);
     sub.instructor_calificador_id = req.instructor?.id ?? null;
     if (finalEvaluations) sub.evaluaciones_incisos = finalEvaluations;
@@ -851,10 +854,10 @@ export const calificarEntrega = async (req, res) => {
       nota_real: cleanRealNota,
       nota_con_bonus: cleanRealNota,
       ...(finalEvaluations ? { evaluaciones_incisos:finalEvaluations } : {}),
-      ...(hasAutomatic ? {calificacion_automatica:assessment,puntos_automaticos:automaticResult.automaticScore,apartados_pendientes:automaticResult.pending}: {})
+      ...(usesSealedAssessment ? {calificacion_automatica:assessment,puntos_automaticos:automaticResult.automaticScore,apartados_pendientes:automaticResult.pending}: {})
     };
-    if (!hasAutomatic) delete sub.auditoria.calificacion_automatica;
-    if (hasAutomatic && !automaticResult.complete) {
+    if (!usesSealedAssessment) delete sub.auditoria.calificacion_automatica;
+    if (usesSealedAssessment && !automaticResult.complete) {
       sub.nota_obtenida=null;sub.nota_real=null;sub.nota_con_bonus=null;
       sub.auditoria.nota_real=null;sub.auditoria.nota_con_bonus=null;
     }
@@ -881,7 +884,7 @@ export const calificarEntrega = async (req, res) => {
           .eq("id", entrega_id).select("id,updated_at");
 
         if (updErr) {
-          if (hasAutomatic || !["42703","PGRST204"].includes(updErr.code) || !/nota_real|nota_con_bonus/.test(updErr.message || "")) throw updErr;
+          if (usesSealedAssessment || !["42703","PGRST204"].includes(updErr.code) || !/nota_real|nota_con_bonus/.test(updErr.message || "")) throw updErr;
           // Fallback por si las columnas nota_real / nota_con_bonus aún no existen en la base de datos
           delete updatePayload.nota_real;
           delete updatePayload.nota_con_bonus;
@@ -908,8 +911,8 @@ export const calificarEntrega = async (req, res) => {
     savePersistentPruebas(next, !(isSupabaseConfigured && supabase));
     cachePruebas = next;
 
-    // Una prueba mixta no publica una nota definitiva hasta completar su revisión.
-    if (hasAutomatic) {
+    // La nota definitiva se publica cuando todas las casillas selladas tienen valoración.
+    if (usesSealedAssessment) {
       await syncAutomaticStudentGrade(sub, req.instructor);
       return res.json({success:true,message:sub.estado==="calificado"?"Calificación guardada y sincronizada.":"Apartados guardados; quedan respuestas pendientes de revisión.",data:sub});
     }

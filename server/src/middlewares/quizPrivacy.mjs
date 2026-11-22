@@ -1,4 +1,4 @@
-import { quizMatchingOptions } from "../../../shared/quizItems.mjs";
+import { quizMatchingOptions, RELATED_QUIZ_ITEM, RELATED_FIELDS_MAX } from "../../../shared/quizItems.mjs";
 
 const pick = (value, keys) => Object.fromEntries(keys.filter(key => value?.[key] !== undefined).map(key => [key, value[key]]));
 export function studentQuiz(quiz) {
@@ -8,6 +8,10 @@ export function studentQuiz(quiz) {
   if (quiz.reposicion) output.reposicion = pick(quiz.reposicion,["id","seccion","semana"]);
   output.preguntas = questions.map(question => ({ ...pick(question,["id","numero","enunciado","imagen_url","puntos","tiempo_segundos","es_bonus"]), items: (question.items || []).map(item => {
     const clean = pick(item,["id","tipo","instruccion","etiqueta","puntos","cantidad","texto_completar"]);
+    if (item.tipo === RELATED_QUIZ_ITEM) {
+      clean.grupos = item.grupos;
+      clean.campos = Array.isArray(item.campos) ? item.campos.slice(0, RELATED_FIELDS_MAX).map(label => typeof label === "string" ? label : "") : [];
+    }
     if (item.opciones) clean.opciones = item.opciones.map(option => pick(option,["id","texto"]));
     if (item.pares) {
       clean.pares = item.pares.map(pair => pick(pair,["id","termino"]));

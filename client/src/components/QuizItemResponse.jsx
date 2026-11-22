@@ -1,10 +1,36 @@
 import React, { useId } from "react";
-import { quizMatchingOptions, quizItemSlotCount, completionParts, completionBlankCount } from "../../../shared/quizItems.mjs";
+import {
+  quizMatchingOptions, quizItemSlotCount, completionParts, completionBlankCount, RELATED_QUIZ_ITEM,
+  quizRelatedFieldCount, quizRelatedGroupCount, quizRelatedFieldName
+} from "../../../shared/quizItems.mjs";
 import "./QuizItemResponse.css";
 
 export default function QuizItemResponse({ item, value, onChange = () => {}, disabled = false, onBlur }) {
   const name = useId();
   const label = item.instruccion || item.etiqueta || "Respuesta";
+  if (item.tipo === RELATED_QUIZ_ITEM) {
+    const fields = quizRelatedFieldCount(item);
+    const groups = quizRelatedGroupCount(item);
+    return <div className="quiz-response">
+      {Array.from({ length: groups }, (_, groupIndex) => <fieldset className="quiz-response__related-group" key={groupIndex} disabled={disabled}>
+        <legend className={groups === 1 ? "quiz-response__sr" : undefined}>{groups === 1 ? label : `Grupo ${groupIndex + 1}`}</legend>
+        <div className="quiz-response__related-fields">
+          {Array.from({ length: fields }, (_, fieldIndex) => {
+            const slot = groupIndex * fields + fieldIndex;
+            return <label key={fieldIndex}>{quizRelatedFieldName(item, fieldIndex)}
+              <textarea data-quiz-writing className="sp-quiz-input sp-quiz-textarea" rows={2}
+                value={Array.isArray(value) ? value[slot] || "" : ""}
+                onBlur={onBlur} autoComplete="off" autoCorrect="off" spellCheck={false} onChange={event => {
+                  const next = Array.from({ length: groups * fields }, (_, index) => Array.isArray(value) ? value[index] || "" : "");
+                  next[slot] = event.target.value;
+                  onChange(next);
+                }} />
+            </label>;
+          })}
+        </div>
+      </fieldset>)}
+    </div>;
+  }
   if (item.tipo === "seleccion_multiple" || item.tipo === "verdadero_falso") {
     const options = item.tipo === "verdadero_falso" ? ["Verdadero", "Falso"] : (item.opciones || []).map(option => option.texto);
     return <fieldset className="quiz-response quiz-response--choices" disabled={disabled} aria-label={label}>

@@ -135,6 +135,7 @@
 .quiz-item-editor__answer-key h5 { font-size: .88rem; color: #2b6142; margin: 0; }
 .quiz-item-editor__answer-key p { font-size: .8rem; color: #4f705c; line-height: 1.6; }
 .quiz-item-editor__answer-key > .user-button { justify-self: start; }
+.quiz-item-editor__related-summary { margin: 0; color: #36576c; font-size: .85rem; line-height: 1.5; }
 .quiz-item-editor__option { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: .45rem; padding: .4rem; border: 1px solid #c4d8ca; background: #fff; border-radius: .6rem; min-width: 0; }
 .quiz-item-editor__option[data-correct="true"] { border-color: #3d9464; box-shadow: inset 0 0 0 1px #3d9464; }
 .quiz-item-editor__option > input, .quiz-item-editor__pair input { font-size: 1rem; font-weight: 400; padding: .6rem; border: 1px solid #b9cbd7; border-radius: .45rem; }

@@ -10,7 +10,7 @@ import { getMakeupOutcome } from "../../../shared/studentMakeups.mjs";
 import StudentGradesView from "./StudentGradesView";
 import StudentDashboard from "./StudentDashboard";
 import "./StudentDashboard.css";
-import { isQuizItemMultiSlot, quizItemSlotCount, quizSlotLabel } from "../../../shared/quizItems.mjs";
+import { isQuizItemMultiSlot, quizItemSlotCount, quizSlotLabel, RELATED_QUIZ_ITEM } from "../../../shared/quizItems.mjs";
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { sameStudentEnrollment } from "../../../shared/studentIdentity.mjs";
 import {
@@ -548,9 +548,7 @@ export default function StudentPortalView({ student, notify = () => {}, onActivi
       } else {
         (q.items || []).forEach((it) => {
           if (isQuizItemMultiSlot(it)) {
-            initAnswers[q.id][it.id] = esPreguntaPerdida
-              ? Array(quizItemSlotCount(it)).fill("sin_responder")
-              : Array(quizItemSlotCount(it)).fill("");
+            initAnswers[q.id][it.id] = Array(quizItemSlotCount(it)).fill(esPreguntaPerdida && it.tipo !== RELATED_QUIZ_ITEM ? "sin_responder" : "");
           } else {
             initAnswers[q.id][it.id] = esPreguntaPerdida ? "sin_responder" : "";
           }
@@ -3000,8 +2998,8 @@ export default function StudentPortalView({ student, notify = () => {}, onActivi
                                           }}
                                         >
                                           {/* Casilla y Respuesta enviada */}
-                                          <div style={{ display: "flex", alignItems: "center", gap: "0.55rem", flex: 1, minWidth: "200px" }}>
-                                            <span
+                                          <div style={{ display: "flex", alignItems: "center", gap: "0.55rem", flex: 1, minWidth: item.tipo === RELATED_QUIZ_ITEM ? 0 : "200px" }}>
+                                            {item.tipo !== RELATED_QUIZ_ITEM && <span
                                               style={{
                                                 width: "22px",
                                                 height: "22px",
@@ -3018,15 +3016,18 @@ export default function StudentPortalView({ student, notify = () => {}, onActivi
                                               }}
                                             >
                                               {rIdx + 1}.
-                                            </span>
+                                            </span>}
                                             <span
                                               style={{
                                                 fontSize: "0.88rem",
                                                 fontWeight: 700,
+                                                overflowWrap: item.tipo === RELATED_QUIZ_ITEM ? "anywhere" : undefined,
+                                                whiteSpace: item.tipo === RELATED_QUIZ_ITEM ? "pre-wrap" : undefined,
                                                 color: rowVal && String(rowVal).trim() ? "#0f172a" : "#94a3b8",
                                                 fontStyle: rowVal && String(rowVal).trim() ? "normal" : "italic"
                                               }}
                                             >
+                                              {item.tipo === RELATED_QUIZ_ITEM && <strong style={{ display: "block" }}>{quizSlotLabel(item, rIdx)}</strong>}
                                               {item.tipo === "terminos_pareados" && <strong>{quizSlotLabel(item,rIdx)} → </strong>}{rowVal && String(rowVal).trim() ? rowVal : "Sin respuesta enviada"}
                                             </span>
                                           </div>
