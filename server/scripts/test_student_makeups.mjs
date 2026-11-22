@@ -15,16 +15,17 @@ const sections=[{id:"origin",codigo:"ORIGEN",carrera:"Medicina",periodo_academic
   {id:"host",codigo:"DESTINO",carrera:"Medicina",periodo_academico:"III 2026",coordinador:"Otra Persona",dia:"Sábado",hora_inicio:"11:00",hora_fin:"13:00",instructores_asignados:["receiver"]},
   {id:"past",codigo:"PASADA",carrera:"Medicina",periodo_academico:"III 2026",dia:"Miércoles",hora_inicio:"11:00",hora_fin:"13:00"},
   {id:"other",codigo:"AJENA",carrera:"Enfermería",periodo_academico:"III 2026",dia:"Sábado",hora_inicio:"11:00",hora_fin:"13:00"}];
-const student={numero_cuenta:"DEMO",nombre_completo:"Estudiante aislado",seccion_id:"origin",carrera:"Medicina",activo:true,contrasena:"SECRET",notas:{otra_nota:2},asistencias:{asistencia_1:"Falta justificada"}};
+const student={id:"student-demo",numero_cuenta:"DEMO",nombre_completo:"Estudiante aislado",seccion_id:"origin",carrera:"Medicina",activo:true,contrasena:"SECRET",notas:{otra_nota:2},asistencias:{asistencia_1:"Falta justificada"}};
 const tables={secciones:sections,estudiantes_medicina:[student,{...student,numero_cuenta:"NO",asistencias:{asistencia_1:"Falta injustificada"}}],
   configuracion_semanas:[{carrera:"MEDICINA",numero_semana:1,fecha_inicio:"2026-11-02",fecha_fin:"2026-11-08",parcial:"I",es_examen:false},{carrera:"MEDICINA",numero_semana:2,fecha_inicio:"2026-11-09",fecha_fin:"2026-11-15",parcial:"I",es_examen:false},{carrera:"MEDICINA",numero_semana:3,fecha_inicio:"2026-11-16",fecha_fin:"2026-11-22",parcial:"I",es_examen:true}],
-  temario:[{id:"t1",titulo:"Manual uno",semana:1,carrera:"MEDICINA",tiene_manual:true}],reposiciones_estudiantes:[],fechas_carga_manuales:[],sesiones_pruebas_en_vivo:[],entregas_pruebas:[],asignaciones_instructores:[],
+  temario:[{id:"t1",titulo:"Manual uno",semana:1,carrera:"MEDICINA",tiene_manual:true}],reposiciones_estudiantes:[],fechas_carga_manuales:[],sesiones_pruebas_en_vivo:[],entregas_pruebas:[],asignaciones_instructores:[],quiz_activity_attempts:[],
   pruebas_semanales:[{id:"host-quiz",seccion_id:"host",carrera:"Medicina",numero_semana:1,publicada:true,tiempo_por_pregunta_segundos:90,preguntas:[{id:"q",items:[{id:"a",tipo:"verdadero_falso",puntos:5,respuesta_correcta:"Verdadero"}]}]}]};
 function split(expression){let depth=0,start=0,result=[];for(let i=0;i<expression.length;i++){if(expression[i]==="(")depth++;if(expression[i]===")")depth--;if(expression[i]===","&&!depth){result.push(expression.slice(start,i));start=i+1;}}return [...result,expression.slice(start)];}
 function match(row,expression){if(expression.startsWith("and("))return split(expression.slice(4,-1)).every(part=>match(row,part));if(expression.startsWith("or("))return split(expression.slice(3,-1)).some(part=>match(row,part));const [key,op,...parts]=expression.split(".");const value=parts.join(".");return op==="ilike"?new RegExp("^"+value.replace(/[.*+?^${}()|[\]\\]/g,"\\$&").replaceAll("%",".*")+"$","i").test(row[key]||""):String(row[key])===value;}
 const clone=value=>structuredClone(value);
 const rpcCalls=[],normalGrades=[];
 const database={from(table){const predicates=[];let operation="read",payload,single=false,fields="*",range=null;const query={
+  match(values){for(const [key,value] of Object.entries(values))query.eq(key,value);return query;},is(key,value){predicates.push(row=>row[key]===value);return query;},
   select(value="*"){fields=value;return query;},eq(key,value){predicates.push(row=>String(row[key])===String(value));return query;},in(key,values){predicates.push(row=>values.map(String).includes(String(row[key])));return query;},or(expression){predicates.push(row=>split(expression).some(part=>match(row,part)));return query;},order(){return query;},limit(){return query;},range(start,end){range=[start,end];return query;},maybeSingle(){single=true;return query;},single(){single=true;return query;},insert(value){operation="insert";payload=clone(value);return query;},update(value){operation="update";payload=clone(value);return query;},
   async then(resolve){const source=tables[table]||[];let data=source.filter(row=>predicates.every(predicate=>predicate(row)));if(operation==="insert"){
     if(table==="reposiciones_estudiantes"&&source.some(row=>row.seccion_origen_id===payload.seccion_origen_id&&row.numero_cuenta===payload.numero_cuenta&&row.numero_semana===payload.numero_semana&&["solicitada","asignada","completada"].includes(row.estado)))return resolve({error:{code:"23505"}});
@@ -37,6 +38,7 @@ const database={from(table){const predicates=[];let operation="read",payload,sin
  }};
  return request;
 },runRpc(name,payload,headers){rpcCalls.push({name,payload,headers});
+  if(name==="append_quiz_activity")return {data:null,error:null};
   if(name==="sync_quiz_makeup_grade"){
     const result=database.runRpc("apply_student_makeup",{p_id:payload.p_makeup,p_entrega:payload.p_delivery},headers);
     return {data:!result.error,error:result.error};
@@ -47,7 +49,7 @@ async function compiled(entry){const output=await build({entryPoints:[entry],bun
   b.onResolve({filter:/estudiantes\.controller\.js$/},()=>({path:"students",namespace:"mock"}));b.onResolve({filter:/academicAgenda\.controller\.js$/},()=>({path:"agenda",namespace:"mock"}));
   b.onResolve({filter:/liveQuiz\.controller\.js$/},()=>({path:"live",namespace:"mock"}));b.onResolve({filter:/secciones\.controller\.js$/},()=>({path:"sections",namespace:"mock"}));b.onResolve({filter:/asignaciones\.controller\.js$/},()=>({path:"assignments",namespace:"mock"}));b.onResolve({filter:/^node:fs$/},()=>({path:"fs",namespace:"mock"}));
   if(entry.includes("middleware"))b.onResolve({filter:/pruebas\.controller\.js$/},()=>({path:"submissions",namespace:"mock"}));
-  b.onLoad({filter:/.*/,namespace:"mock"},({path:p})=>({contents:({db:"export const supabase=globalThis.database,isSupabaseConfigured=true;",auth:"export const authenticateInstructor=(r,s,n)=>n(),authenticateStudent=(r,s,n)=>n();",students:"export const hasPracticeAbsence=async()=>false;export const normalizeCarreraToTable=()=> 'estudiantes_medicina';export const updateEstudianteGradeDirect=async(...a)=>globalThis.normalGrades.push(a);",agenda:"export const getSectionAttendanceEvents=async()=>[];",live:"export const getLiveQuizEvidence=async()=>({estado:'en_pregunta',alumnos_conectados:{}});",sections:"export const getLocalSchedulingSections=()=>[];",assignments:"export const getLocalSectionAssignments=()=>[];",submissions:"export const getQuizSubmissionForAccess=async()=>null;",fs:"export default {existsSync:()=>false,mkdirSync(){},writeFileSync(){}};"})[p]}));
+  b.onLoad({filter:/.*/,namespace:"mock"},({path:p})=>({contents:({db:"export const supabase=globalThis.database,isSupabaseConfigured=true;",auth:"export const authenticateInstructor=(r,s,n)=>n(),authenticateStudent=(r,s,n)=>n();",students:"export const normalizeCarreraToTable=()=> 'estudiantes_medicina';export const updateEstudianteGradeDirect=async(...a)=>globalThis.normalGrades.push(a);",agenda:"export const getSectionAttendanceEvents=async()=>[];",live:"export const getLiveQuizEvidence=async()=>({estado:'en_pregunta',alumnos_conectados:{}});",sections:"export const getLocalSchedulingSections=()=>[];",assignments:"export const getLocalSectionAssignments=()=>[];",submissions:"export const getQuizSubmissionForAccess=async()=>null;",fs:"export default {existsSync:()=>false,mkdirSync(){},writeFileSync(){}};"})[p]}));
   }}]});const module={exports:{}};vm.runInNewContext(output.outputFiles[0].text,{module,exports:module.exports,database,normalGrades,Date:Clock,require,console,process:{cwd:()=>process.cwd()}});return module.exports;}
 const controllers=await compiled("server/src/controllers/studentMakeups.controller.js");
 const middleware=await compiled("server/src/middlewares/quizAccess.middleware.js");
@@ -81,6 +83,7 @@ auth=await call(middleware.quizAccess({student:true}),{student,params:{seccion_i
 auth=await call(middleware.quizAccess({student:true}),{student,params:{seccion_id:"origin"}});auth.res.json({success:true,data:[{id:"origin-quiz",numero_semana:1,publicada:true,preguntas:[]},{id:"second",numero_semana:2,publicada:true,preguntas:[]}]});
 assert.equal(auth.payload.data[0].id,"host-quiz");assert.equal(auth.payload.data[0].preguntas[0].items[0].respuesta_correcta,undefined);assert.equal(auth.payload.reposiciones[0].seccion,"DESTINO");assert(!JSON.stringify(auth.payload).includes("Justificación privada"));
 now=Date.parse("2026-11-07T18:00:00Z");
+tables.quiz_activity_attempts.push({id:"attempt",alumno_id:student.id,seccion_id:"host",numero_semana:1,numero_cuenta:"DEMO",quiz_id:"host-quiz",reemplazado_at:null,finalizado_at:null,faltas:0,aceptado_at:new Clock().toISOString()});
 // El controlador recibe el destino validado, pero la matrícula autenticada permanece intacta.
 auth=await call(middleware.quizAccess({student:true,kind:"submission"}),{method:"POST",student,params:{seccion_id:"origin"},body:{numero_semana:1,numero_cuenta:"DEMO",quiz_id:"host-quiz",respuestas:{q:{a:"Verdadero"}}}});assert(auth.next);
 result=await call(quizzes.submitPruebaEstudiante,auth.req);assert.equal(result.status,200);assert.equal(result.payload.data.estado,"calificado");assert.equal(student.notas.prueba_1,5);assert.equal(student.seccion_id,"origin");assert.equal(normalGrades.length,0);assert(rpcCalls.some(call=>call.payload.p_entrega));
@@ -90,14 +93,12 @@ now=Date.parse("2026-11-07T18:00:00Z");assert.equal((await call(controllers.save
 assert.equal((await call(controllers.saveReceivingMakeup,{instructor:receiver,params:{id:created.id},body:{manuales:{manual_t1:.625}}})).status,409,"Los manuales se cargan en la siguiente práctica, no durante la reposición");
 assert.equal(student.asistencias.asistencia_1,'Falta justificada');assert.equal(student.asistencias.reposicion_1,'Repuso');assert.equal((await call(controllers.saveReceivingMakeup,{instructor:receiver,params:{id:created.id},body:{asistencia_reposicion:'Falta injustificada'}})).status,200);assert.equal(student.asistencias.reposicion_1,'No repuso');assert.equal(student.asistencias.asistencia_1,'Falta justificada');assert.equal((await call(controllers.saveReceivingMakeup,{instructor:receiver,params:{id:created.id},body:{asistencia_reposicion:'Falta justificada'}})).status,400);
 auth=await call(middleware.quizAccess({student:true}),{student,params:{seccion_id:"origin",semana:"1"}});
-assert.equal(auth.status,403);assert.equal(auth.payload.nota,0);
-assert(normalGrades.some(args=>args[3]==='prueba_1' && args[4]===0));
+assert(auth.next);assert.equal(auth.req.params.seccion_id,"host");
+assert.equal(normalGrades.length,0);
 const absentStudent={...student,asistencias:{asistencia_2:'Falta injustificada'}};
 auth=await call(middleware.quizAccess({student:true}),{student:absentStudent,params:{seccion_id:"origin",semana:"2"}});
-assert.equal(auth.status,403);assert.equal(auth.payload.reason,'PRACTICE_ABSENCE');
+assert(auth.next);assert.equal(auth.req.params.seccion_id,"origin");
 now=Date.parse("2026-11-14T18:00:00Z");
-assert.equal((await call(controllers.saveReceivingMakeup,{instructor:receiver,params:{id:created.id},body:{manuales:{manual_t1:.875}}})).status,409,"Una falta en reposición impide registrar manuales positivos");
-tables.reposiciones_estudiantes.find(row=>row.id===created.id).asistencia_reposicion='Asistio';
 assert.equal((await call(controllers.saveReceivingMakeup,{instructor:receiver,params:{id:created.id},body:{manuales:{manual_t1:.875}}})).status,200);assert.equal(student.notas.manual_t1,.875);
 assert.equal((await call(controllers.saveReceivingMakeup,{instructor:{id:"outsider",rol:"Instructor"},params:{id:created.id},body:{manuales:{manual_t1:1}}})).status,403);
 assert.equal((await call(controllers.saveReceivingMakeup,{instructor:receiver,params:{id:created.id},body:{manuales:{manual_t1:1.001}}})).status,400);
@@ -114,13 +115,15 @@ assert.deepEqual(quizzesDueAtPractice(regularWeeks,2),[1]);
 assert.deepEqual(quizzesDueAtPractice(regularWeeks,3),[2,3]);
 const juan={...student,numero_cuenta:'JUAN',asistencias:{asistencia_1:'Falta injustificada',asistencia_2:'Asistio',asistencia_3:'Asistio'}};
 const accessJuan=number=>call(middleware.quizAccess({student:true}),{student:juan,params:{seccion_id:'origin',semana:String(number)}});
-assert.equal((await accessJuan(1)).status,403);assert((await accessJuan(2)).next);
+assert((await accessJuan(1)).next);assert((await accessJuan(2)).next);
 juan.asistencias.asistencia_2='Falta justificada';
 tables.reposiciones_estudiantes.push({id:'juan-makeup',numero_cuenta:'JUAN',numero_semana:2,seccion_origen_id:'origin',seccion_destino_id:'host',estado:'asignada',asistencia_reposicion:'Asistio'});
-assert.equal((await accessJuan(1)).status,403);
+assert((await accessJuan(1)).next);
 assert((await accessJuan(2)).next);assert((await accessJuan(3)).next);
 tables.reposiciones_estudiantes.at(-1).asistencia_reposicion='Falta injustificada';
-assert.equal((await accessJuan(2)).status,403);assert((await accessJuan(3)).next);
+const absentMakeupAccess = await accessJuan(2);
+assert(absentMakeupAccess.next);assert.equal(absentMakeupAccess.req.params.seccion_id,'host');
+assert((await accessJuan(3)).next);
 tables.reposiciones_estudiantes.pop();juan.asistencias.asistencia_2='Falta injustificada';
-assert.equal((await accessJuan(1)).status,403);assert.equal((await accessJuan(2)).status,403);assert((await accessJuan(3)).next);
+assert((await accessJuan(1)).next);assert((await accessJuan(2)).next);assert((await accessJuan(3)).next);
 console.log('PASS casos de Juan: falta en práctica 1, reposición de práctica 2, dos faltas y dos pruebas antes del examen con permisos independientes.');

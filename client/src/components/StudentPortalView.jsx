@@ -524,10 +524,6 @@ export default function StudentPortalView({ student, notify = () => {}, onActivi
   // Iniciar la realización de una prueba semanal en vivo
   const handleStartQuiz = async (quiz, liveSess = null, accepted = false) => {
     if (activeQuizToTake || existingSubmissions[quiz.numero_semana]) return;
-    if (quiz.falta_injustificada) {
-      window.alert(quiz.mensaje_asistencia);
-      return;
-    }
     if (!accepted) { setActivityError(""); setActivityConsent({ quiz, liveSess }); return; }
     // 1. Las preguntas se mantienen en orden secuencial estricto para sincronización global
     const originalQuestions = quiz.preguntas || [];

@@ -21,7 +21,7 @@ const bundle = await build({
       path === "database" ? "export const isSupabaseConfigured=true; export const supabase=globalThis.database;" :
       path === "auth.controller.js" ? "export const getInstructorByIdOrEmail=async id=>globalThis.users.get(id); export const getStudentByCuentaAndCarrera=async()=>null; export const getStudentSession=async()=>null;" :
       path === "manualsSchedule.controller.js" ? "export const listManualDates=(req,res)=>res.json({}); export const saveManualDate=listManualDates;" :
-      "export const updateBatchGrades=(req,res)=>{globalThis.saved();res.json({success:true})}; export const getEstudiantesBySeccion=updateBatchGrades,getEstudianteByCuenta=updateBatchGrades,createEstudiante=updateBatchGrades,updateEstudiante=updateBatchGrades,saveWeeklyAttendance=updateBatchGrades,saveWeeklyManuals=updateBatchGrades,deleteEstudiante=updateBatchGrades;"
+      "export const updateBatchGrades=(req,res)=>{globalThis.saved();res.json({success:true})}; export const getEstudiantesBySeccion=updateBatchGrades,getEstudianteByCuenta=updateBatchGrades,createEstudiante=updateBatchGrades,updateEstudiante=updateBatchGrades,saveWeeklyAttendance=updateBatchGrades,saveWeeklyManuals=updateBatchGrades,deleteEstudiante=updateBatchGrades,listGradeHistory=updateBatchGrades,getMySectionRank=updateBatchGrades;"
     }));
   } }]
 });
