@@ -39,7 +39,11 @@ const compiled = await build({
             for(const e of events){if(a.eventos.some(row=>row.id===e.id))continue;if(e.tipo==='salida'){if(a.episodio_abierto||a.faltas>=3)continue;a.faltas++;a.episodio_abierto=e.episodio_id;}else a.episodio_abierto=null;a.eventos.push({...e,falta:a.faltas,recibido_at:new Date().toISOString()});}
             localStorage.setItem('fixture-server-activity',JSON.stringify(a));return ok(structuredClone(a));
           },
-          sendLiveHeartbeat:async(section,week,payload)=>{f().heartbeats.push(structuredClone(payload));return ok(f().live);},
+          sendLiveHeartbeat:async(section,week,payload)=>{
+            f().heartbeats.push(structuredClone(payload));
+            if(f().failHeartbeat)return {success:false};
+            return ok(f().live);
+          },
           submit:async(section,payload)=>{f().sent.push(structuredClone(payload));if(f().failSubmit)throw Object.assign(Error(f().submitError || 'isolated offline'),{status:f().submitStatus});if(f().delaySubmit)await new Promise(r=>setTimeout(r,Number(f().delaySubmit)||250));f().submission={...payload,id:'fixture-delivery',estado:'enviado'};return {success:true,data:f().submission};}
         }
       };`, loader: 'js' }));
@@ -48,8 +52,8 @@ const compiled = await build({
 const js = compiled.outputFiles.find(file => file.path.endsWith('.js')).text;
 const css = compiled.outputFiles.find(file => file.path.endsWith('.css'))?.text || '';
 const browser = await chromium.launch({ headless: false, ...(process.env.HISTOLAB_CHROMIUM_PATH ? { executablePath: process.env.HISTOLAB_CHROMIUM_PATH } : {}) });
-async function setup({ size = { width: 390, height: 844 }, ipad = false, phase = 'en_pregunta', restore = false, deny = false, review = false, reviewAttempts = null, reviewFallback = null, failReview = false } = {}) {
-  const context = await browser.newContext({ viewport: size });
+async function setup({ size = { width: 390, height: 844 }, ipad = false, touch = ipad, items = quiz.preguntas[0].items, phase = 'en_pregunta', restore = false, deny = false, review = false, reviewAttempts = null, reviewFallback = null, failReview = false } = {}) {
+  const context = await browser.newContext({ viewport: size, hasTouch: touch, isMobile: touch });
   const page = await context.newPage(); const errors = [];
   page.on('pageerror', error => { errors.push(error.message); console.error('Portal fixture:', error.message); });
   await page.route('**/*', async route => {
@@ -72,7 +76,7 @@ async function setup({ size = { width: 390, height: 844 }, ipad = false, phase =
       localStorage.setItem('histolab_active_quiz_session_fixture', JSON.stringify({ quiz, liveSess: live }));
       localStorage.setItem('histolab_active_quiz_fixture_sem_1', JSON.stringify({ quiz, quizAnswers: { q: { a: 'Respuesta conservada' } }, strikes: 3, incidents: [{tipo:'perdida_de_foco'}], startTime: Date.now(), endTime: Date.now() + 90000 }));
     }
-  }, { student, quiz, live: { ...live, estado: phase }, restore, deny, review, reviewAttempts, reviewFallback, failReview, ipad, size });
+  }, { student, quiz: { ...quiz, preguntas: [{ ...quiz.preguntas[0], items }] }, live: { ...live, estado: phase }, restore, deny, review, reviewAttempts, reviewFallback, failReview, ipad, size });
   await page.goto(TARGET_URL);
   async function start() {
     await page.getByRole('button', { name: 'Pruebas semanales', exact: true }).click();
@@ -87,8 +91,116 @@ async function setup({ size = { width: 390, height: 844 }, ipad = false, phase =
 const playable=async page=>{await page.getByRole('textbox').waitFor();await page.waitForFunction(()=>!document.querySelector('textarea').disabled);};
 async function leave(page){await page.evaluate(()=>{window.dispatchEvent(new Event('blur'));Object.defineProperty(document,'visibilityState',{configurable:true,get:()=> 'hidden'});document.dispatchEvent(new Event('visibilitychange'));window.dispatchEvent(new Event('blur'));});}
 async function back(page){await page.evaluate(()=>{Object.defineProperty(document,'visibilityState',{configurable:true,get:()=> 'visible'});document.dispatchEvent(new Event('visibilitychange'));window.dispatchEvent(new Event('focus'));});await page.getByRole('button',{name:'Regresar a la prueba',exact:true}).click();await page.waitForFunction(()=>!window.fixture.activity?.episodio_abierto);}
+
+async function writeWithoutRetapping(page, field, number, label) {
+  await field.tap();
+  const control = await field.evaluateHandle(input => {
+    const state = { input, focusLosses: 0 };
+    input.addEventListener('focusout', () => state.focusLosses++);
+    return state;
+  });
+  let expected = '';
+  const check = async () => {
+    const actual = await control.evaluate(({ input, focusLosses }) => ({
+      focused: input === document.activeElement,
+      editable: input.isConnected && input.matches(':enabled') && !input.readOnly,
+      focusLosses,
+      value: input.value
+    }));
+    assert.deepEqual(actual, { focused: true, editable: true, focusLosses: 0, value: expected }, label);
+  };
+  const type = async text => {
+    for (const letter of text) {
+      // Escribe en el campo activo. Una acción sobre el locator podría recuperar el foco y ocultar una caída.
+      await page.keyboard.insertText(letter);
+      expected += letter;
+      await check();
+    }
+  };
+  try {
+    await check();
+    await type('Tres');
+    // El latido siguiente debe recoger la escritura y mantener el mismo campo activo.
+    const heartbeat = await page.evaluate(() => window.fixture.heartbeats.length);
+    await page.waitForFunction(count => window.fixture.heartbeats.length > count, heartbeat);
+    await check();
+    await page.evaluate(() => {
+      const viewport = window.visualViewport;
+      Object.defineProperty(viewport, 'height', { configurable: true, value: innerHeight / 2 });
+      Object.defineProperty(viewport, 'width', { configurable: true, value: innerWidth / 2 });
+      Object.defineProperty(document, 'hasFocus', { configurable: true, value: () => false });
+      viewport.dispatchEvent(new Event('resize'));
+      viewport.dispatchEvent(new Event('scroll'));
+      window.dispatchEvent(new Event('blur'));
+      window.fixture.failHeartbeat = true;
+    });
+    await page.getByText('Reconectando…', { exact: true }).waitFor();
+    await check();
+    await type(` letras más ${number}`);
+    await page.evaluate(() => {
+      delete document.hasFocus;
+      delete window.visualViewport.width;
+      delete window.visualViewport.height;
+      window.visualViewport.dispatchEvent(new Event('resize'));
+      window.fixture.failHeartbeat = false;
+    });
+    await page.getByText('Sincronizado', { exact: true }).waitFor();
+    await check();
+    return expected;
+  } finally {
+    await control.dispose();
+  }
+}
+
 try{
  await mkdir('artifacts/quiz-activity',{recursive:true});
+ const writingItems = [
+  ...quiz.preguntas[0].items,
+  { id: 'list', tipo: 'listado', cantidad: 2, instruccion: 'Enumera' },
+  { id: 'blank', tipo: 'completacion', texto_completar: 'La célula tiene ___ y ___.', instruccion: 'Completa' },
+  { id: 'related', tipo: 'respuestas_relacionadas', campos: ['Nombre', 'Función'], grupos: 2 }
+ ];
+ const touchSizes = [
+  { width: 320, height: 640 }, { width: 640, height: 360 },
+  { width: 820, height: 1180, ipad: true }, { width: 1180, height: 820, ipad: true },
+  { width: 390, height: 844, legacy: true }
+ ];
+ for (const { width, height, ipad, legacy } of touchSizes) {
+  const f = await setup({ size: { width, height }, touch: true, ipad, items: legacy ? [] : writingItems });
+  const { page } = f;
+  await f.start();
+  const writing = page.locator('[data-quiz-writing]');
+  await page.waitForFunction(() => document.querySelector('[data-quiz-writing]')?.matches(':enabled'));
+  const fieldCount = legacy ? 1 : 9;
+  assert.equal(await writing.count(), fieldCount);
+  const answers = [];
+  for (let index = 0; index < fieldCount; index++) {
+    const number = index + 1;
+    answers.push(await writeWithoutRetapping(page, writing.nth(index), number, `Campo ${number} en ${width}×${height}`));
+  }
+  const synced = await page.evaluate(() => window.fixture.heartbeats.at(-1)?.respuestas_parciales?.q);
+  assert.deepEqual(synced, legacy ? { respuesta: answers[0] } : {
+    a: answers[0], list: answers.slice(1, 3), blank: answers.slice(3, 5), related: answers.slice(5)
+  });
+  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('histolab_active_quiz_fixture_sem_1')).quizAnswers.q);
+  assert.deepEqual(saved, synced);
+  assert.equal(await page.evaluate(() => window.fixture.activity.faltas), 0);
+  assert.equal(await page.getByRole('alertdialog').count(), 0);
+  assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+  await leave(page);
+  await page.getByRole('alertdialog').getByText('Falta 1 de 3', { exact: true }).waitFor();
+  assert.deepEqual(await page.evaluate(() => window.fixture.activity.eventos[0].senales), ['pagina_oculta']);
+  await back(page);
+  assert.deepEqual(await writing.evaluateAll(fields => fields.map(field => field.value)), answers);
+  await page.getByRole('button', { name: 'Finalizar y entregar', exact: true }).click();
+  await page.getByText(/Has respondido las 1 preguntas \(1\/1\)/).waitFor();
+  await page.getByRole('button', { name: 'Sí, Entregar Ahora', exact: true }).click();
+  await page.waitForFunction(() => window.fixture.sent.length === 1);
+  assert.deepEqual(await page.evaluate(() => window.fixture.sent[0].respuestas.q), synced);
+  assert.deepEqual(f.errors, []);
+  await f.context.close();
+  console.log(`PASS escritura táctil ${width}×${height}: ${fieldCount} campos, una pulsación por campo, latidos, reconexión y borrador.`);
+ }
  // Contrato de iPad simulado: no afirma validar el WebKit de un dispositivo físico.
  for (const size of [{width:1180,height:820},{width:820,height:1180}]) {
   const f=await setup({ipad:true,size});const {page}=f;

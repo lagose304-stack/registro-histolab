@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useSyncExternalStore } from "react";
 import { ArrowLeft, Clock, Radio, Lock, CheckCircle2, Send } from "lucide-react";
 import QuizItemResponse from "./QuizItemResponse";
 import { quizItemLabel } from "../../../shared/quizItems.mjs";
@@ -14,14 +14,23 @@ function QuizImage({ src, number }) {
   </figure>;
 }
 
-export default function StudentQuizPlayer({ quiz, liveState, answers, seconds, online, connection, sealed, submitting, locked = false, confirmed, activity, activityError, onExit, onChange, onBlur, onConfirm, onSubmit }) {
+function LiveQuizItemResponse({ answerStore, questionId, item, disabled, onChange, onBlur }) {
+  const value = useSyncExternalStore(answerStore.subscribe, () => {
+    const answer = answerStore.read()[questionId];
+    return typeof answer === "string" && item.id === "respuesta" ? answer : answer?.[item.id];
+  });
+
+  return <QuizItemResponse item={item} value={value} disabled={disabled}
+    onChange={next => onChange(questionId, item.id, next)} onBlur={() => onBlur(questionId)} />;
+}
+
+export default function StudentQuizPlayer({ quiz, liveState, answerStore, seconds, online, connection, questionVerified, sealed, submitting, locked = false, confirmed, activity, activityError, onExit, onChange, onBlur, onConfirm, onSubmit }) {
   const phase = liveState?.estado || "lobby";
   const index = liveState?.pregunta_actual_idx ?? 0;
   const questions = quiz.preguntas || [];
   const question = questions[index];
-  const disabled = locked || phase !== "en_pregunta" || sealed || submitting || seconds <= 0 || connection !== "connected" || !online;
+  const disabled = locked || phase !== "en_pregunta" || sealed || submitting || seconds <= 0 || !questionVerified;
   const timer = `${Math.floor(Math.max(0, seconds) / 60).toString().padStart(2, "0")}:${(Math.max(0, seconds) % 60).toString().padStart(2, "0")}`;
-  const answer = question ? answers?.[question.id] : null;
   const bonus = index === 5;
   const times = questions.map(q => Number(q.tiempo_segundos || quiz.tiempo_por_pregunta_segundos || 90));
   return <section className="quiz-player sp-quiz-take-card" inert={locked || submitting || sealed} aria-label="Prueba en curso">
@@ -34,7 +43,7 @@ export default function StudentQuizPlayer({ quiz, liveState, answers, seconds, o
       <span>{phase === "lobby" ? "Sala de espera" : `Pregunta ${index + 1} de ${questions.length}`}{bonus && phase !== "lobby" ? " · Bonus" : ""}</span>
       <strong className="quiz-player__timer" data-urgent={phase === "en_pregunta" && seconds <= 15} aria-label={phase === "en_pregunta" ? `Tiempo restante ${timer}` : undefined}><Clock size={19} />{phase === "en_pregunta" ? timer : phase === "esperando_siguiente" ? "Esperando siguiente" : phase === "finalizada" ? "Finalizada" : "En espera"}</strong>
     </div>
-    {(!online || connection === "reconnecting") && <p className="quiz-player__warning" role="alert">La sincronización se interrumpió. Tus respuestas se conservan en este dispositivo. Reconectando para verificar la pregunta y el tiempo vigentes…</p>}
+    {(!online || connection === "reconnecting") && <p className="quiz-player__warning" role="status">{!disabled ? "Puedes seguir respondiendo mientras quede tiempo. Tus respuestas se guardan en este dispositivo." : "Tus respuestas se conservan en este dispositivo. Reconectando para verificar la pregunta y el tiempo vigentes…"}</p>}
     {sealed && <p className="quiz-player__warning" role="status">La prueba está sellada. La entrega se enviará al recuperar la conexión.</p>}
     {activity && <div className="quiz-activity" data-limit={activity.attempt.faltas >= 3} role={activity.attempt.faltas ? "alert" : "status"}>
       <strong>{activity.attempt.faltas ? `Falta ${activity.attempt.faltas} de 3` : "0 de 3 faltas"}</strong>
@@ -54,7 +63,8 @@ export default function StudentQuizPlayer({ quiz, liveState, answers, seconds, o
           {question.imagen_url && <QuizImage key={`${question.id}:${question.imagen_url}`} src={question.imagen_url} number={index + 1} />}
           <div className="quiz-player__items">{(question.items?.length ? question.items : [{ id: "respuesta", tipo: "texto_corto", instruccion: "Respuesta" }]).map((item, itemIndex) => <div className="quiz-player__item" key={item.id}>
             <div className="quiz-player__item-heading"><h4>{String.fromCharCode(97 + itemIndex)}) {item.instruccion || item.etiqueta || quizItemLabel(item)}</h4>{item.puntos !== undefined && <span>{item.puntos} pt(s)</span>}</div>
-            <QuizItemResponse item={item} value={typeof answer === "string" && item.id === "respuesta" ? answer : answer?.[item.id]} disabled={disabled} onChange={value => onChange(question.id, item.id, value)} onBlur={() => onBlur(question.id)} />
+            <LiveQuizItemResponse answerStore={answerStore} questionId={question.id} item={item}
+              disabled={disabled} onChange={onChange} onBlur={onBlur} />
           </div>)}</div>
         </article>
         <div className="quiz-player__actions"><p>{seconds <= 0 ? "Tiempo agotado. Respuestas bloqueadas; esperando indicaciones del instructor." : "Las respuestas se guardan en este dispositivo y se sincronizan durante la prueba."}</p>{index < questions.length - 1 ? <button type="button" disabled={disabled} onClick={() => { onBlur(question.id); onConfirm(index); }}><CheckCircle2 size={18} />{confirmed[index] ? "Volver a guardar respuesta" : "Guardar respuesta"}</button> : <button type="button" disabled={sealed || submitting} onClick={onSubmit}><Send size={18} />{submitting ? "Enviando…" : !online ? "Finalizar y guardar entrega" : "Finalizar y entregar"}</button>}</div>

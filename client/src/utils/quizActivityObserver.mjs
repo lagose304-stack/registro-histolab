@@ -2,12 +2,19 @@ import { QUIZ_ACTIVITY_LIMIT } from "../../../shared/quizActivity.mjs";
 import { createQuizWindowGuard } from "./quizWindowGuard.mjs";
 
 // Revisión del algoritmo, independiente de la versión de la política de faltas.
-export const QUIZ_ACTIVITY_OBSERVER_VERSION = 4;
+export const QUIZ_ACTIVITY_OBSERVER_VERSION = 5;
+
+export function usesTouchInput(window) {
+  return window.navigator?.maxTouchPoints > 0 ||
+    Boolean(window.matchMedia?.("(any-pointer: coarse)")?.matches);
+}
 
 // Observa señales del navegador. No intercepta teclas, navegación ni permisos.
 export function observeQuizActivity({ window, document, getState, onEvent, isActive, explicitReturn = false, onWindowStatus = () => {}, makeId = () => crypto.randomUUID(), now = () => new Date().toISOString(), nowMs = () => Date.now() }) {
   const guard = createQuizWindowGuard(window, nowMs);
   const windowStatus = () => guard.check(getState()?.ventana_version === 1);
+  // En pantallas táctiles el teclado y los controles del sistema pueden tomar el foco.
+  const tracksWindowFocus = !usesTouchInput(window);
   let returnTimer;
   let stopped = false;
   const recheckTimers = new Set();
@@ -29,7 +36,10 @@ export function observeQuizActivity({ window, document, getState, onEvent, isAct
     }, 150);
   };
   const visibility = () => document.visibilityState === "hidden" ? departure("pagina_oculta") : returned();
-  const blur = event => { if (event.target === window) departure("ventana_sin_foco"); };
+  const blur = event => {
+    if (tracksWindowFocus && event.target === window &&
+        document.visibilityState !== "hidden") departure("ventana_sin_foco");
+  };
   const pagehide = () => departure("documento_abandonado");
   window.addEventListener("blur", blur);
   window.addEventListener("focus", returned);
@@ -43,7 +53,7 @@ export function observeQuizActivity({ window, document, getState, onEvent, isAct
     const size = windowStatus();
     onWindowStatus(size.blocked);
     if (document.visibilityState === "hidden") departure("pagina_oculta");
-    else if (!document.hasFocus()) departure("ventana_sin_foco");
+    else if (tracksWindowFocus && !document.hasFocus()) departure("ventana_sin_foco");
     else if (size.departure) departure("ventana_reducida");
     else if (getState().episodio_abierto) returned();
   };
@@ -70,9 +80,7 @@ export function observeQuizActivity({ window, document, getState, onEvent, isAct
   listen(window.visualViewport, "resize");
   listen(window.screen?.orientation, "change");
   const stateTimer = window.setInterval(checkState, 500);
-  if (document.visibilityState === "hidden") departure("pagina_oculta");
-  else if (!document.hasFocus()) departure("ventana_sin_foco");
-  else returned();
+  checkState();
   const cleanup = () => {
     stopped = true;
     for (const remove of removers) remove();

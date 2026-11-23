@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { usesTouchInput } from "../utils/quizActivityObserver.mjs";
 import "./QuizActivity.css";
 
 export default function QuizActivityConsent({ title, busy, error, onAccept, onCancel }) {
@@ -10,7 +11,7 @@ export default function QuizActivityConsent({ title, busy, error, onAccept, onCa
       <div className="quiz-activity-consent__rules">
         <p><strong>Acciones prohibidas</strong>, también durante la sala de espera. Cada una suma una falta:</p>
         <ul>
-          <li>Cambiar a otra pestaña, aplicación o ventana: la página queda oculta o la ventana pierde el foco.</li>
+          <li>{usesTouchInput(window) ? "Cambiar a otra pestaña o aplicación cuando la página queda oculta. Puedes usar el teclado de tu dispositivo durante la prueba." : "Cambiar a otra pestaña, aplicación o ventana: la página queda oculta o la ventana pierde el foco."}</li>
           <li>Abandonar, cerrar o recargar la página de la prueba.</li>
           <li>En iPad, reducir el ancho de Safari de forma significativa durante al menos un segundo, aunque la página siga visible. Para regresar debes restaurar el ancho.</li>
         </ul>

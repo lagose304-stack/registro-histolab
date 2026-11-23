@@ -10,10 +10,8 @@ export function quizWindowStatus(window) {
   const angle = window.orientation;
   const landscape = type ? type.startsWith("landscape") : typeof angle === "number" ? Math.abs(angle) === 90 : null;
   const expected = landscape === null ? screen.width : landscape ? Math.max(screen.width, screen.height) : Math.min(screen.width, screen.height);
-  const view = window.visualViewport;
-  // El zoom con los dedos reduce el viewport visual, no el ancho de la ventana.
-  const visualWidth = Number(view?.width) * (Number(view?.scale) || 1);
-  const actual = visualWidth > 0 ? Math.min(width, visualWidth) : width;
+  // El viewport visual puede reducirse por el teclado o el zoom dentro de la misma ventana.
+  const actual = width;
   return { supported: true, reduced: expected - actual > Math.max(32, expected * 0.08), expected, actual,
     orientation: landscape === null ? "unknown" : landscape ? "landscape" : "portrait" };
 }

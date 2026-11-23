@@ -37,8 +37,8 @@ function fixture({ legacy = false, width = 1180 } = {}) {
   const departure=f.events[0].hora_cliente;
   for(const width of [478,524,600]){f.resize(width);f.advance(1500);}
   assert.equal(f.state.faltas,1);assert.equal(f.cleanup.canReturn(),false);assert.equal(f.events[0].hora_cliente,departure);
-  // Incluso innerWidth puede ir por delante del viewport visual al restaurar.
-  f.win.innerWidth=1180;assert.equal(f.cleanup.canReturn(),false);
+  // El viewport visual puede seguir reducido después de restaurar la ventana.
+  f.win.innerWidth=1180;assert.equal(f.cleanup.canReturn(),true);
   f.resize(1180);f.advance(500);assert(f.state.episodio_abierto);f.return();
   f.resize(600);f.advance(1600);assert.equal(f.state.faltas,2);
   f.resize(1180);f.advance(500);f.return();f.resize(524);f.advance(1600);assert.equal(f.state.faltas,3);
@@ -53,7 +53,10 @@ function fixture({ legacy = false, width = 1180 } = {}) {
   // Teclado y barras: altura variable con y sin campo activo.
   for(const h of [320,615,750,681]){f.win.innerHeight=h;f.win.visualViewport.height=h;f.win.visualViewport.dispatchEvent(new Event('resize'));f.advance(1600);}
   f.win.visualViewport.width=590;f.win.visualViewport.scale=2;f.advance(2000);assert.equal(f.state.faltas,0,'Zoom con dedos no reduce la ventana');
-  f.win.visualViewport.scale=1;f.win.visualViewport.width=1180;
+  f.win.visualViewport.scale=1;f.win.visualViewport.width=590;
+  f.setFocused(false);f.win.dispatchEvent(new Event('blur'));f.advance(2000);
+  assert.equal(f.state.faltas,0,'Viewport visual reducido y foco perdido en iPad visible no contabilizan falta');
+  f.setFocused(true);f.win.visualViewport.width=1180;
   f.resize(1170);f.advance(1600);assert.equal(f.state.faltas,0,'Tolera pequeñas variaciones');
   f.resize(524);f.advance(400);f.resize(1180);f.advance(1600);assert.equal(f.state.faltas,0,'Ignora cambios transitorios');
   f.win.screen.orientation.type='portrait-primary';f.win.screen.orientation.dispatchEvent(new Event('change'));f.advance(500);f.resize(820);f.advance(2000);assert.equal(f.state.faltas,0,'Rotación válida');

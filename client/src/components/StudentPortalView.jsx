@@ -2,6 +2,7 @@ import QuizActivityConsent from "./QuizActivityConsent";
 import QuizActivityWarning from "./QuizActivityWarning";
 import QuizActivityFinished from "./QuizActivityFinished";
 import { useQuizActivity } from "../utils/useQuizActivity";
+import { createQuizAnswerStore } from "../utils/quizAnswerStore";
 import StudentQuizPlayer from "./StudentQuizPlayer";
 import StudentQuizzesView from "./StudentQuizzesView";
 import StudentAccountView from "./StudentAccountView";
@@ -151,7 +152,7 @@ export default function StudentPortalView({ student, notify = () => {}, onActivi
   const [quizLoadError, setQuizLoadError] = useState("");
   const quizLoadRequestRef = useRef(0);
   const [activeQuizToTake, setActiveQuizToTake] = useState(() => savedActiveQuizSession?.quiz || null);
-  const [quizAnswers, setQuizAnswers] = useState(() => {
+  const [answerStore] = useState(() => {
     if (savedActiveQuizSession?.quiz?.numero_semana) {
       try {
         const cKey = student?.numero_cuenta || "estudiante";
@@ -159,11 +160,11 @@ export default function StudentPortalView({ student, notify = () => {}, onActivi
         const attemptRaw = safeStorage.getItem(`histolab_active_quiz_${cKey}_sem_${sem}`);
         if (attemptRaw) {
           const attempt = JSON.parse(attemptRaw);
-          if (attempt?.quizAnswers) return attempt.quizAnswers;
+          if (attempt?.quizAnswers) return createQuizAnswerStore(attempt.quizAnswers);
         }
       } catch (_) {}
     }
-    return {};
+    return createQuizAnswerStore({});
   });
   const [submittingQuiz, setSubmittingQuiz] = useState(false);
   const [existingSubmissions, setExistingSubmissions] = useState({});
@@ -182,11 +183,11 @@ export default function StudentPortalView({ student, notify = () => {}, onActivi
   const activeLiveStateRef = useRef(null);
   activeLiveStateRef.current = activeLiveState;
 
-  const quizAnswersRef = useRef(quizAnswers);
-  quizAnswersRef.current = quizAnswers;
   const sendHeartbeatRef = useRef(null);
   const [liveConnection, setLiveConnection] = useState("connecting");
+  const [verifiedLiveQuizId, setVerifiedLiveQuizId] = useState(null);
   const lastKnownQuestionIdxRef = useRef(null);
+  const liveQuestionDeadlineRef = useRef(null);
 
   // Estado de preguntas, tiempo y recuperación de conexión
   const [shuffledQuestions, setShuffledQuestions] = useState(() => savedActiveQuizSession?.quiz?.preguntas || []);
@@ -560,8 +561,7 @@ export default function StudentPortalView({ student, notify = () => {}, onActivi
       Object.assign(initAnswers, reopened.respuestas);
       clearActiveAttemptFromDisk(quiz.numero_semana);
     }
-    setQuizAnswers(initAnswers);
-    quizAnswersRef.current = initAnswers;
+    answerStore.replace(initAnswers);
     setAnsweredQuestionsMap({});
 
     setTimeRemainingSeconds(initialSecs);
@@ -574,6 +574,9 @@ export default function StudentPortalView({ student, notify = () => {}, onActivi
     };
     setActiveLiveState(effectiveLive);
     setLiveConnection("connecting");
+    setVerifiedLiveQuizId(null);
+    lastKnownQuestionIdxRef.current = null;
+    liveQuestionDeadlineRef.current = null;
 
     const now = Date.now();
     quizStartTimeRef.current = now;
@@ -659,7 +662,7 @@ export default function StudentPortalView({ student, notify = () => {}, onActivi
         submission: finalData
       });
       setActiveQuizToTake(null);
-      setQuizAnswers({});
+      answerStore.replace({});
 
       setConfirmSubmitModalOpen(false);
       setConfirmExitModalOpen(false);
@@ -670,7 +673,7 @@ export default function StudentPortalView({ student, notify = () => {}, onActivi
       loadStudentQuizzes();
 
     },
-    [activeQuizToTake, clearActiveAttemptFromDisk, getPendingSubmissionStorageKey, loadStudentQuizzes, notify]
+    [activeQuizToTake, answerStore, clearActiveAttemptFromDisk, getPendingSubmissionStorageKey, loadStudentQuizzes, notify]
   );
 
   const returnToReopenedQuiz = useCallback(week => {
@@ -692,11 +695,12 @@ export default function StudentPortalView({ student, notify = () => {}, onActivi
 
   // Estadísticas de preguntas respondidas para el diálogo de confirmación de entrega
   const getAnsweredStats = useMemo(() => {
-    if (!activeQuizToTake || !Array.isArray(activeQuizToTake.preguntas)) {
+    if (!confirmSubmitModalOpen || !Array.isArray(activeQuizToTake?.preguntas)) {
       return { answered: 0, total: 0 };
     }
     const total = activeQuizToTake.preguntas.length;
     let answered = 0;
+    const quizAnswers = answerStore.read();
 
     activeQuizToTake.preguntas.forEach((q) => {
       const qAns = quizAnswers[q.id];
@@ -729,7 +733,7 @@ export default function StudentPortalView({ student, notify = () => {}, onActivi
     });
 
     return { answered, total };
-  }, [activeQuizToTake, quizAnswers]);
+  }, [activeQuizToTake, answerStore, confirmSubmitModalOpen]);
 
   // Ejecución del envío de la prueba semanal al servidor (sellado e inmutabilidad)
   const executeSubmitQuiz = async (forcedReason = null) => {
@@ -762,7 +766,7 @@ export default function StudentPortalView({ student, notify = () => {}, onActivi
       numero_cuenta: cuentaKey,
       nombre_completo: effectiveStudent?.nombre_completo,
       carrera: carreraKey,
-      respuestas: structuredClone(quizAnswersRef.current || quizAnswers),
+      respuestas: structuredClone(answerStore.read()),
       ...activity.payload(),
       auditoria: auditoriaPayload
     };
@@ -907,7 +911,7 @@ export default function StudentPortalView({ student, notify = () => {}, onActivi
       if (replacement && replacement.id !== activeQuizToTake.id) {
         clearActiveAttemptFromDisk(sem);
         setActiveQuizToTake(null);
-        setQuizAnswers({});
+        answerStore.replace({});
         notify("Tienes una prueba de reposición asignada. Ingresa desde el catálogo actualizado.", "info");
         return;
       }
@@ -926,9 +930,6 @@ export default function StudentPortalView({ student, notify = () => {}, onActivi
           if (saved) {
             if (saved.shuffledQuestions && saved.shuffledQuestions.length > 0) {
               setShuffledQuestions(saved.shuffledQuestions);
-            }
-            if (saved.quizAnswers && Object.keys(saved.quizAnswers).length > 0) {
-              setQuizAnswers((prev) => ({ ...(prev || {}), ...saved.quizAnswers }));
             }
             if (saved.startTime) quizStartTimeRef.current = saved.startTime;
             if (saved.endTime) quizEndTimeRef.current = saved.endTime;
@@ -974,7 +975,7 @@ export default function StudentPortalView({ student, notify = () => {}, onActivi
             // Intento vigente: restaurar íntegramente
             setActiveQuizToTake(saved.quiz || quiz);
             setShuffledQuestions(saved.shuffledQuestions || quiz.preguntas || []);
-            setQuizAnswers(saved.quizAnswers || {});
+            answerStore.replace(saved.quizAnswers || {});
             quizStartTimeRef.current = saved.startTime || now;
             quizEndTimeRef.current = saved.endTime || now + 90000;
             lastTickTimeRef.current = now;
@@ -990,7 +991,7 @@ export default function StudentPortalView({ student, notify = () => {}, onActivi
         }
       }
     }
-  }, [onlineQuizzes, activeQuizToTake, existingSubmissions, isExamSealedOffline, getActiveAttemptStorageKey, getPendingSubmissionStorageKey, clearActiveAttemptFromDisk, notify]);
+  }, [onlineQuizzes, activeQuizToTake, answerStore, existingSubmissions, isExamSealedOffline, getActiveAttemptStorageKey, getPendingSubmissionStorageKey, clearActiveAttemptFromDisk, notify]);
 
   const confirmedAnswersRef = useRef(answeredQuestionsMap);
   confirmedAnswersRef.current = answeredQuestionsMap;
@@ -1015,7 +1016,7 @@ export default function StudentPortalView({ student, notify = () => {}, onActivi
         }
         if (!secId || !isMounted) return;
 
-        const curAnswers = quizAnswersRef.current || quizAnswers;
+        const curAnswers = answerStore.read();
         const curIdx = activeLiveStateRef.current?.pregunta_actual_idx ?? 0;
         const curQ = (activeQuizToTake?.preguntas || [])[curIdx];
         const curAns = curQ ? curAnswers[curQ.id] : null;
@@ -1043,6 +1044,7 @@ export default function StudentPortalView({ student, notify = () => {}, onActivi
         if (res?.success && res.data && isMounted) {
           const liveData = res.data;
           setLiveConnection("connected");
+          setVerifiedLiveQuizId(activeQuizToTake.id);
           setActiveLiveState(liveData);
 
           // Detección cuando el docente desde control en vivo cambia de pregunta con los botones
@@ -1059,15 +1061,10 @@ export default function StudentPortalView({ student, notify = () => {}, onActivi
             saveActiveAttemptToDisk(
               activeQuizToTake,
               shuffledQuestions,
-              curAnswers,
+              answerStore.read(),
               quizStartTimeRef.current,
               quizEndTimeRef.current
             );
-
-            // 3. Desenfocar input activo para ocultar teclado en móviles
-            if (document.activeElement && typeof document.activeElement.blur === "function") {
-              document.activeElement.blur();
-            }
 
             notify(`Pregunta #${incomingIdx + 1} iniciada por el instructor titular de la sección. Tu respuesta previa quedó guardada.`, "info");
           } else if (typeof incomingIdx === "number") {
@@ -1075,7 +1072,11 @@ export default function StudentPortalView({ student, notify = () => {}, onActivi
           }
 
           if (liveData.estado === "en_pregunta") {
-            setTimeRemainingSeconds(liveData.tiempo_restante_segundos ?? 90);
+            const remaining = liveData.tiempo_restante_segundos ?? 90;
+            liveQuestionDeadlineRef.current = Date.now() + remaining * 1000;
+            setTimeRemainingSeconds(remaining);
+          } else {
+            liveQuestionDeadlineRef.current = null;
           }
 
           // Si el docente finalizó la prueba para toda la sección
@@ -1104,7 +1105,7 @@ export default function StudentPortalView({ student, notify = () => {}, onActivi
       sendHeartbeatRef.current = null;
       clearInterval(heartbeatInterval);
     };
-  }, [activeQuizToTake, effectiveStudent, cuentaKey, isExamSealedOffline, resolveStudentSectionId, shuffledQuestions, saveActiveAttemptToDisk, notify]);
+  }, [activeQuizToTake, answerStore, effectiveStudent, cuentaKey, isExamSealedOffline, resolveStudentSectionId, shuffledQuestions, saveActiveAttemptToDisk, notify]);
 
   // Auto-guardado garantizado al terminarse el tiempo de cada pregunta
   useEffect(() => {
@@ -1115,7 +1116,7 @@ export default function StudentPortalView({ student, notify = () => {}, onActivi
       saveActiveAttemptToDisk(
         activeQuizToTake,
         shuffledQuestions,
-        quizAnswersRef.current || quizAnswers,
+        answerStore.read(),
         quizStartTimeRef.current,
         quizEndTimeRef.current
       );
@@ -1123,20 +1124,16 @@ export default function StudentPortalView({ student, notify = () => {}, onActivi
         sendHeartbeatRef.current();
       }
     }
-  }, [timeRemainingSeconds, activeQuizToTake, isExamSealedOffline, activeLiveState?.estado, shuffledQuestions, saveActiveAttemptToDisk]);
+  }, [timeRemainingSeconds, activeQuizToTake, answerStore, isExamSealedOffline, activeLiveState?.estado, shuffledQuestions, saveActiveAttemptToDisk]);
 
-  // Decremento local fluido de segundo a segundo mientras está en pregunta
+  // El reloj local parte del último latido confirmado, también durante la reconexión.
   useEffect(() => {
     if (!activeQuizToTake || isExamSealedOffline || activeLiveState?.estado !== "en_pregunta") return;
 
     const interval = setInterval(() => {
-      setTimeRemainingSeconds((prev) => {
-        if (prev <= 1) {
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
+      const deadline = liveQuestionDeadlineRef.current;
+      if (deadline !== null) setTimeRemainingSeconds(Math.max(0, Math.ceil((deadline - Date.now()) / 1000)));
+    }, 250);
 
     return () => clearInterval(interval);
   }, [activeQuizToTake, isExamSealedOffline, activeLiveState?.estado]);
@@ -1152,86 +1149,22 @@ export default function StudentPortalView({ student, notify = () => {}, onActivi
     setConfirmSubmitModalOpen(false);
   };
 
-  // Auto-desplazamiento inteligente para cuando el teclado virtual de celular se abre
-  useEffect(() => {
-    if (!activeQuizToTake || isExamSealedOffline) return;
-
-    let timeoutId = null;
-    const handleViewportChange = () => {
-      const el = document.activeElement;
-      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA")) {
-        if (timeoutId) clearTimeout(timeoutId);
-        timeoutId = setTimeout(() => {
-          el.scrollIntoView({ behavior: "smooth", block: "center" });
-        }, 180);
-      }
-    };
-
-    if (typeof window !== "undefined" && window.visualViewport) {
-      window.visualViewport.addEventListener("resize", handleViewportChange);
-      window.visualViewport.addEventListener("scroll", handleViewportChange);
-    }
-
-    return () => {
-      if (timeoutId) clearTimeout(timeoutId);
-      if (typeof window !== "undefined" && window.visualViewport) {
-        window.visualViewport.removeEventListener("resize", handleViewportChange);
-        window.visualViewport.removeEventListener("scroll", handleViewportChange);
-      }
-    };
-  }, [activeQuizToTake, isExamSealedOffline]);
-
   // Manejar cambio en casilla de respuesta con auto-guardado persistente
-  const handleAnswerChange = (preguntaId, itemId, indexOrText, textIfList = null) => {
+  const handleAnswerChange = (preguntaId, itemId, value) => {
     if (isExamSealedOffline || activity.warning || autoSubmitTriggeredRef.current || isSubmittingRef.current || confirmExitModalOpen || confirmSubmitModalOpen) return;
-    setQuizAnswers((prev) => {
-      const prevVal = prev[preguntaId];
-      const currentQ = (prevVal && typeof prevVal === "object" && !Array.isArray(prevVal)) ? { ...prevVal } : {};
-      let updated;
-      if (textIfList !== null) {
-        // Listado numerado
-        const currentList = Array.isArray(currentQ[itemId]) ? [...currentQ[itemId]] : [];
-        currentList[indexOrText] = textIfList;
-        updated = {
-          ...prev,
-          [preguntaId]: {
-            ...currentQ,
-            [itemId]: currentList
-          }
-        };
-      } else {
-        // Texto corto
-        updated = {
-          ...prev,
-          [preguntaId]: {
-            ...currentQ,
-            [itemId]: indexOrText
-          }
-        };
-      }
-
-      quizAnswersRef.current = updated;
-
-      // Auto-guardado inmediato en almacenamiento local para no perder respuestas por corte o recarga
-      if (activeQuizToTake) {
-        saveActiveAttemptToDisk(
-          activeQuizToTake,
-          shuffledQuestions,
-          updated,
-          quizStartTimeRef.current,
-          quizEndTimeRef.current
-        );
-      }
-
-      return updated;
-    });
+    const answers = answerStore.read();
+    const previous = answers[preguntaId];
+    const current = previous && typeof previous === "object" && !Array.isArray(previous) ? previous : {};
+    const updated = { ...answers, [preguntaId]: { ...current, [itemId]: value } };
+    answerStore.replace(updated);
+    saveActiveAttemptToDisk(activeQuizToTake, shuffledQuestions, updated, quizStartTimeRef.current, quizEndTimeRef.current);
   };
 
   // Auto-guardado garantizado al terminar de escribir en una casilla de respuesta (onBlur)
   const handleAnswerBlur = (preguntaId) => {
     if (isExamSealedOffline || !activeQuizToTake) return;
     const curIdx = activeLiveStateRef.current?.pregunta_actual_idx ?? 0;
-    const currentAnswers = quizAnswersRef.current || quizAnswers;
+    const currentAnswers = answerStore.read();
     const curQAnswer = currentAnswers[preguntaId];
 
     const hasValue = Boolean(
@@ -3114,8 +3047,9 @@ export default function StudentPortalView({ student, notify = () => {}, onActivi
         )}
           </>
         ) : (
-          <StudentQuizPlayer quiz={activeQuizToTake} liveState={activeLiveState} answers={quizAnswers}
+          <StudentQuizPlayer quiz={activeQuizToTake} liveState={activeLiveState} answerStore={answerStore}
             seconds={timeRemainingSeconds} online={isOnline} connection={liveConnection}
+            questionVerified={verifiedLiveQuizId === activeQuizToTake.id}
             sealed={isExamSealedOffline} submitting={submittingQuiz} confirmed={answeredQuestionsMap}
             locked={!activity.ready || activity.warning || confirmExitModalOpen || confirmSubmitModalOpen}
             activity={activity.state} activityError={activity.error}

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { diagnosticDevice, normalizeDiagnosticPayload } from "../../shared/quizDiagnostics.mjs";
 import { observeQuizDiagnostics } from "../../client/src/utils/quizDiagnosticsObserver.mjs";
 import { startQuizDiagnostics } from "../../client/src/utils/quizDiagnosticsTransport.mjs";
+import { QUIZ_ACTIVITY_OBSERVER_VERSION } from "../../client/src/utils/quizActivityObserver.mjs";
 
 class Clock {
   time=1700000000000; next=0; tasks=new Map();
@@ -53,7 +54,7 @@ const api={saveDiagnostics:async(section,week,attempt,batch)=>{calls.push(struct
 const args={window:win,document:doc,storage,section:'s',week:1,account:'A',attemptId:'attempt',api,isActive:()=>true,getQuestion:()=>({pregunta_indice:1}),getFaults:()=>2};
 const settle=async()=>{for(let i=0;i<15;i++)await Promise.resolve();};
 try{
- const end=startQuizDiagnostics(args);await settle();assert.equal(calls.length,1);assert.equal(calls[0].datos.muestras[0].detector_version,3);const firstId=calls[0].id;end();await settle();
+ const end=startQuizDiagnostics(args);await settle();assert.equal(calls.length,1);assert.equal(calls[0].datos.muestras[0].detector_version,QUIZ_ACTIVITY_OBSERVER_VERSION);const firstId=calls[0].id;end();await settle();
  failing=false;const resumed=startQuizDiagnostics(args);await settle();assert.equal(calls[2].id,firstId,'La recarga reintenta exactamente el lote persistido');
  assert(server.has(firstId));assert.equal(calls.filter(batch=>batch.id===firstId).length,3,'La misma identidad permite deduplicar en el servidor');
  assert(!JSON.stringify(calls).includes('Texto privado'));assert.equal(calls.at(-1).datos.muestras.at(-1).faltas_observadas,2);
@@ -63,7 +64,7 @@ try{
  const legacy=startQuizDiagnostics({...args,attemptId:'legacy'});await settle();
  const mixed=calls[beforeLegacy].datos.muestras;
  assert.equal(Object.hasOwn(mixed[0],'detector_version'),false,'Una muestra antigua en cola no se etiqueta con el detector nuevo');
- assert.equal(mixed[1].detector_version,3,'La muestra nueva sí identifica el detector');
+ assert.equal(mixed[1].detector_version,QUIZ_ACTIVITY_OBSERVER_VERSION,'La muestra nueva sí identifica el detector');
  legacy();await settle();assert.equal(clock.tasks.size,0);
 }finally{Date.now=realNow;}
 console.log('PASS diagnóstico: foco silencioso, teclado/rotación sin faltas, privacidad por campos permitidos, límites, reintento/recarga idempotente y limpieza.');
